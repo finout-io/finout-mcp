@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "finout": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/ABSOLUTE/PATH/TO/finout-mcp-server",
+        "run",
+        "finout-mcp"
+      ],
+      "env": {
+        "FINOUT_CLIENT_ID": "your_finout_client_id",
+        "FINOUT_SECRET_KEY": "your_finout_secret_key"
+      }
+    }
+  }
+}

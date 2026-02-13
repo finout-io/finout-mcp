@@ -1,0 +1,42 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: asaf
+  namespace: finout-tools
+  labels:
+    app: asaf
+  annotations:
+    # NGINX Ingress annotations
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # For Azure Application Gateway (if using)
+    # appgw.ingress.kubernetes.io/ssl-redirect: "true"
+
+    # For AWS ALB (if using)
+    # alb.ingress.kubernetes.io/scheme: internal
+    # alb.ingress.kubernetes.io/target-type: ip
+
+    # Rate limiting (optional)
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+
+    # CORS (if needed)
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://your-domain.com"
+spec:
+  ingressClassName: nginx  # or azure-application-gateway, alb, etc.
+  tls:
+  - hosts:
+    - asaf.your-company.internal
+    secretName: asaf-tls-cert
+  rules:
+  - host: asaf.your-company.internal
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: asaf
+            port:
+              number: 80

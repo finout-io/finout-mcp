@@ -1,0 +1,27 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.5
+    hooks:
+      - id: ruff
+        args: [--fix, --unsafe-fixes]
+        files: ^packages/mcp-server/
+      - id: ruff-format
+        files: ^packages/mcp-server/
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.1
+    hooks:
+      - id: mypy
+        files: ^packages/mcp-server/src/
+        additional_dependencies: [httpx, pydantic, mcp]
+        args: [--ignore-missing-imports]
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (mcp-server)
+        entry: bash -c 'cd packages/mcp-server && uv run pytest'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

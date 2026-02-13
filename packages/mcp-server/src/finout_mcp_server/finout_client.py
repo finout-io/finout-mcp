@@ -1,0 +1,892 @@
+"""
+Finout API Client - handles all interactions with the Finout REST API.
+Implements authentication, request handling, and data formatting.
+"""
+
+import os
+from datetime import datetime, timedelta
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
+
+import httpx
+
+if TYPE_CHECKING:
+    from .filter_cache import FilterCache
+
+
+class CostType(StrEnum):
+    """Cost metric types supported by Finout"""
+
+    NET_AMORTIZED = "netAmortizedCost"
+    BLENDED = "blendedCost"
+    UNBLENDED = "unblendedCost"
+    AMORTIZED = "amortizedCost"
+
+
+class Granularity(StrEnum):
+    """Time granularity for cost queries"""
+
+    DAILY = "daily"
+    MONTHLY = "monthly"
+    ACCUMULATED = "accumulated"
+
+
+class FinoutClient:
+    """
+    Client for interacting with the Finout API.
+    Handles authentication, rate limiting, and data transformation.
+    """
+
+    def __init__(
+        self,
+        client_id: str | None = None,
+        secret_key: str | None = None,
+        base_url: str = "https://app.finout.io/v1",
+        internal_api_url: str | None = None,
+        account_id: str | None = None,
+        allow_missing_credentials: bool = False,
+    ):
+        """
+        Initialize Finout API client.
+
+        Args:
+            client_id: Finout API client ID (or from FINOUT_CLIENT_ID env var)
+            secret_key: Finout API secret key (or from FINOUT_SECRET_KEY env var)
+            base_url: Base URL for Finout API
+            internal_api_url: Internal cost-service API URL (or from FINOUT_INTERNAL_API_URL env var)
+            account_id: Account ID for internal API (or from FINOUT_ACCOUNT_ID env var)
+            allow_missing_credentials: If True, allows initialization without credentials
+                                       (for testing/inspection only - API calls will fail)
+        """
+        self.client_id = client_id or os.getenv("FINOUT_CLIENT_ID")
+        self.secret_key = secret_key or os.getenv("FINOUT_SECRET_KEY")
+        self.base_url = base_url
+        self.internal_api_url = internal_api_url or os.getenv("FINOUT_INTERNAL_API_URL")
+        self.account_id = account_id or os.getenv("FINOUT_ACCOUNT_ID")
+
+        if not self.client_id or not self.secret_key:
+            if not allow_missing_credentials:
+                raise ValueError(
+                    "Finout credentials not provided. Set FINOUT_CLIENT_ID and "
+                    "FINOUT_SECRET_KEY environment variables or pass them to the constructor."
+                )
+
+        # Initialize HTTP client with credentials if available
+        headers = {"Content-Type": "application/json"}
+        if self.client_id:
+            headers["x-finout-client-id"] = self.client_id
+        if self.secret_key:
+            headers["x-finout-secret-key"] = self.secret_key
+
+        self.client = httpx.AsyncClient(base_url=self.base_url, headers=headers, timeout=30.0)
+
+        self.internal_client: httpx.AsyncClient | None
+        if self.internal_api_url:
+            # Internal API requires additional authorization headers
+            internal_headers = headers.copy()
+            internal_headers["authorized-user-roles"] = "sysAdmin"
+
+            if self.account_id:
+                internal_headers["authorized-account-id"] = self.account_id
+
+            self.internal_client = httpx.AsyncClient(
+                base_url=self.internal_api_url, headers=internal_headers, timeout=30.0
+            )
+        else:
+            self.internal_client = None
+
+        self._filter_cache: FilterCache | None = None
+
+    async def close(self):
+        """Close the HTTP clients"""
+        await self.client.aclose()
+        if self.internal_client:
+            await self.internal_client.aclose()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+    def _parse_time_period(self, period: str) -> tuple[int, int]:
+        """
+        Convert human-readable time period to UNIX timestamps.
+
+        Args:
+            period: Time period string - supports:
+                   - Predefined: 'today', 'yesterday', 'last_7_days', 'this_week', 'last_week',
+                     'two_weeks_ago', 'last_30_days', 'last_month', 'this_month', etc.
+                   - Custom range: 'YYYY-MM-DD to YYYY-MM-DD' (e.g., '2026-01-24 to 2026-01-31')
+                   - ISO format: 'YYYY-MM-DDTHH:MM:SS to YYYY-MM-DDTHH:MM:SS'
+
+        Returns:
+            Tuple of (start_timestamp, end_timestamp)
+        """
+        # Check for custom date range format
+        if " to " in period:
+            try:
+                start_str, end_str = period.split(" to ", 1)
+                start_str = start_str.strip()
+                end_str = end_str.strip()
+
+                # Try parsing with different formats
+                for fmt in ["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"]:
+                    try:
+                        start = datetime.strptime(start_str, fmt)
+                        end = datetime.strptime(end_str, fmt)
+                        # If time not specified, end should be end of day
+                        if fmt == "%Y-%m-%d":
+                            end = end.replace(hour=23, minute=59, second=59)
+                        return int(start.timestamp()), int(end.timestamp())
+                    except ValueError:
+                        continue
+
+                raise ValueError(f"Could not parse date range: {period}")
+            except Exception as e:
+                raise ValueError(
+                    f"Invalid date range format: {period}\n"
+                    f"Expected format: 'YYYY-MM-DD to YYYY-MM-DD'\n"
+                    f"Example: '2026-01-24 to 2026-01-31'"
+                ) from e
+
+        now = datetime.now()
+        today_start = datetime(now.year, now.month, now.day)
+
+        if period == "today":
+            start = today_start
+            end = now
+        elif period == "yesterday":
+            start = today_start - timedelta(days=1)
+            end = today_start
+        elif period == "last_7_days":
+            start = today_start - timedelta(days=7)
+            end = now
+        elif period == "last_30_days":
+            start = today_start - timedelta(days=30)
+            end = now
+        elif period == "this_week":
+            # Monday of this week
+            days_since_monday = today_start.weekday()
+            start = today_start - timedelta(days=days_since_monday)
+            end = now
+        elif period == "last_week":
+            # Monday to Sunday of last week
+            days_since_monday = today_start.weekday()
+            this_monday = today_start - timedelta(days=days_since_monday)
+            last_monday = this_monday - timedelta(days=7)
+            start = last_monday
+            end = this_monday
+        elif period == "two_weeks_ago" or period == "week_before_last":
+            # Monday to Sunday of two weeks ago
+            days_since_monday = today_start.weekday()
+            this_monday = today_start - timedelta(days=days_since_monday)
+            two_weeks_ago_monday = this_monday - timedelta(days=14)
+            two_weeks_ago_end = this_monday - timedelta(days=7)
+            start = two_weeks_ago_monday
+            end = two_weeks_ago_end
+        elif period == "this_month" or period == "month_to_date":
+            start = datetime(now.year, now.month, 1)
+            end = now
+        elif period == "last_month":
+            # First day of last month
+            first_this_month = datetime(now.year, now.month, 1)
+            last_month = first_this_month - timedelta(days=1)
+            start = datetime(last_month.year, last_month.month, 1)
+            end = first_this_month
+        elif period == "last_quarter":
+            # Simplified: last 90 days
+            start = today_start - timedelta(days=90)
+            end = now
+        else:
+            raise ValueError(
+                f"Unknown time period: {period}\n\n"
+                f"Supported values: today, yesterday, last_7_days, this_week, last_week, "
+                f"two_weeks_ago, last_30_days, this_month, last_month, last_quarter"
+            )
+
+        return int(start.timestamp()), int(end.timestamp())
+
+    async def get_anomalies(
+        self, time_period: str = "last_7_days", severity: str | None = None
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch detected cost anomalies.
+
+        Args:
+            time_period: Time period to check for anomalies
+            severity: Filter by severity (e.g., 'high', 'medium', 'low')
+
+        Returns:
+            List of anomaly objects
+
+        Note: Anomalies API endpoint not yet documented in Finout API docs.
+              This is a placeholder implementation.
+        """
+        # TODO: Find the correct Finout anomalies API endpoint
+        # Searched docs.finout.io but no API endpoint documented
+        # Anomalies exist in UI but no programmatic access documented yet
+
+        raise NotImplementedError(
+            "Anomalies API endpoint not yet available in Finout API documentation. "
+            "Please contact Finout support for anomaly detection API access."
+        )
+
+    async def get_costguard_scans(self) -> list[dict[str, Any]]:
+        """
+        Fetch CostGuard waste detection scans.
+
+        Returns:
+            List of scan objects with metadata
+
+        API Doc: https://docs.finout.io/configuration/finout-api/costguard-api
+        """
+        response = await self.client.get("/cost-guard/scans")
+        response.raise_for_status()
+
+        result = response.json()
+
+        # Return the scans array from the response
+        return result.get("scans", [])
+
+    async def get_waste_recommendations(
+        self,
+        scan_type: str | None = None,
+        service: str | None = None,
+        min_saving: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Get waste and optimization recommendations from CostGuard.
+
+        Args:
+            scan_type: Type of scan (e.g., 'idle', 'rightsizing')
+            service: Filter by cloud service (e.g., 'AWS', 'GCP', 'K8S')
+            min_saving: Minimum monthly savings threshold
+
+        Returns:
+            List of recommendation objects
+
+        API Doc: https://docs.finout.io/configuration/finout-api/costguard-api
+        """
+        scans = await self.get_costguard_scans()
+
+        all_recommendations = []
+
+        for scan in scans:
+            # Apply filters based on scan metadata
+            metadata = scan.get("scanMetadata", {})
+
+            if scan_type and metadata.get("type", "").lower() != scan_type.lower():
+                continue
+
+            if service and metadata.get("costCenter", "").upper() != service.upper():
+                continue
+
+            # Get recommendations for this scan
+            scan_id = scan.get("scanId")
+
+            # Call the recommendations endpoint
+            response = await self.client.post(
+                "/cost-guard/scans-recommendations", json={"scanId": scan_id}
+            )
+            response.raise_for_status()
+
+            result = response.json()
+
+            # Process grouped data
+            for group_data in result.get("data", []):
+                for resource in group_data.get("resources", []):
+                    yearly_savings = resource.get("resourceYearlyPotentialSavings", 0)
+                    monthly_savings = yearly_savings / 12
+
+                    # Apply min_saving filter
+                    if min_saving and monthly_savings < min_saving:
+                        continue
+
+                    all_recommendations.append(
+                        {
+                            "scan_id": scan_id,
+                            "scan_name": result.get("scanName"),
+                            "scan_type": metadata.get("type"),
+                            "cost_center": metadata.get("costCenter"),
+                            "group": group_data.get("group"),
+                            "resource_id": resource.get("resourceId"),
+                            "resource_metadata": resource.get("resourceMetadata", {}),
+                            "resource_waste": resource.get("resourceTotalWaste", 0),
+                            "monthly_savings": monthly_savings,
+                            "yearly_savings": yearly_savings,
+                        }
+                    )
+
+        # Sort by monthly savings (highest first)
+        all_recommendations.sort(key=lambda x: x["monthly_savings"], reverse=True)
+
+        return all_recommendations
+
+    @property
+    def filter_cache(self) -> "FilterCache":
+        """
+        Lazy-initialize and return the filter cache.
+
+        Returns:
+            FilterCache instance
+
+        Raises:
+            ValueError: If internal API URL not configured
+        """
+        if not self.internal_api_url:
+            raise ValueError(
+                "Internal API URL not configured. Set FINOUT_INTERNAL_API_URL "
+                "environment variable to your cost-service endpoint."
+            )
+
+        if self._filter_cache is None:
+            from .filter_cache import FilterCache
+
+            self._filter_cache = FilterCache(self)
+
+        return self._filter_cache
+
+    def _current_date_range(self) -> dict[str, Any]:
+        """
+        Get current date range for filter queries (last 30 days).
+
+        Returns:
+            Dictionary with correct date format for API
+        """
+        return self._build_date_payload("last_30_days")
+
+    def _get_internal_headers(self, account_id: str | None = None) -> dict[str, str]:
+        """
+        Get headers for internal API requests with optional account_id override.
+
+        Args:
+            account_id: Optional account ID to override the default
+
+        Returns:
+            Dictionary of headers with account ID set
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured")
+
+        # Start with base headers
+        headers = {"Content-Type": "application/json", "authorized-user-roles": "sysAdmin"}
+
+        # Use provided account_id or fall back to instance default
+        effective_account_id = account_id or self.account_id
+        if effective_account_id:
+            headers["authorized-account-id"] = effective_account_id
+
+        return headers
+
+    async def _fetch_filters_metadata(
+        self, date: dict[str, int] | None = None, account_id: str | None = None
+    ) -> dict[str, Any]:
+        """
+        Fetch filter metadata WITHOUT values (internal method for cache).
+
+        Args:
+            date: Date range for filter query
+            account_id: Optional account ID override
+
+        Returns:
+            Filter metadata organized by cost center
+
+        Raises:
+            ValueError: If internal API not configured or request fails
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured. Set FINOUT_INTERNAL_API_URL.")
+
+        if date is None:
+            date = self._current_date_range()
+
+        # Get headers with account_id override
+        headers = self._get_internal_headers(account_id)
+
+        try:
+            # Call the filters endpoint with includeValues=false
+            payload = {
+                "date": date,
+                "includeValues": False,  # This prevents the 10MB response
+            }
+
+            response = await self.internal_client.post(
+                "/cost-service/filters",
+                json=payload,
+                headers=headers,  # Use custom headers with account_id
+            )
+            response.raise_for_status()
+
+            result = response.json()
+
+            # API returns a list of filters, not a nested dict
+            if isinstance(result, list):
+                # Convert list format to our expected dict format
+                # API returns: [{"costCenter": "aws", "key": "service", "path": "...", "values": {...}}, ...]
+                # Keep ALL metadata so we can build proper filter payloads later
+
+                organized: dict[str, Any] = {}
+                for item in result:
+                    if not isinstance(item, dict):
+                        continue
+
+                    cost_center = item.get("costCenter", "unknown")
+
+                    # Get the filter type from the API response
+                    # Tags will have type="tag", standard filters have type="col"
+                    filter_type = item.get("type", "col")
+
+                    # Initialize cost center if not exists
+                    if cost_center not in organized:
+                        organized[cost_center] = {}
+
+                    # Initialize filter type list if not exists
+                    if filter_type not in organized[cost_center]:
+                        organized[cost_center][filter_type] = []
+
+                    # Keep all filter metadata (except values)
+                    filter_obj = {
+                        "costCenter": cost_center,
+                        "key": item.get("key", ""),
+                        "path": item.get("path", ""),
+                        "type": filter_type,  # Use actual type from API
+                    }
+
+                    organized[cost_center][filter_type].append(filter_obj)
+
+                return organized
+
+            # If it's already a dict, process it
+            if isinstance(result, dict):
+                # Strip out values from each filter
+                cleaned_result: dict[str, Any] = {}
+                for cost_center, filter_types in result.items():
+                    if isinstance(filter_types, dict):
+                        cleaned_result[cost_center] = {}
+                        for filter_type, filters in filter_types.items():
+                            if isinstance(filters, list):
+                                cleaned_filters = []
+                                for f in filters:
+                                    if isinstance(f, dict):
+                                        cleaned_filter = {
+                                            k: v for k, v in f.items() if k != "values"
+                                        }
+                                        cleaned_filters.append(cleaned_filter)
+                                cleaned_result[cost_center][filter_type] = cleaned_filters
+                return cleaned_result
+
+            raise ValueError(
+                f"Invalid response format from filters API: expected dict or list, got {type(result)}"
+            )
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise ValueError(
+                    "Authentication failed. Check your FINOUT_CLIENT_ID and FINOUT_SECRET_KEY."
+                ) from e
+            elif e.response.status_code == 403:
+                raise ValueError(
+                    "Access denied. Verify your credentials have permission to access the cost-service API."
+                ) from e
+            else:
+                raise
+
+        except httpx.TimeoutException as e:
+            raise ValueError(
+                "Request timed out. The filters API may be slow or unavailable."
+            ) from e
+
+    async def _fetch_filter_values(
+        self,
+        filter_key: str,
+        cost_center: str | None = None,
+        filter_type: str | None = None,
+        date: dict[str, int] | None = None,
+        account_id: str | None = None,
+    ) -> list[Any]:
+        """
+        Fetch values for a specific filter (internal method for cache).
+
+        Args:
+            filter_key: Filter key to fetch values for
+            cost_center: Cost center filter belongs to
+            filter_type: Type of filter
+            date: Date range for value query
+            account_id: Optional account ID override
+
+        Returns:
+            List of filter values
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured. Set FINOUT_INTERNAL_API_URL.")
+
+        if date is None:
+            date = self._current_date_range()
+
+        # Get headers with account_id override
+        headers = self._get_internal_headers(account_id)
+
+        # Call the filters endpoint with specific filter request
+        payload = {"date": date, "includeValues": True, "filterKey": filter_key}
+
+        if cost_center:
+            payload["costCenter"] = cost_center
+        if filter_type:
+            payload["filterType"] = filter_type
+
+        response = await self.internal_client.post(
+            "/cost-service/filters",
+            json=payload,
+            headers=headers,  # Use custom headers with account_id
+        )
+        response.raise_for_status()
+
+        result = response.json()
+
+        # API returns a list, not nested dict
+        if isinstance(result, list):
+            # Find the matching filter and extract its values
+            for item in result:
+                if not isinstance(item, dict):
+                    continue
+
+                if item.get("key") == filter_key:
+                    # Check cost_center match if specified
+                    if cost_center and item.get("costCenter") != cost_center:
+                        continue
+
+                    # Extract values - they're in a dict, we need the keys
+                    values_dict = item.get("values", {})
+                    if isinstance(values_dict, dict):
+                        return list(values_dict.keys())
+                    return []
+
+        # Fallback: old dict format
+        values: list[Any] = []
+        if isinstance(result, dict):
+            for cc, types in result.items():
+                if cost_center and cc != cost_center:
+                    continue
+
+                if isinstance(types, dict):
+                    for ft, filters in types.items():
+                        if filter_type and ft != filter_type:
+                            continue
+
+                        if isinstance(filters, list):
+                            for f in filters:
+                                if f.get("key") == filter_key:
+                                    values_dict = f.get("values", {})
+                                    if isinstance(values_dict, dict):
+                                        return list(values_dict.keys())
+                                    return []
+
+        return values
+
+    async def get_filters_metadata(
+        self,
+        date: dict[str, int] | None = None,
+        use_cache: bool = True,
+        account_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get filter metadata (without values) using cache.
+
+        Args:
+            date: Date range for filter query
+            use_cache: Whether to use cached metadata
+            account_id: Optional account ID override
+
+        Returns:
+            Filter metadata organized by cost center
+        """
+        # TODO: Pass account_id to cache for per-account caching
+        # For now, bypass cache if account_id differs from default
+        if account_id and account_id != self.account_id:
+            # Fetch directly without cache for different account
+            return await self._fetch_filters_metadata(date, account_id)
+        return await self.filter_cache.get_metadata(date, use_cache)
+
+    async def get_filter_values(
+        self,
+        filter_key: str,
+        cost_center: str | None = None,
+        filter_type: str | None = None,
+        date: dict[str, int] | None = None,
+        limit: int = 100,
+        use_cache: bool = True,
+        account_id: str | None = None,
+    ) -> list[Any]:
+        """
+        Get values for a specific filter (lazy-loaded from cache).
+
+        Args:
+            filter_key: Filter key to fetch values for
+            cost_center: Cost center filter belongs to (case-insensitive, will be normalized to lowercase)
+            filter_type: Type of filter
+            date: Date range for value query
+            limit: Maximum number of values to return
+            use_cache: Whether to use cached values
+            account_id: Optional account ID override
+
+        Returns:
+            List of filter values (truncated to limit)
+
+        Note:
+            cost_center will be automatically normalized to lowercase for consistency
+            (e.g., "AMAZON-CUR" becomes "amazon-cur")
+        """
+        # Normalize cost_center to lowercase to handle case sensitivity issues
+        if cost_center:
+            cost_center = cost_center.lower()
+
+        # If account_id differs, bypass cache and fetch directly
+        if account_id and account_id != self.account_id:
+            return await self._fetch_filter_values(
+                filter_key, cost_center, filter_type, date, account_id
+            )
+
+        return await self.filter_cache.get_filter_values(
+            filter_key, cost_center, filter_type, date, limit, use_cache
+        )
+
+    async def search_filters(
+        self,
+        query: str,
+        cost_center: str | None = None,
+        limit: int = 50,
+        account_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Search filters by keyword with relevance ranking.
+
+        Args:
+            query: Search query (case-insensitive)
+            cost_center: Optional cost center to filter by (case-insensitive, will be normalized)
+            limit: Maximum number of results
+            account_id: Optional account ID override
+
+        Returns:
+            List of matching filters, sorted by relevance
+        """
+        from .filter_utils import search_filters_by_keyword
+
+        # Normalize cost_center to lowercase for consistency
+        if cost_center:
+            cost_center = cost_center.lower()
+
+        # Get metadata (with account_id override)
+        metadata = await self.get_filters_metadata(account_id=account_id)
+
+        # Search using utility function
+        return search_filters_by_keyword(metadata, query, cost_center, limit)
+
+    def _build_filter_payload(self, filters: list[dict[str, Any]]) -> dict[str, Any]:
+        """
+        Convert filter arguments to internal API format.
+
+        Args:
+            filters: List of filter objects with costCenter, key, path, type, operator, value
+
+        Returns:
+            Filter dict in internal API format (single filter or AND wrapper)
+
+        Example input:
+            [
+                {
+                    "costCenter": "amazon-cur",
+                    "key": "parent_cloud_service",
+                    "path": "AWS/Services",
+                    "type": "col",
+                    "operator": "is",
+                    "value": "AmazonEC2"
+                }
+            ]
+
+        Example output (single filter):
+            {
+                "costCenter": "amazon-cur",
+                "key": "parent_cloud_service",
+                "path": "AWS/Services",
+                "type": "col",
+                "operator": "is",
+                "value": "AmazonEC2"
+            }
+
+        Example output (multiple filters):
+            {
+                "AND": [
+                    {...filter1...},
+                    {...filter2...}
+                ]
+            }
+        """
+        if not filters:
+            return {}
+
+        formatted_filters = []
+
+        for f in filters:
+            if not isinstance(f, dict):
+                raise ValueError(f"Filter must be a dictionary: {f}")
+
+            # Validate required fields
+            required = ["costCenter", "key", "path", "type", "value"]
+            for field in required:
+                if field not in f:
+                    raise ValueError(f"Filter missing required field '{field}': {f}")
+
+            # Build filter in correct format
+            formatted_filter = {
+                "costCenter": f["costCenter"],
+                "key": f["key"],
+                "path": f["path"],
+                "type": f.get("type", "col"),
+                "operator": f.get("operator", "is"),
+                "value": f["value"],  # Single value, not array
+            }
+
+            formatted_filters.append(formatted_filter)
+
+        # Single filter: return as-is
+        if len(formatted_filters) == 1:
+            return formatted_filters[0]
+
+        # Multiple filters: wrap in AND
+        return {"AND": formatted_filters}
+
+    def _build_date_payload(self, time_period: str) -> dict[str, Any]:
+        """
+        Build date payload for cost queries in the format the API expects.
+
+        Args:
+            time_period: Time period string
+
+        Returns:
+            Date dict with correct format
+        """
+        # Map time periods to relative ranges (API-native)
+        relative_map = {
+            "today": {"relativeRange": "today", "type": "day"},
+            "yesterday": {"relativeRange": "yesterday", "type": "day"},
+            "last_7_days": {"relativeRange": "last7Days", "type": "day"},
+            "last_30_days": {"relativeRange": "last30Days", "type": "day"},
+            "this_month": {"relativeRange": "currentMonth", "type": "month"},
+            "month_to_date": {"relativeRange": "currentMonth", "type": "month"},
+            "last_month": {"relativeRange": "previousMonth", "type": "month"},
+            "last_quarter": {"relativeRange": "previousQuarter", "type": "quarter"},
+        }
+
+        if time_period in relative_map:
+            return relative_map[time_period]
+
+        # For custom periods (this_week, last_week, two_weeks_ago, etc.)
+        # use absolute timestamps
+        start_ts, end_ts = self._parse_time_period(time_period)
+        return {
+            "from": start_ts * 1000,
+            "to": end_ts * 1000,
+            "type": "day",  # Use "day" granularity for custom ranges
+        }
+
+    async def query_costs_with_filters(
+        self,
+        time_period: str = "last_30_days",
+        filters: list[dict[str, Any]] | None = None,
+        group_by: list[str] | None = None,
+        x_axis_group_by: str | None = None,
+        cost_type: CostType = CostType.NET_AMORTIZED,
+        account_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Query costs using internal API with flexible filters.
+
+        Args:
+            time_period: Time period string (e.g., 'last_30_days')
+            filters: List of filter objects with key, value, operator
+            group_by: List of dimensions to group by
+            x_axis_group_by: X-axis grouping (e.g., "daily", "monthly")
+            cost_type: Type of cost metric to retrieve
+            account_id: Optional account ID to query (overrides instance default)
+
+        Returns:
+            Cost query results
+
+        Raises:
+            ValueError: If internal API not configured or invalid parameters
+            httpx.HTTPStatusError: If API request fails
+            httpx.TimeoutException: If request times out
+
+        Example:
+            await client.query_costs_with_filters(
+                time_period="last_month",
+                filters=[
+                    {"key": "service", "value": ["ec2"], "operator": "eq"},
+                    {"key": "region", "value": ["us-east-1"], "operator": "eq"}
+                ],
+                group_by=["account", "service"],
+                x_axis_group_by="daily",
+                account_id="abc-123"  # Optional: query specific account
+            )
+        """
+        if not self.internal_client:
+            raise ValueError(
+                "Internal API client not configured. Set FINOUT_INTERNAL_API_URL "
+                "environment variable to your cost-service endpoint."
+            )
+
+        # Get headers with account_id override
+        headers = self._get_internal_headers(account_id)
+
+        try:
+            # Build payload with correct date format
+            payload: dict[str, Any] = {
+                "date": self._build_date_payload(time_period),
+                "costType": cost_type.value,
+            }
+
+            # Add filters if provided
+            if filters:
+                payload["filters"] = self._build_filter_payload(filters)
+
+            # Add grouping if provided (needs full metadata like filters)
+            if group_by:
+                if not isinstance(group_by, list):
+                    raise ValueError("group_by must be a list")
+                # group_by should be list of dicts with costCenter, key, path, type
+                payload["groupBys"] = group_by  # Note: plural "groupBys"
+
+            if x_axis_group_by:
+                if x_axis_group_by not in ["daily", "monthly"]:
+                    raise ValueError("x_axis_group_by must be 'daily' or 'monthly'")
+                payload["xAxisGroupBy"] = x_axis_group_by
+
+            # Call internal cost API with custom headers (account_id override)
+            response = await self.internal_client.post(
+                "/cost-service/cost", json=payload, headers=headers
+            )
+            response.raise_for_status()
+
+            return response.json()
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise ValueError(
+                    "Authentication failed. Check your FINOUT_CLIENT_ID and FINOUT_SECRET_KEY."
+                ) from e
+            elif e.response.status_code == 403:
+                raise ValueError(
+                    "Access denied. Verify your credentials have permission to access the cost-service API."
+                ) from e
+            elif e.response.status_code == 404:
+                raise ValueError(
+                    "Cost-service API endpoint not found. Verify FINOUT_INTERNAL_API_URL is correct."
+                ) from e
+            else:
+                raise
+
+        except httpx.TimeoutException as e:
+            raise ValueError(
+                "Request timed out after 30 seconds. The API may be slow or unavailable."
+            ) from e

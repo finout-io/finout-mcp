@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  asaf:
+    build:
+      context: .
+      dockerfile: Dockerfile.asaf
+    container_name: asaf
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - FINOUT_CLIENT_ID=${FINOUT_CLIENT_ID}
+      - FINOUT_SECRET_KEY=${FINOUT_SECRET_KEY}
+      - FINOUT_INTERNAL_API_URL=${FINOUT_INTERNAL_API_URL}
+      - FINOUT_ACCOUNT_ID=${FINOUT_ACCOUNT_ID}
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - finout
+
+networks:
+  finout:
+    driver: bridge

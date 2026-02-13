@@ -1,0 +1,12 @@
+[project]
+name = "finout-mcp"
+version = "0.1.0"
+description = "Finout MCP Server - Monorepo"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+finout-mcp-server = { workspace = true }
+asaf = { workspace = true }

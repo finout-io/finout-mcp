@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: asaf-config
+  namespace: finout-tools
+  labels:
+    app: asaf
+data:
+  # Finout Internal API URL
+  finout-internal-api-url: "http://finout-app.prod-mirror.internal.finout.io"
+
+  # Default Account ID (can be overridden in UI)
+  finout-default-account-id: "your-default-account-id"
+
+  # Optional: Log level
+  log-level: "INFO"
