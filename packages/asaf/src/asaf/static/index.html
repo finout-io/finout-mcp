@@ -342,6 +342,47 @@
             font-size: 13px;
         }
 
+        .tool-calls-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #f0f4ff;
+            border: 1px solid #d0dfff;
+            border-radius: 8px;
+            cursor: pointer;
+            user-select: none;
+            margin-bottom: 4px;
+        }
+
+        .tool-calls-header:hover {
+            background: #e6edff;
+        }
+
+        .tool-calls-icon {
+            font-size: 14px;
+        }
+
+        .tool-calls-count {
+            font-weight: 600;
+            color: #38B28E;
+            flex: 1;
+        }
+
+        .tool-calls-toggle {
+            color: #666;
+            font-size: 12px;
+        }
+
+        .tool-calls-list {
+            display: none;
+            padding-top: 4px;
+        }
+
+        .tool-calls-list.expanded {
+            display: block;
+        }
+
         .tool-call {
             background: #f0f4ff;
             border: 1px solid #d0dfff;
@@ -732,7 +773,7 @@
         let currentToolCalls = [];
         let toolCallIdCounter = 0; // Counter for unique IDs
 
-        function addMessage(role, content, toolCalls = [], totalTime = null) {
+        function addMessage(role, content, toolCalls = [], totalTime = null, toolTime = null) {
             const chatContainer = document.getElementById('chatContainer');
 
             // Remove welcome message if it exists
@@ -762,6 +803,24 @@
                 const toolCallsDiv = document.createElement('div');
                 toolCallsDiv.className = 'tool-calls';
 
+                const listId = `tool-list-${toolCallIdCounter++}`;
+
+                // Add collapsible header
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'tool-calls-header';
+                headerDiv.onclick = () => toggleToolCallsList(listId);
+                headerDiv.innerHTML = `
+                    <span class="tool-calls-icon">🔧</span>
+                    <span class="tool-calls-count">${toolCalls.length} tool call${toolCalls.length > 1 ? 's' : ''}</span>
+                    <span class="tool-calls-toggle" id="toggle-${listId}">▶ Show tools</span>
+                `;
+                toolCallsDiv.appendChild(headerDiv);
+
+                // Add collapsible list
+                const listDiv = document.createElement('div');
+                listDiv.className = 'tool-calls-list';
+                listDiv.id = listId;
+
                 toolCalls.forEach((toolCall, index) => {
                     const uniqueId = toolCallIdCounter++; // Increment counter for unique ID
                     const toolDiv = document.createElement('div');
@@ -783,9 +842,10 @@
                             </div>
                         </div>
                     `;
-                    toolCallsDiv.appendChild(toolDiv);
+                    listDiv.appendChild(toolDiv);
                 });
 
+                toolCallsDiv.appendChild(listDiv);
                 contentDiv.appendChild(toolCallsDiv);
             }
 
@@ -795,11 +855,23 @@
                 timingDiv.className = 'timing-summary';
                 const toolCount = toolCalls ? toolCalls.length : 0;
                 const modelName = getModelName(currentModel);
-                timingDiv.innerHTML = `
-                    <span class="timing-model">${modelName}</span>
-                    ${toolCount > 0 ? `<span class="timing-tools">${toolCount} tool${toolCount > 1 ? 's' : ''}</span>` : ''}
-                    <span class="timing-duration">${totalTime}s</span>
-                `;
+
+                // Calculate thinking time (total - tool time)
+                const thinkingTime = toolTime ? (totalTime - toolTime).toFixed(1) : totalTime;
+
+                let timingHTML = `<span class="timing-model">${modelName}</span>`;
+
+                if (toolTime && toolTime > 0) {
+                    // Show breakdown: tools + thinking
+                    timingHTML += `
+                        <span class="timing-tools">🔧 ${toolTime}s</span>
+                        <span class="timing-model">💭 ${thinkingTime}s</span>
+                    `;
+                }
+
+                timingHTML += `<span class="timing-duration">${totalTime}s total</span>`;
+
+                timingDiv.innerHTML = timingHTML;
                 contentDiv.appendChild(timingDiv);
             }
 
@@ -808,6 +880,19 @@
 
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function toggleToolCallsList(listId) {
+            const list = document.getElementById(listId);
+            const toggle = document.getElementById(`toggle-${listId}`);
+
+            if (list.classList.contains('expanded')) {
+                list.classList.remove('expanded');
+                toggle.textContent = '▶ Show tools';
+            } else {
+                list.classList.add('expanded');
+                toggle.textContent = '▼ Hide tools';
+            }
         }
 
         function toggleToolCall(id) {
@@ -977,7 +1062,7 @@
                 const totalTime = ((Date.now() - requestStartTime) / 1000).toFixed(1);
 
                 // Add assistant response with tool calls and timing
-                addMessage('assistant', data.response, data.tool_calls || [], totalTime);
+                addMessage('assistant', data.response, data.tool_calls || [], totalTime, data.tool_time);
 
                 // Update conversation history
                 conversationHistory.push({role: 'user', content: message});

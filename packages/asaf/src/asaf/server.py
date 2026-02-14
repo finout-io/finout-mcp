@@ -190,7 +190,10 @@ mcp_bridge: Optional[MCPBridge] = None
 # Global account cache
 _account_cache: Optional[Dict[str, Any]] = None
 _account_cache_time: Optional[datetime] = None
-_account_cache_ttl = timedelta(minutes=5)  # Cache for 5 minutes
+_account_cache_ttl = timedelta(hours=3)  # Cache for 3 hours
+
+# Last selected account persistence
+_last_account_file = package_root / ".last_account"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -221,6 +224,22 @@ app.add_middleware(
 
 # Initialize Anthropic client
 anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+def save_last_account(account_id: str) -> None:
+    """Save the last selected account ID to file"""
+    try:
+        _last_account_file.write_text(account_id)
+    except Exception as e:
+        print(f"Warning: Could not save last account: {e}")
+
+def load_last_account() -> Optional[str]:
+    """Load the last selected account ID from file"""
+    try:
+        if _last_account_file.exists():
+            return _last_account_file.read_text().strip()
+    except Exception as e:
+        print(f"Warning: Could not load last account: {e}")
+    return None
 
 def convert_mcp_tools_to_claude_format(mcp_tools: List[Dict]) -> List[Dict]:
     """Convert MCP tool definitions to Claude API format"""
@@ -283,6 +302,7 @@ async def chat(request: ChatRequest):
 
         # Track tool calls for display
         all_tool_calls = []
+        total_tool_time = 0.0
 
         # Handle tool calls
         while response.stop_reason == "tool_use":
@@ -298,8 +318,12 @@ async def chat(request: ChatRequest):
                     print(f"Calling tool: {tool_name} with {tool_input}")
 
                     try:
+                        # Time tool execution
+                        tool_start = datetime.now()
                         # Call MCP tool (account context is set at MCP startup)
                         result = await mcp_bridge.call_tool(tool_name, tool_input)
+                        tool_duration = (datetime.now() - tool_start).total_seconds()
+                        total_tool_time += tool_duration
 
                         # Track for display
                         all_tool_calls.append({
@@ -351,6 +375,7 @@ async def chat(request: ChatRequest):
         return {
             "response": response_text,
             "tool_calls": all_tool_calls,  # Include tool call details
+            "tool_time": round(total_tool_time, 2),  # Time spent in tool execution
             "conversation_history": messages + [{"role": "assistant", "content": response_text}]
         }
 
@@ -388,9 +413,13 @@ async def get_accounts():
             _account_cache_time is not None and
             now - _account_cache_time < _account_cache_ttl):
             print(f"Using cached accounts ({len(_account_cache)} accounts, age: {(now - _account_cache_time).seconds}s)")
+            # Return last selected account if MCP not running, otherwise current MCP account
+            current_id = (mcp_bridge.current_account_id
+                         if (mcp_bridge and mcp_bridge.process and mcp_bridge.process.poll() is None)
+                         else load_last_account())
             return {
                 "accounts": _account_cache,
-                "current_account_id": mcp_bridge.current_account_id if mcp_bridge else None,
+                "current_account_id": current_id,
                 "cached": True
             }
 
@@ -450,9 +479,14 @@ async def get_accounts():
             _account_cache = account_list
             _account_cache_time = now
 
+            # Return last selected account if MCP not running, otherwise current MCP account
+            current_id = (mcp_bridge.current_account_id
+                         if (mcp_bridge and mcp_bridge.process and mcp_bridge.process.poll() is None)
+                         else load_last_account())
+
             return {
                 "accounts": account_list,
-                "current_account_id": mcp_bridge.current_account_id if mcp_bridge else None,
+                "current_account_id": current_id,
                 "cached": False
             }
 
@@ -484,6 +518,9 @@ async def switch_account(request: dict):
     else:
         # MCP running - restart with new account
         await mcp_bridge.restart_with_account(account_id)
+
+    # Save as last selected account
+    save_last_account(account_id)
 
     return {
         "success": True,
