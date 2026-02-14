@@ -504,6 +504,47 @@
             border-color: #38B28E; /* Finout teal */
         }
 
+        #micButton {
+            padding: 12px 20px;
+            background: white;
+            color: #38B28E;
+            border: 2px solid #38B28E;
+            border-radius: 25px;
+            font-size: 18px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #micButton:hover:not(:disabled) {
+            background: #f0f9f6;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(56, 178, 142, 0.2);
+        }
+
+        #micButton:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #micButton.recording {
+            background: #FF6B35;
+            border-color: #FF6B35;
+            color: white;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
+        }
+
         #sendButton {
             padding: 12px 30px;
             background: #38B28E; /* Finout teal */
@@ -761,6 +802,7 @@
                     onkeypress="handleKeyPress(event)"
                     rows="1"
                 ></textarea>
+                <button id="micButton" onclick="toggleVoiceInput()" title="Voice input">🎤</button>
                 <button id="sendButton" onclick="sendMessage()">Send</button>
             </div>
         </div>
@@ -1414,6 +1456,81 @@
                 textarea.style.overflowY = 'auto';
             } else {
                 textarea.style.overflowY = 'hidden';
+            }
+        }
+
+        // Voice input functionality
+        let recognition = null;
+        let isRecording = false;
+
+        function initVoiceRecognition() {
+            // Check browser support
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (!SpeechRecognition) {
+                console.warn('Speech recognition not supported in this browser');
+                return null;
+            }
+
+            const recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                isRecording = true;
+                const micButton = document.getElementById('micButton');
+                micButton.classList.add('recording');
+                micButton.title = 'Recording... Click to stop';
+            };
+
+            recognition.onend = () => {
+                isRecording = false;
+                const micButton = document.getElementById('micButton');
+                micButton.classList.remove('recording');
+                micButton.title = 'Voice input';
+            };
+
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = 0; i < event.results.length; i++) {
+                    transcript += event.results[i][0].transcript;
+                }
+
+                // Update input field with transcription
+                const input = document.getElementById('messageInput');
+                input.value = transcript;
+                autoResizeTextarea();
+                input.focus();
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                isRecording = false;
+                const micButton = document.getElementById('micButton');
+                micButton.classList.remove('recording');
+
+                if (event.error === 'not-allowed') {
+                    alert('Microphone access denied. Please enable microphone permissions.');
+                }
+            };
+
+            return recognition;
+        }
+
+        function toggleVoiceInput() {
+            if (!recognition) {
+                recognition = initVoiceRecognition();
+                if (!recognition) {
+                    alert('Voice input is not supported in your browser. Try Chrome, Edge, or Safari.');
+                    return;
+                }
+            }
+
+            if (isRecording) {
+                recognition.stop();
+            } else {
+                recognition.start();
             }
         }
 
