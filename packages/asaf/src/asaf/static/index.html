@@ -1473,18 +1473,24 @@
             }
 
             const recognition = new SpeechRecognition();
-            recognition.continuous = false;
+            recognition.continuous = true;  // Keep recording until manually stopped
             recognition.interimResults = true;
             recognition.lang = 'en-US';
+            recognition.maxAlternatives = 1;
+
+            let finalTranscript = '';
 
             recognition.onstart = () => {
+                console.log('Voice recognition started');
                 isRecording = true;
+                finalTranscript = '';
                 const micButton = document.getElementById('micButton');
                 micButton.classList.add('recording');
                 micButton.title = 'Recording... Click to stop';
             };
 
             recognition.onend = () => {
+                console.log('Voice recognition ended');
                 isRecording = false;
                 const micButton = document.getElementById('micButton');
                 micButton.classList.remove('recording');
@@ -1492,16 +1498,22 @@
             };
 
             recognition.onresult = (event) => {
-                let transcript = '';
-                for (let i = 0; i < event.results.length; i++) {
-                    transcript += event.results[i][0].transcript;
+                let interimTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript + ' ';
+                    } else {
+                        interimTranscript += transcript;
+                    }
                 }
 
-                // Update input field with transcription
+                // Update input field with both final and interim results
                 const input = document.getElementById('messageInput');
-                input.value = transcript;
+                input.value = (finalTranscript + interimTranscript).trim();
                 autoResizeTextarea();
-                input.focus();
+                console.log('Transcription:', input.value);
             };
 
             recognition.onerror = (event) => {
@@ -1511,7 +1523,11 @@
                 micButton.classList.remove('recording');
 
                 if (event.error === 'not-allowed') {
-                    alert('Microphone access denied. Please enable microphone permissions.');
+                    alert('Microphone access denied. Please enable microphone permissions in your browser settings.');
+                } else if (event.error === 'no-speech') {
+                    console.log('No speech detected');
+                } else {
+                    alert(`Voice input error: ${event.error}`);
                 }
             };
 
