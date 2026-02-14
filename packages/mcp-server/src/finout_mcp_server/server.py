@@ -1121,6 +1121,15 @@ async def discover_context_impl(args: dict) -> dict:
             for wid in widget_ids:
                 try:
                     widget = await finout_client.get_widget(wid)
+
+                    # Debug: Print widget structure to understand the schema
+                    import sys
+
+                    print(f"\n[DEBUG] Widget {wid} structure:", file=sys.stderr)
+                    print(f"Keys: {list(widget.keys())}", file=sys.stderr)
+                    if "data" in widget:
+                        print(f"Data keys: {list(widget.get('data', {}).keys())}", file=sys.stderr)
+
                     query_data = widget.get("data", {}).get("query", {})
 
                     # Extract and simplify filter information
@@ -1149,7 +1158,12 @@ async def discover_context_impl(args: dict) -> dict:
                         }
                     )
                 except Exception as e:
-                    print(f"Error fetching widget {wid}: {e}")
+                    import sys
+
+                    print(f"Error fetching widget {wid}: {e}", file=sys.stderr)
+                    import traceback
+
+                    traceback.print_exc(file=sys.stderr)
                     pass
 
             dashboards_list.append(
