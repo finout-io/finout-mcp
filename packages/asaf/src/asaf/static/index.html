@@ -1481,12 +1481,36 @@
             let finalTranscript = '';
 
             recognition.onstart = () => {
-                console.log('Voice recognition started');
+                console.log('✅ Voice recognition started - speak now!');
                 isRecording = true;
                 finalTranscript = '';
                 const micButton = document.getElementById('micButton');
                 micButton.classList.add('recording');
                 micButton.title = 'Recording... Click to stop';
+            };
+
+            recognition.onspeechstart = () => {
+                console.log('🎤 Speech detected!');
+            };
+
+            recognition.onspeechend = () => {
+                console.log('🔇 Speech ended');
+            };
+
+            recognition.onsoundstart = () => {
+                console.log('🔊 Sound detected!');
+            };
+
+            recognition.onsoundend = () => {
+                console.log('🔇 Sound ended');
+            };
+
+            recognition.onaudiostart = () => {
+                console.log('🎙️ Audio capture started');
+            };
+
+            recognition.onaudioend = () => {
+                console.log('🎙️ Audio capture ended');
             };
 
             recognition.onend = () => {
@@ -1498,22 +1522,33 @@
             };
 
             recognition.onresult = (event) => {
+                console.log('onresult fired! Event:', event);
+                console.log('Results length:', event.results.length);
+
                 let interimTranscript = '';
 
                 for (let i = event.resultIndex; i < event.results.length; i++) {
                     const transcript = event.results[i][0].transcript;
+                    console.log(`Result ${i}:`, transcript, 'isFinal:', event.results[i].isFinal);
+
                     if (event.results[i].isFinal) {
                         finalTranscript += transcript + ' ';
+                        console.log('Added to final transcript:', transcript);
                     } else {
                         interimTranscript += transcript;
+                        console.log('Added to interim transcript:', transcript);
                     }
                 }
 
                 // Update input field with both final and interim results
                 const input = document.getElementById('messageInput');
-                input.value = (finalTranscript + interimTranscript).trim();
+                const newValue = (finalTranscript + interimTranscript).trim();
+                console.log('Setting input value to:', newValue);
+                input.value = newValue;
                 autoResizeTextarea();
-                console.log('Transcription:', input.value);
+
+                // Force focus to make sure it's visible
+                input.focus();
             };
 
             recognition.onerror = (event) => {
