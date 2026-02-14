@@ -1234,11 +1234,22 @@ async def discover_context_impl(args: dict) -> dict:
                         filter_summary[key].append(value)
 
             if filter_summary:
-                summary_parts.append("\n\nCommon filters used:")
+                summary_parts.append(
+                    "\n\n⚠️ IMPORTANT: The dashboards/views above show how to identify these resources."
+                )
+                summary_parts.append("\n\nFilters that define this context:")
                 for key, values in list(filter_summary.items())[:5]:  # Top 5 filters
-                    summary_parts.append(f"  • {key}: {', '.join(map(str, values[:3]))}")
+                    values_str = ", ".join(map(str, values[:3]))
+                    summary_parts.append(f"  • {key}: {values_str}")
 
-                summary_parts.append("\nTo query costs, use query_costs tool with these filters.")
+                # Provide example query
+                first_key = list(filter_summary.keys())[0]
+                first_value = filter_summary[first_key][0]
+                summary_parts.append(
+                    f"\n\n✅ NEXT STEP: Query costs using these filters."
+                    f"\nExample: query_costs(time_period='last_30_days', "
+                    f"filters=[{{'key': '{first_key}', 'value': '{first_value}', 'operator': 'eq'}}])"
+                )
 
         results["summary"] = "".join(summary_parts)
 
