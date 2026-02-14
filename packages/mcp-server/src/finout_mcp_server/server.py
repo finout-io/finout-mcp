@@ -484,6 +484,56 @@ async def list_tools() -> list[Tool]:
                 "required": ["filter_key"],
             },
         ),
+        Tool(
+            name="discover_context",
+            description=(
+                "Search for how the account organizes cost/usage data related to a query.\n\n"
+                "Discovers business context by searching across:\n"
+                "- **Dashboards**: Named collections of widgets showing cost breakdowns\n"
+                "- **Views**: Saved queries with specific filters and groupings (semantic layer)\n"
+                "- **Data Explorers**: Complex multi-dimensional analysis queries\n\n"
+                "Returns information about filters, virtual tags, dimensions, and groupings commonly used for the queried topic. "
+                "This helps understand the business logic and existing organizational patterns before querying costs.\n\n"
+                "**When to use:**\n"
+                '- User asks about a named concept ("vikings", "production", "team X")\n'
+                "- Need to understand how they organize/filter data\n"
+                "- Before making cost queries for unfamiliar topics\n\n"
+                "**Example queries:**\n"
+                '- "vikings" → finds "Vikings dashboard", shows what filters/groupings they use\n'
+                '- "production" → finds production views, shows env=prod filters\n'
+                '- "kafka" → finds Kafka-related dashboards/views and their configurations'
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query - matches against dashboard names, view names, widget configurations, data explorer names/descriptions",
+                    },
+                    "include_dashboards": {
+                        "type": "boolean",
+                        "description": "Include dashboards in search",
+                        "default": True,
+                    },
+                    "include_views": {
+                        "type": "boolean",
+                        "description": "Include views (saved queries) in search",
+                        "default": True,
+                    },
+                    "include_data_explorers": {
+                        "type": "boolean",
+                        "description": "Include data explorers in search",
+                        "default": True,
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of results per category",
+                        "default": 5,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
     ]
 
 
@@ -532,6 +582,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await get_filter_values_impl(arguments)
         elif name == "debug_filters":
             result = await debug_filters_impl(arguments)
+        elif name == "discover_context":
+            result = await discover_context_impl(arguments or {})
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1029,6 +1081,118 @@ async def get_filter_values_impl(args: dict) -> dict:
             "is_truncated": truncated["is_truncated"],
         },
     }
+
+
+async def discover_context_impl(args: dict) -> dict:
+    """Implementation of discover_context tool"""
+    assert finout_client is not None
+
+    query = args.get("query", "").lower()
+    include_dashboards = args.get("include_dashboards", True)
+    include_views = args.get("include_views", True)
+    include_data_explorers = args.get("include_data_explorers", True)
+    max_results = args.get("max_results", 5)
+
+    dashboards_list: list[dict[str, Any]] = []
+    views_list: list[dict[str, Any]] = []
+    data_explorers_list: list[dict[str, Any]] = []
+
+    results: dict[str, Any] = {
+        "query": args.get("query"),
+        "dashboards": dashboards_list,
+        "views": views_list,
+        "data_explorers": data_explorers_list,
+        "summary": "",
+    }
+
+    # Search dashboards
+    if include_dashboards:
+        dashboards = await finout_client.get_dashboards()
+        matching_dashboards = [d for d in dashboards if query in d.get("name", "").lower()][
+            :max_results
+        ]
+
+        # Enrich with widget details for matching dashboards
+        for dashboard in matching_dashboards:
+            widget_ids = [
+                w["widgetId"] for w in dashboard.get("widgets", [])[:3]
+            ]  # First 3 widgets
+            widgets: list[dict[str, Any]] = []
+            for wid in widget_ids:
+                try:
+                    widget = await finout_client.get_widget(wid)
+                    # Extract useful context from widget
+                    widgets.append(
+                        {
+                            "id": wid,
+                            "name": widget.get("name"),
+                            "filters": widget.get("data", {}).get("query", {}).get("filters"),
+                            "groupBys": widget.get("data", {}).get("query", {}).get("groupBys"),
+                        }
+                    )
+                except Exception:
+                    pass
+
+            dashboards_list.append(
+                {
+                    "id": dashboard["id"],
+                    "name": dashboard["name"],
+                    "widgets": widgets,
+                    "defaultDate": dashboard.get("defaultDate"),
+                }
+            )
+
+    # Search views
+    if include_views:
+        views = await finout_client.get_views()
+        matching_views = [v for v in views if query in v.get("name", "").lower()][:max_results]
+
+        for view in matching_views:
+            views_list.append(
+                {
+                    "id": view["id"],
+                    "name": view["name"],
+                    "type": view.get("type"),
+                    "filters": view.get("data", {}).get("query", {}).get("filters"),
+                    "groupBys": view.get("data", {}).get("query", {}).get("groupBys"),
+                    "date": view.get("data", {}).get("date"),
+                }
+            )
+
+    # Search data explorers
+    if include_data_explorers:
+        explorers = await finout_client.get_data_explorers()
+        matching_explorers = [
+            e
+            for e in explorers
+            if query in e.get("name", "").lower() or query in e.get("description", "").lower()
+        ][:max_results]
+
+        for explorer in matching_explorers:
+            data_explorers_list.append(
+                {
+                    "id": explorer["id"],
+                    "name": explorer["name"],
+                    "description": explorer.get("description"),
+                    "filters": explorer.get("filters"),
+                    "columns": explorer.get("columns"),
+                }
+            )
+
+    # Generate summary
+    total_results = len(dashboards_list) + len(views_list) + len(data_explorers_list)
+    if total_results == 0:
+        results["summary"] = (
+            f"No context found for '{args.get('query')}'. "
+            "Try a different search term or use search_filters to explore available dimensions."
+        )
+    else:
+        results["summary"] = (
+            f"Found {len(dashboards_list)} dashboards, {len(views_list)} views, "
+            f"{len(data_explorers_list)} data explorers related to '{args.get('query')}'"
+        )
+
+    return results
 
 
 # Resource Definitions

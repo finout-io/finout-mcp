@@ -979,3 +979,117 @@ class FinoutClient:
             raise ValueError(
                 "Request timed out after 30 seconds. The API may be slow or unavailable."
             ) from e
+
+    # Context Discovery Methods
+
+    async def get_dashboards(self) -> list[dict[str, Any]]:
+        """
+        Fetch all dashboards for the account.
+
+        Returns:
+            List of dashboard objects with name, widgets, dates, etc.
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured")
+
+        # Fetch account info if needed
+        if self.account_id and not self._account_info:
+            import sys
+
+            print(f"→ Fetching account info for {self.account_id}...", file=sys.stderr)
+            try:
+                self._account_info = await self._fetch_account_info()
+            except Exception as e:
+                print(f"✗ Failed to fetch account info: {e}", file=sys.stderr)
+
+        headers = self._get_internal_headers()
+
+        response = await self.internal_client.get(
+            "/dashboard-service/dashboard",
+            headers=headers,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_widget(self, widget_id: str) -> dict[str, Any]:
+        """
+        Fetch a specific widget by ID.
+
+        Args:
+            widget_id: Widget ID to fetch
+
+        Returns:
+            Widget object with full configuration and query details
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured")
+
+        headers = self._get_internal_headers()
+
+        response = await self.internal_client.get(
+            f"/dashboard-service/widget/{widget_id}",
+            headers=headers,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_views(self) -> list[dict[str, Any]]:
+        """
+        Fetch all views (saved queries) for the account.
+
+        Returns:
+            List of view objects with filters, groupBys, and query config
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured")
+
+        # Fetch account info if needed
+        if self.account_id and not self._account_info:
+            import sys
+
+            print(f"→ Fetching account info for {self.account_id}...", file=sys.stderr)
+            try:
+                self._account_info = await self._fetch_account_info()
+            except Exception as e:
+                print(f"✗ Failed to fetch account info: {e}", file=sys.stderr)
+
+        headers = self._get_internal_headers()
+
+        response = await self.internal_client.get(
+            "/view-service/view",
+            headers=headers,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_data_explorers(self) -> list[dict[str, Any]]:
+        """
+        Fetch all data explorers for the account.
+
+        Returns:
+            List of data explorer objects with columns, filters, aggregations
+        """
+        if not self.internal_client or not self.account_id:
+            raise ValueError("Internal API client and account_id required")
+
+        # Fetch account info if needed
+        if not self._account_info:
+            import sys
+
+            print(f"→ Fetching account info for {self.account_id}...", file=sys.stderr)
+            try:
+                self._account_info = await self._fetch_account_info()
+            except Exception as e:
+                print(f"✗ Failed to fetch account info: {e}", file=sys.stderr)
+
+        # Data explorer service requires sysAdmin role but scopes by accountId parameter
+        headers = self._get_internal_headers()
+        headers["authorized-user-roles"] = "sysAdmin"
+
+        response = await self.internal_client.get(
+            "/data-explorer-service/data-explorer",
+            headers=headers,
+            params={"accountId": self.account_id},  # Required parameter for scoping
+        )
+        response.raise_for_status()
+        return response.json()
