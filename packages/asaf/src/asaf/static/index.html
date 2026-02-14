@@ -1526,8 +1526,12 @@
                     alert('Microphone access denied. Please enable microphone permissions in your browser settings.');
                 } else if (event.error === 'no-speech') {
                     console.log('No speech detected');
+                } else if (event.error === 'network') {
+                    alert('Voice input requires internet connection. The speech recognition service is unavailable.\n\nTry:\n- Check your internet connection\n- Reload the page\n- Use Chrome/Edge browser');
+                } else if (event.error === 'aborted') {
+                    console.log('Speech recognition aborted');
                 } else {
-                    alert(`Voice input error: ${event.error}`);
+                    alert(`Voice input error: ${event.error}\n\nThis feature requires:\n- Chrome, Edge, or Safari browser\n- Internet connection\n- Microphone permissions`);
                 }
             };
 
