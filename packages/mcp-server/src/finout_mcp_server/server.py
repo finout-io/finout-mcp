@@ -1121,16 +1121,35 @@ async def discover_context_impl(args: dict) -> dict:
             for wid in widget_ids:
                 try:
                     widget = await finout_client.get_widget(wid)
-                    # Extract useful context from widget
+                    query_data = widget.get("data", {}).get("query", {})
+
+                    # Extract and simplify filter information
+                    filters = query_data.get("filters", [])
+                    simplified_filters = []
+                    for f in filters:
+                        if isinstance(f, dict):
+                            # Extract key filter details
+                            simplified_filters.append(
+                                {
+                                    "key": f.get("key"),
+                                    "value": f.get("value"),
+                                    "operator": f.get("operator", "eq"),
+                                }
+                            )
+
+                    # Extract groupBys
+                    group_bys = query_data.get("groupBys", [])
+
                     widgets.append(
                         {
-                            "id": wid,
                             "name": widget.get("name"),
-                            "filters": widget.get("data", {}).get("query", {}).get("filters"),
-                            "groupBys": widget.get("data", {}).get("query", {}).get("groupBys"),
+                            "filters": simplified_filters if simplified_filters else None,
+                            "groupBys": group_bys if group_bys else None,
+                            "date": query_data.get("date"),
                         }
                     )
-                except Exception:
+                except Exception as e:
+                    print(f"Error fetching widget {wid}: {e}")
                     pass
 
             dashboards_list.append(
@@ -1179,7 +1198,7 @@ async def discover_context_impl(args: dict) -> dict:
                 }
             )
 
-    # Generate summary
+    # Generate summary with actionable guidance
     total_results = len(dashboards_list) + len(views_list) + len(data_explorers_list)
     if total_results == 0:
         results["summary"] = (
@@ -1187,10 +1206,41 @@ async def discover_context_impl(args: dict) -> dict:
             "Try a different search term or use search_filters to explore available dimensions."
         )
     else:
-        results["summary"] = (
-            f"Found {len(dashboards_list)} dashboards, {len(views_list)} views, "
-            f"{len(data_explorers_list)} data explorers related to '{args.get('query')}'"
-        )
+        summary_parts = [
+            f"Found {len(dashboards_list)} dashboard(s), {len(views_list)} view(s), "
+            f"{len(data_explorers_list)} data explorer(s) for '{args.get('query')}'"
+        ]
+
+        # Extract common filters from discovered context
+        all_filters = []
+        for dashboard in dashboards_list:
+            for widget in dashboard.get("widgets", []):
+                if widget.get("filters"):
+                    all_filters.extend(widget["filters"])
+        for view in views_list:
+            if view.get("filters"):
+                all_filters.extend(view["filters"])
+
+        # Provide actionable guidance
+        if all_filters:
+            filter_summary: dict[str, list[Any]] = {}
+            for f in all_filters:
+                key = f.get("key")
+                if key:
+                    if key not in filter_summary:
+                        filter_summary[key] = []
+                    value = f.get("value")
+                    if value and value not in filter_summary[key]:
+                        filter_summary[key].append(value)
+
+            if filter_summary:
+                summary_parts.append("\n\nCommon filters used:")
+                for key, values in list(filter_summary.items())[:5]:  # Top 5 filters
+                    summary_parts.append(f"  • {key}: {', '.join(map(str, values[:3]))}")
+
+                summary_parts.append("\nTo query costs, use query_costs tool with these filters.")
+
+        results["summary"] = "".join(summary_parts)
 
     return results
 
