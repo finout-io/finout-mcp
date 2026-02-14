@@ -1122,32 +1122,40 @@ async def discover_context_impl(args: dict) -> dict:
                 try:
                     widget = await finout_client.get_widget(wid)
 
-                    # Extract query data from configuration (not data)
-                    query_data = widget.get("configuration", {}).get("query", {})
+                    # Extract configuration (filters are directly under configuration)
+                    config = widget.get("configuration", {})
 
-                    # Extract and simplify filter information
-                    filters = query_data.get("filters", [])
+                    # Extract filter (single object, not array)
+                    filter_obj = config.get("filters", {})
                     simplified_filters = []
-                    for f in filters:
-                        if isinstance(f, dict):
-                            # Extract key filter details
-                            simplified_filters.append(
-                                {
-                                    "key": f.get("key"),
-                                    "value": f.get("value"),
-                                    "operator": f.get("operator", "eq"),
-                                }
-                            )
+                    if filter_obj and isinstance(filter_obj, dict):
+                        simplified_filters.append(
+                            {
+                                "key": filter_obj.get("key"),
+                                "value": filter_obj.get("value"),
+                                "operator": filter_obj.get("operator", "eq"),
+                                "type": filter_obj.get("type"),
+                            }
+                        )
 
-                    # Extract groupBys
-                    group_bys = query_data.get("groupBys", [])
+                    # Extract groupBy (singular, not array)
+                    group_by_obj = config.get("groupBy", {})
+                    group_bys = []
+                    if group_by_obj and isinstance(group_by_obj, dict):
+                        group_bys.append(
+                            {
+                                "key": group_by_obj.get("key"),
+                                "path": group_by_obj.get("path"),
+                                "type": group_by_obj.get("type"),
+                            }
+                        )
 
                     widgets.append(
                         {
                             "name": widget.get("name"),
                             "filters": simplified_filters if simplified_filters else None,
                             "groupBys": group_bys if group_bys else None,
-                            "date": query_data.get("date"),
+                            "date": config.get("date"),
                         }
                     )
                 except Exception as e:
