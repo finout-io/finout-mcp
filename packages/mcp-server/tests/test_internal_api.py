@@ -429,3 +429,27 @@ class TestFinoutClientInternalAPI:
             )
 
         await client.close()
+
+    def test_normalize_cost_center(self):
+        """Test cost center normalization handles various capitalizations"""
+        client = FinoutClient(
+            client_id="test", secret_key="test", internal_api_url="http://localhost:3000"
+        )
+
+        # Test virtualTag normalization (the problematic case)
+        assert client._normalize_cost_center("VIRTUALTAG") == "virtualTag"
+        assert client._normalize_cost_center("virtualtag") == "virtualTag"
+        assert client._normalize_cost_center("VirtualTag") == "virtualTag"
+        assert client._normalize_cost_center("virtualTag") == "virtualTag"
+
+        # Test other known cost centers
+        assert client._normalize_cost_center("AMAZON-CUR") == "amazon-cur"
+        assert client._normalize_cost_center("Amazon-Cur") == "amazon-cur"
+        assert client._normalize_cost_center("KUBERNETES") == "kubernetes"
+        assert client._normalize_cost_center("Kubernetes") == "kubernetes"
+        assert client._normalize_cost_center("GCP") == "gcp"
+        assert client._normalize_cost_center("gcp") == "gcp"
+
+        # Test unknown cost centers (pass through as-is)
+        assert client._normalize_cost_center("unknown-center") == "unknown-center"
+        assert client._normalize_cost_center("CustomCenter") == "CustomCenter"

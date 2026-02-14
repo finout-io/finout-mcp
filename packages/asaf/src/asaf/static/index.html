@@ -57,6 +57,7 @@
             gap: 12px;
             padding-bottom: 15px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            position: relative;
         }
 
         .logo {
@@ -116,6 +117,29 @@
 
         .conversation-search:focus {
             background: rgba(255, 255, 255, 0.2);
+        }
+
+        .new-chat-button {
+            padding: 8px 16px;
+            background: rgba(255, 214, 50, 0.2);
+            border: 1px solid rgba(255, 214, 50, 0.5);
+            border-radius: 6px;
+            color: #FFD632;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: auto;
+            white-space: nowrap;
+        }
+
+        .new-chat-button:hover {
+            background: rgba(255, 214, 50, 0.3);
+            border-color: #FFD632;
+            transform: translateY(-1px);
         }
 
         .conversations-list {
@@ -830,6 +854,9 @@
                         <span class="word">inout</span>
                     </div>
                 </div>
+                <button class="new-chat-button" onclick="startNewChat()">
+                    ✨ New Chat
+                </button>
             </div>
 
             <div class="sidebar-section">
@@ -1812,6 +1839,30 @@
                 const response = await fetch(`/api/conversations/${conversationId}`);
                 const conversation = await response.json();
 
+                // CRITICAL: Validate account mismatch
+                if (conversation.account_id !== currentAccountId) {
+                    const switchAccount = confirm(
+                        `This conversation is for account "${conversation.account_id}" but you have "${currentAccountId}" selected.\n\n` +
+                        `Do you want to switch to "${conversation.account_id}"?`
+                    );
+
+                    if (switchAccount) {
+                        // Find the account in the list
+                        const account = availableAccounts.find(a => a.accountId === conversation.account_id);
+                        if (account) {
+                            await switchAccount(conversation.account_id, account.name);
+                            // Recursively load conversation after switching
+                            await loadConversation(conversationId);
+                            return;
+                        } else {
+                            alert('Cannot switch to that account - account not found');
+                            return;
+                        }
+                    } else {
+                        return; // User declined to switch
+                    }
+                }
+
                 // Clear current chat
                 const chatContainer = document.getElementById('chatContainer');
                 chatContainer.innerHTML = '';
@@ -1834,6 +1885,42 @@
                 console.error('Error loading conversation:', error);
                 alert('Failed to load conversation');
             }
+        }
+
+        function startNewChat() {
+            // Clear current conversation
+            const chatContainer = document.getElementById('chatContainer');
+            chatContainer.innerHTML = `
+                <div class="welcome-message">
+                    <h2>👋 Welcome to ASAF!</h2>
+                    <p>Ask me anything about your cloud costs and I'll help you understand them better.</p>
+                    <div class="example-questions">
+                        <div class="example-question" onclick="askExample('What were my AWS costs last month?')">
+                            💰 What were my AWS costs last month?
+                        </div>
+                        <div class="example-question" onclick="askExample('Compare this week to last week')">
+                            📊 Compare this week to last week
+                        </div>
+                        <div class="example-question" onclick="askExample('Show me my top 5 services by cost')">
+                            🔝 Show me my top 5 services
+                        </div>
+                        <div class="example-question" onclick="askExample('Compare the last 7 days of the last 4 months')">
+                            📈 Last 7 days of last 4 months
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Reset conversation state
+            conversationHistory = [];
+            currentConversationId = null;
+
+            // Clear message input
+            const messageInput = document.getElementById('messageInput');
+            messageInput.value = '';
+
+            // Refresh conversations list (to deselect current)
+            renderConversations();
         }
 
         async function autoSaveConversation() {

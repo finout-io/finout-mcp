@@ -734,12 +734,12 @@ class FinoutClient:
             List of filter values (truncated to limit)
 
         Note:
-            cost_center will be automatically normalized to lowercase for consistency
-            (e.g., "AMAZON-CUR" becomes "amazon-cur")
+            cost_center will be automatically normalized to correct capitalization
+            (e.g., "VIRTUALTAG" becomes "virtualTag", "AMAZON-CUR" becomes "amazon-cur")
         """
-        # Normalize cost_center to lowercase to handle case sensitivity issues
+        # Normalize cost_center to correct capitalization
         if cost_center:
-            cost_center = cost_center.lower()
+            cost_center = self._normalize_cost_center(cost_center)
 
         return await self.filter_cache.get_filter_values(
             filter_key, cost_center, filter_type, date, limit, use_cache
@@ -764,15 +764,46 @@ class FinoutClient:
         """
         from .filter_utils import search_filters_by_keyword
 
-        # Normalize cost_center to lowercase for consistency
+        # Normalize cost_center to correct capitalization
         if cost_center:
-            cost_center = cost_center.lower()
+            cost_center = self._normalize_cost_center(cost_center)
 
         # Get metadata
         metadata = await self.get_filters_metadata()
 
         # Search using utility function
         return search_filters_by_keyword(metadata, query, cost_center, limit)
+
+    def _normalize_cost_center(self, cost_center: str) -> str:
+        """
+        Normalize cost center names to correct capitalization.
+        The Finout API is case-sensitive, so we need exact matches.
+
+        Args:
+            cost_center: Cost center name in any case
+
+        Returns:
+            Properly capitalized cost center name
+        """
+        # Mapping of lowercase to correct capitalization
+        known_cost_centers = {
+            "virtualtag": "virtualTag",  # NOT "VIRTUALTAG"
+            "amazon-cur": "amazon-cur",
+            "kubernetes": "kubernetes",
+            "gcp": "gcp",
+            "azure": "azure",
+            "datadog": "datadog",
+            "snowflake": "snowflake",
+            "mongodb": "mongodb",
+            "confluent": "confluent",
+            "databricks": "databricks",
+        }
+
+        # Normalize to lowercase for lookup
+        normalized = cost_center.lower()
+
+        # Return known mapping or original if unknown
+        return known_cost_centers.get(normalized, cost_center)
 
     def _build_filter_payload(self, filters: list[dict[str, Any]]) -> dict[str, Any]:
         """
@@ -829,9 +860,9 @@ class FinoutClient:
                 if field not in f:
                     raise ValueError(f"Filter missing required field '{field}': {f}")
 
-            # Build filter in correct format
+            # Build filter in correct format (normalize costCenter for API)
             formatted_filter = {
-                "costCenter": f["costCenter"],
+                "costCenter": self._normalize_cost_center(f["costCenter"]),
                 "key": f["key"],
                 "path": f["path"],
                 "type": f.get("type", "col"),
@@ -889,9 +920,10 @@ class FinoutClient:
         group_by: list[str] | None = None,
         x_axis_group_by: str | None = None,
         cost_type: CostType = CostType.NET_AMORTIZED,
+        usage_configuration: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Query costs using internal API with flexible filters.
+        Query costs/usage using internal API with flexible filters.
 
         Args:
             time_period: Time period string (e.g., 'last_30_days')
@@ -899,24 +931,31 @@ class FinoutClient:
             group_by: List of dimensions to group by
             x_axis_group_by: X-axis grouping (e.g., "daily", "monthly")
             cost_type: Type of cost metric to retrieve
+            usage_configuration: Usage config for querying usage instead of cost
+                Example: {"usageType": "usageAmount", "costCenter": "amazon-cur", "units": "Hrs"}
 
         Returns:
-            Cost query results
+            Cost/usage query results
 
         Raises:
             ValueError: If internal API not configured or invalid parameters
             httpx.HTTPStatusError: If API request fails
             httpx.TimeoutException: If request times out
 
-        Example:
+        Example (cost query):
             await client.query_costs_with_filters(
                 time_period="last_month",
                 filters=[
-                    {"key": "service", "value": ["ec2"], "operator": "eq"},
-                    {"key": "region", "value": ["us-east-1"], "operator": "eq"}
+                    {"key": "service", "value": ["ec2"], "operator": "eq"}
                 ],
-                group_by=["account", "service"],
                 x_axis_group_by="daily",
+            )
+
+        Example (usage query):
+            await client.query_costs_with_filters(
+                time_period="last_month",
+                filters=[{"key": "service", "value": ["ec2"], "operator": "eq"}],
+                usage_configuration={"usageType": "usageAmount", "costCenter": "amazon-cur", "units": "Hrs"}
             )
         """
         if not self.internal_client:
@@ -943,13 +982,27 @@ class FinoutClient:
             if group_by:
                 if not isinstance(group_by, list):
                     raise ValueError("group_by must be a list")
-                # group_by should be list of dicts with costCenter, key, path, type
-                payload["groupBys"] = group_by  # Note: plural "groupBys"
+                # Normalize costCenter in group_by items
+                normalized_group_by = []
+                for group in group_by:
+                    if isinstance(group, dict) and "costCenter" in group:
+                        normalized_group = {**group}
+                        normalized_group["costCenter"] = self._normalize_cost_center(
+                            group["costCenter"]
+                        )
+                        normalized_group_by.append(normalized_group)
+                    else:
+                        normalized_group_by.append(group)
+                payload["groupBys"] = normalized_group_by  # Note: plural "groupBys"
 
             if x_axis_group_by:
                 if x_axis_group_by not in ["daily", "monthly"]:
                     raise ValueError("x_axis_group_by must be 'daily' or 'monthly'")
                 payload["xAxisGroupBy"] = x_axis_group_by
+
+            # Add usage configuration if provided (for usage queries instead of cost)
+            if usage_configuration:
+                payload["usageConfiguration"] = usage_configuration
 
             # Call internal cost API
             response = await self.internal_client.post(
@@ -960,7 +1013,26 @@ class FinoutClient:
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 401:
+            if e.response.status_code == 400:
+                # Parse error response to help Claude understand what's wrong
+                try:
+                    error_body = e.response.json()
+                    error_msg = (
+                        error_body.get("message") or error_body.get("error") or str(error_body)
+                    )
+                except Exception:
+                    error_msg = e.response.text or "Invalid request"
+
+                raise ValueError(
+                    f"Bad request (400): {error_msg}\n\n"
+                    f"This usually means:\n"
+                    f"- Invalid filter values (check filter values exist in the account)\n"
+                    f"- Wrong operator (try 'eq' instead of 'is')\n"
+                    f"- Missing required fields\n"
+                    f"- Invalid time period format\n\n"
+                    f"Suggestion: Try querying without filters first to test the time period."
+                ) from e
+            elif e.response.status_code == 401:
                 raise ValueError(
                     "Authentication failed. Check your FINOUT_CLIENT_ID and FINOUT_SECRET_KEY."
                 ) from e
@@ -978,6 +1050,75 @@ class FinoutClient:
         except httpx.TimeoutException as e:
             raise ValueError(
                 "Request timed out after 30 seconds. The API may be slow or unavailable."
+            ) from e
+
+    async def get_usage_unit_types(
+        self,
+        time_period: str = "last_30_days",
+        filters: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, str]]:
+        """
+        Discover available usage unit types for a cost center.
+
+        Args:
+            time_period: Time period for discovery
+            filters: Filters to narrow down cost center (e.g., filter by cost_center_type)
+
+        Returns:
+            List of available units with costCenter
+            Example: [{"costCenter": "GCP", "units": "Hour"}, {"costCenter": "GCP", "units": "Gibibyte"}]
+
+        Raises:
+            ValueError: If internal API not configured
+            httpx.HTTPStatusError: If API request fails
+        """
+        if not self.internal_client:
+            raise ValueError(
+                "Internal API client not configured. Set FINOUT_INTERNAL_API_URL "
+                "environment variable to your cost-service endpoint."
+            )
+
+        # Get headers
+        headers = self._get_internal_headers()
+
+        try:
+            # Build payload
+            payload: dict[str, Any] = {
+                "date": self._build_date_payload(time_period),
+                "groupBy": {},
+            }
+
+            # Add filters if provided
+            if filters:
+                payload["filters"] = self._build_filter_payload(filters)
+
+            # Call usage unit types endpoint
+            response = await self.internal_client.post(
+                "/cost-service/usage-unit-types",
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()
+
+            return response.json()
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 400:
+                try:
+                    error_body = e.response.json()
+                    error_msg = (
+                        error_body.get("message") or error_body.get("error") or str(error_body)
+                    )
+                except Exception:
+                    error_msg = e.response.text or "Invalid request"
+
+                raise ValueError(f"Failed to fetch usage units: {error_msg}") from e
+            else:
+                raise
+
+        except httpx.TimeoutException as e:
+            raise ValueError(
+                "Request timed out. The usage-unit-types API may be slow or unavailable."
             ) from e
 
     # Context Discovery Methods

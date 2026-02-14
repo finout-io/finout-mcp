@@ -85,7 +85,21 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="query_costs",
             description=(
-                "Query cloud costs with flexible filters and grouping.\n\n"
+                "Query cloud costs AND usage with flexible filters and grouping.\n\n"
+                "⚠️ COST + USAGE IN ONE QUERY:\n"
+                "- Cost is ALWAYS returned in results\n"
+                "- To ALSO get usage: Provide usage_configuration\n"
+                "- When usage_configuration has 'units', results include BOTH cost AND usage\n"
+                "- No need for separate queries - get cost and usage together!\n\n"
+                "USAGE CONFIGURATION:\n"
+                "- usageType: 'usageAmount' (raw usage) OR 'normalizedUsageAmount' (normalized across resources)\n"
+                "- costCenter: Cost center name (e.g., 'amazon-cur', 'Azure', 'GCP')\n"
+                "- units: Unit type (discover with get_usage_unit_types tool)\n\n"
+                "USAGE EXAMPLES:\n"
+                '- AWS EC2 hours: {"usageType": "usageAmount", "costCenter": "amazon-cur", "units": "Hrs"}\n'
+                '- Azure hours: {"usageType": "usageAmount", "costCenter": "Azure", "units": "1 Hour"}\n'
+                '- GCP hours: {"usageType": "usageAmount", "costCenter": "GCP", "units": "Hour"}\n'
+                '- Normalized: {"usageType": "normalizedUsageAmount", "costCenter": "amazon-cur", "units": "Hrs"}\n\n'
                 "WORKFLOW:\n"
                 "1) Use search_filters to find relevant filters (e.g., search_filters('service'))\n"
                 "2) Copy the FULL filter object from search results (costCenter, key, path, type)\n"
@@ -217,6 +231,39 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "enum": ["daily", "monthly"],
                         "description": "Optional: Time-based grouping for x-axis",
+                    },
+                    "usage_configuration": {
+                        "type": "object",
+                        "properties": {
+                            "usageType": {
+                                "type": "string",
+                                "description": (
+                                    "Usage type:\n"
+                                    "- 'usageAmount': Raw usage quantity (default)\n"
+                                    "- 'normalizedUsageAmount': Normalized usage for cross-resource comparison"
+                                ),
+                                "enum": ["usageAmount", "normalizedUsageAmount"],
+                                "default": "usageAmount",
+                            },
+                            "costCenter": {
+                                "type": "string",
+                                "description": "Cost center for usage (e.g., 'amazon-cur' for AWS, 'Azure', 'GCP')",
+                            },
+                            "units": {
+                                "type": "string",
+                                "description": (
+                                    "Units for usage - use get_usage_unit_types to discover valid units.\n"
+                                    "Examples: 'Hrs', '1 Hour', 'Hour', 'Gibibyte', 'Count', 'Gibibyte month'"
+                                ),
+                            },
+                        },
+                        "required": ["usageType", "costCenter", "units"],
+                        "description": (
+                            "Optional: Usage configuration for querying usage ALONG WITH cost. "
+                            "When provided with 'units', results include BOTH cost AND usage data. "
+                            'Example: {"usageType": "usageAmount", "costCenter": "amazon-cur", "units": "Hrs"} '
+                            "returns both EC2 cost AND hours used in the same query."
+                        ),
                     },
                 },
                 "required": ["time_period"],
@@ -487,6 +534,76 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="get_usage_unit_types",
+            description=(
+                "Discover available usage units for a cost center (AWS, Azure, GCP, etc.).\n\n"
+                "Use this BEFORE creating usage queries to find valid unit types.\n\n"
+                "WORKFLOW:\n"
+                "1. Call this tool to discover units for a cost center\n"
+                "2. Pick a unit from the results (e.g., 'Hour', 'Gibibyte', 'Count')\n"
+                "3. Use it in query_costs with usage_configuration\n\n"
+                "EXAMPLES:\n\n"
+                "Find AWS usage units:\n"
+                "get_usage_unit_types(\n"
+                "  filters=[{\n"
+                "    'costCenter': 'global',\n"
+                "    'key': 'cost_center_type',\n"
+                "    'path': 'Global/Cost Center',\n"
+                "    'type': 'col',\n"
+                "    'operator': 'is',\n"
+                "    'value': 'AWS'\n"
+                "  }]\n"
+                ")\n"
+                "→ Returns: [{'costCenter': 'amazon-cur', 'units': 'Hrs'}, ...]\n\n"
+                "Find GCP usage units:\n"
+                "get_usage_unit_types(\n"
+                "  filters=[{\n"
+                "    'costCenter': 'global',\n"
+                "    'key': 'cost_center_type',\n"
+                "    'path': 'Global/Cost Center',\n"
+                "    'type': 'col',\n"
+                "    'operator': 'is',\n"
+                "    'value': 'GCP'\n"
+                "  }]\n"
+                ")\n"
+                "→ Returns: [{'costCenter': 'GCP', 'units': 'Hour'}, {'costCenter': 'GCP', 'units': 'Gibibyte'}, ...]"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "time_period": {
+                        "type": "string",
+                        "description": "Time period for discovery (default: last_30_days)",
+                        "default": "last_30_days",
+                    },
+                    "filters": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "costCenter": {"type": "string"},
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                                "type": {"type": "string"},
+                                "operator": {"type": "string"},
+                                "value": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ]
+                                },
+                            },
+                            "required": ["costCenter", "key", "path", "type", "value"],
+                        },
+                        "description": (
+                            "Filters to narrow down cost center. "
+                            "Use cost_center_type filter to get units for AWS/GCP/Azure/etc."
+                        ),
+                    },
+                },
+            },
+        ),
+        Tool(
             name="discover_context",
             description=(
                 "Search for how the account organizes cost/usage data related to a query.\n\n"
@@ -582,6 +699,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await search_filters_impl(arguments)
         elif name == "get_filter_values":
             result = await get_filter_values_impl(arguments)
+        elif name == "get_usage_unit_types":
+            result = await get_usage_unit_types_impl(arguments)
         elif name == "debug_filters":
             result = await debug_filters_impl(arguments)
         elif name == "discover_context":
@@ -642,6 +761,7 @@ async def query_costs_impl(args: dict) -> dict:
     filters = args.get("filters", [])
     group_by = args.get("group_by")
     x_axis_group_by = args.get("x_axis_group_by")
+    usage_configuration = args.get("usage_configuration")
 
     # Check if internal API is configured
     if not finout_client.internal_api_url:
@@ -699,6 +819,7 @@ async def query_costs_impl(args: dict) -> dict:
         filters=filters if filters else None,
         group_by=group_by,
         x_axis_group_by=x_axis_group_by,
+        usage_configuration=usage_configuration,
     )
 
     # Summarize to avoid context overload
@@ -1082,6 +1203,43 @@ async def get_filter_values_impl(args: dict) -> dict:
             "returned_count": truncated["returned_count"],
             "is_truncated": truncated["is_truncated"],
         },
+    }
+
+
+async def get_usage_unit_types_impl(args: dict) -> dict:
+    """Implementation of get_usage_unit_types tool"""
+    assert finout_client is not None
+
+    time_period = args.get("time_period", "last_30_days")
+    filters = args.get("filters", [])
+
+    # Check if internal API is configured
+    if not finout_client.internal_api_url:
+        return {
+            "error": "Internal API not configured",
+            "message": (
+                "This tool requires the internal cost-service API. "
+                "Set FINOUT_INTERNAL_API_URL environment variable."
+            ),
+        }
+
+    # Get usage unit types
+    units = await finout_client.get_usage_unit_types(
+        time_period=time_period, filters=filters if filters else None
+    )
+
+    # Format response
+    return {
+        "usage_units": units,
+        "count": len(units),
+        "summary": f"Found {len(units)} usage unit types",
+        "examples": [
+            f"Use in query_costs: usage_configuration={{"
+            f'"usageType": "usageAmount", '
+            f'"costCenter": "{unit["costCenter"]}", '
+            f'"units": "{unit["units"]}"}}'
+            for unit in units[:3]  # Show first 3 examples
+        ],
     }
 
 
