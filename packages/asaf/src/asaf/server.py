@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from pathlib import Path
+from .db import db
 
 # Load .env from package directory
 package_root = Path(__file__).parent.parent.parent
@@ -197,18 +198,26 @@ _last_account_file = package_root / ".last_account"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage MCP server lifecycle"""
+    """Manage MCP server and database lifecycle"""
     global mcp_bridge
 
     # Startup - create bridge but don't start MCP yet
     # MCP will be started when user selects an account
     mcp_bridge = MCPBridge()
 
+    # Initialize database connection
+    await db.connect()
+    print("Database connected")
+
     yield
 
     # Shutdown
     if mcp_bridge:
         await mcp_bridge.stop()
+
+    # Close database connection
+    await db.disconnect()
+    print("Database disconnected")
 
 # Create FastAPI app
 app = FastAPI(title="ASAF - Ask the Super AI of Finout", lifespan=lifespan)
@@ -527,6 +536,96 @@ async def switch_account(request: dict):
         "account_id": account_id,
         "message": f"Switched to account {account_id}"
     }
+
+# Conversation Management Endpoints
+
+@app.post("/api/conversations/save")
+async def save_conversation(request: dict):
+    """Save a conversation for later retrieval"""
+    try:
+        name = request.get("name")
+        account_id = request.get("account_id")
+        model = request.get("model")
+        messages = request.get("messages")
+        tool_calls = request.get("tool_calls")
+
+        if not all([name, account_id, model, messages]):
+            raise HTTPException(status_code=400, detail="Missing required fields")
+
+        conversation = await db.save_conversation(
+            name=name,
+            account_id=account_id,
+            model=model,
+            messages=messages,
+            tool_calls=tool_calls,
+        )
+
+        return {
+            "success": True,
+            "conversation_id": str(conversation["id"]),
+            "share_token": conversation["share_token"],
+        }
+
+    except Exception as e:
+        print(f"Error saving conversation: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/conversations/list")
+async def list_conversations(account_id: Optional[str] = None, search: Optional[str] = None):
+    """List saved conversations with optional filtering"""
+    try:
+        conversations = await db.list_conversations(account_id=account_id, search=search)
+        return {"conversations": conversations}
+    except Exception as e:
+        print(f"Error listing conversations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/conversations/{conversation_id}")
+async def get_conversation(conversation_id: str):
+    """Get a conversation by ID"""
+    try:
+        conversation = await db.get_conversation(conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return conversation
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/conversations/{conversation_id}/note")
+async def update_conversation_note(conversation_id: str, request: dict):
+    """Update user note for a conversation"""
+    try:
+        note = request.get("note", "")
+        success = await db.update_note(conversation_id, note)
+
+        if not success:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error updating note: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/share/{share_token}")
+async def get_shared_conversation(share_token: str):
+    """Get a conversation by share token (for public sharing)"""
+    try:
+        conversation = await db.get_conversation_by_token(share_token)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Shared conversation not found")
+        return conversation
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting shared conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 def main():
     """Main entry point for ASAF server"""
