@@ -33,14 +33,15 @@
         }
 
         .sidebar {
-            width: 220px;
+            width: 350px;
             background: #38B28E; /* Finout teal */
             color: white;
-            padding: 30px 20px;
+            padding: 20px;
             display: flex;
             flex-direction: column;
-            gap: 30px;
+            gap: 15px;
             flex-shrink: 0;
+            overflow: hidden;
         }
 
         .main-content {
@@ -51,36 +52,41 @@
         }
 
         .sidebar-header {
-            text-align: center;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
         }
 
         .logo {
-            font-size: 48px;
-            margin-bottom: 15px;
+            font-size: 40px;
+            flex-shrink: 0;
         }
 
         .asaf-acronym {
             display: flex;
             flex-direction: column;
-            gap: 3px;
+            gap: 2px;
+            flex: 1;
         }
 
         .acronym-line {
             display: flex;
             align-items: center;
-            gap: 8px;
-            line-height: 1.3;
+            gap: 6px;
+            line-height: 1.2;
         }
 
         .acronym-line .letter {
-            font-size: 18px;
+            font-size: 14px;
             font-weight: 700;
             color: #FFD632; /* Finout yellow */
-            min-width: 16px;
+            min-width: 12px;
         }
 
         .acronym-line .word {
-            font-size: 13px;
+            font-size: 11px;
             font-weight: 400;
             opacity: 0.95;
         }
@@ -91,6 +97,93 @@
 
         .sidebar-footer {
             margin-top: auto;  /* Push to bottom */
+        }
+
+        .conversation-search {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 6px;
+            color: white;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .conversation-search::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .conversation-search:focus {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .conversations-list {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+            margin: 0 -5px;
+            padding: 0 5px;
+        }
+
+        .conversations-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .conversations-list::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+
+        .conversations-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+        }
+
+        .conversations-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        .conversation-item {
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .conversation-item:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateX(3px);
+        }
+
+        .conversation-item.active {
+            background: rgba(255, 214, 50, 0.3);
+            border-left: 3px solid #FFD632;
+        }
+
+        .conversation-title {
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 4px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .conversation-meta {
+            font-size: 11px;
+            opacity: 0.7;
+        }
+
+        .conversations-empty {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            opacity: 0.6;
         }
 
         .account-label {
@@ -765,10 +858,22 @@
                 </div>
             </div>
 
+            <div class="sidebar-section">
+                <div class="account-label">Conversations</div>
+                <input
+                    type="text"
+                    id="conversationSearch"
+                    class="conversation-search"
+                    placeholder="Search conversations..."
+                    oninput="filterConversations()"
+                />
+            </div>
+
+            <div class="conversations-list" id="conversationsList">
+                <div class="conversations-empty">No conversations yet</div>
+            </div>
+
             <div class="sidebar-footer">
-                <button class="export-button" onclick="saveConversation(event)">
-                    💾 Save Conversation
-                </button>
                 <button class="export-button" onclick="exportConversation(event)">
                     📋 Export Chat
                 </button>
@@ -1112,6 +1217,9 @@
                 // Update conversation history
                 conversationHistory.push({role: 'user', content: message});
                 conversationHistory.push({role: 'assistant', content: data.response});
+
+                // Auto-save conversation
+                await autoSaveConversation();
 
             } catch (error) {
                 hideTypingIndicator();
@@ -1473,6 +1581,10 @@
 
                 // Clear conversation history
                 conversationHistory = [];
+                currentConversationId = null;
+
+                // Load conversations for new account
+                await loadConversations();
 
                 // Clear chat
                 const chatContainer = document.getElementById('chatContainer');
@@ -1652,6 +1764,110 @@
             }
         }
 
+        // Conversation management
+        let allConversations = [];
+        let currentConversationId = null;
+
+        async function loadConversations() {
+            try {
+                const response = await fetch(`/api/conversations/list?account_id=${currentAccountId}`);
+                const data = await response.json();
+                allConversations = data.conversations || [];
+                renderConversations();
+            } catch (error) {
+                console.error('Error loading conversations:', error);
+            }
+        }
+
+        function renderConversations() {
+            const container = document.getElementById('conversationsList');
+            const searchTerm = document.getElementById('conversationSearch').value.toLowerCase();
+
+            const filtered = allConversations.filter(conv =>
+                conv.name.toLowerCase().includes(searchTerm)
+            );
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="conversations-empty">No conversations found</div>';
+                return;
+            }
+
+            container.innerHTML = filtered.map(conv => `
+                <div class="conversation-item ${conv.id === currentConversationId ? 'active' : ''}"
+                     onclick="loadConversation('${conv.id}')">
+                    <div class="conversation-title">${conv.name}</div>
+                    <div class="conversation-meta">
+                        ${new Date(conv.created_at).toLocaleDateString()} • ${conv.message_count} messages
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function filterConversations() {
+            renderConversations();
+        }
+
+        async function loadConversation(conversationId) {
+            try {
+                const response = await fetch(`/api/conversations/${conversationId}`);
+                const conversation = await response.json();
+
+                // Clear current chat
+                const chatContainer = document.getElementById('chatContainer');
+                chatContainer.innerHTML = '';
+
+                // Load messages
+                conversation.messages.forEach(msg => {
+                    if (msg.role === 'user' && typeof msg.content === 'string') {
+                        addMessage('user', msg.content);
+                    } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
+                        addMessage('assistant', msg.content);
+                    }
+                });
+
+                // Update conversation history
+                conversationHistory = conversation.messages;
+                currentConversationId = conversationId;
+                renderConversations();
+
+            } catch (error) {
+                console.error('Error loading conversation:', error);
+                alert('Failed to load conversation');
+            }
+        }
+
+        async function autoSaveConversation() {
+            // Only save if we have messages and an account selected
+            if (conversationHistory.length === 0 || !currentAccountId) return;
+
+            // Generate title from first user message
+            const firstUserMessage = conversationHistory.find(m => m.role === 'user' && typeof m.content === 'string');
+            const title = firstUserMessage ?
+                (firstUserMessage.content.substring(0, 60) + (firstUserMessage.content.length > 60 ? '...' : '')) :
+                'Conversation';
+
+            try {
+                const response = await fetch('/api/conversations/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: title,
+                        account_id: currentAccountId,
+                        model: currentModel,
+                        messages: conversationHistory,
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentConversationId = data.conversation_id;
+                    await loadConversations(); // Refresh list
+                }
+            } catch (error) {
+                console.error('Error auto-saving conversation:', error);
+            }
+        }
+
         // Focus input on load and load accounts
         window.onload = async () => {
             const input = document.getElementById('messageInput');
@@ -1666,7 +1882,11 @@
                 const shareToken = hash.substring(7);
                 await loadSharedConversation(shareToken);
             } else {
-                loadAccounts();
+                await loadAccounts();
+                // Load conversations after account is selected
+                if (currentAccountId) {
+                    await loadConversations();
+                }
             }
         };
 
