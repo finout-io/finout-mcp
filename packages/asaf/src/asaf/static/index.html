@@ -1178,6 +1178,27 @@
             }
         }
 
+        async function autoStartMCP(accountId, accountName) {
+            // Silently start MCP server with the account (no UI feedback)
+            try {
+                const response = await fetch('/api/switch-account', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        account_id: accountId
+                    })
+                });
+
+                if (!response.ok) {
+                    console.warn('Failed to auto-start MCP for account:', accountName);
+                }
+            } catch (error) {
+                console.error('Error auto-starting MCP:', error);
+            }
+        }
+
         async function loadAccounts() {
             try {
                 const response = await fetch('/api/accounts');
@@ -1196,6 +1217,9 @@
                         const accountName = currentAccount.accountName || currentAccount.name || currentAccount.accountId;
                         input.value = accountName;
                         input.placeholder = 'Select account';
+
+                        // Auto-start MCP with last selected account
+                        await autoStartMCP(currentAccountId, accountName);
                     } else {
                         // No current account found, show first account or placeholder
                         if (allAccounts.length > 0) {
@@ -1204,6 +1228,9 @@
                             input.value = accountName;
                             input.placeholder = 'Select account';
                             currentAccountId = firstAccount.accountId;
+
+                            // Auto-start MCP with first account
+                            await autoStartMCP(currentAccountId, accountName);
                         } else {
                             input.placeholder = 'Select account';
                         }
