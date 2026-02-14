@@ -1122,15 +1122,8 @@ async def discover_context_impl(args: dict) -> dict:
                 try:
                     widget = await finout_client.get_widget(wid)
 
-                    # Debug: Print widget structure to understand the schema
-                    import sys
-
-                    print(f"\n[DEBUG] Widget {wid} structure:", file=sys.stderr)
-                    print(f"Keys: {list(widget.keys())}", file=sys.stderr)
-                    if "data" in widget:
-                        print(f"Data keys: {list(widget.get('data', {}).keys())}", file=sys.stderr)
-
-                    query_data = widget.get("data", {}).get("query", {})
+                    # Extract query data from configuration (not data)
+                    query_data = widget.get("configuration", {}).get("query", {})
 
                     # Extract and simplify filter information
                     filters = query_data.get("filters", [])
@@ -1181,14 +1174,18 @@ async def discover_context_impl(args: dict) -> dict:
         matching_views = [v for v in views if query in v.get("name", "").lower()][:max_results]
 
         for view in matching_views:
+            # Try configuration first, fallback to data for backwards compatibility
+            config = view.get("configuration") or view.get("data", {})
+            query = config.get("query", {})
+
             views_list.append(
                 {
                     "id": view["id"],
                     "name": view["name"],
                     "type": view.get("type"),
-                    "filters": view.get("data", {}).get("query", {}).get("filters"),
-                    "groupBys": view.get("data", {}).get("query", {}).get("groupBys"),
-                    "date": view.get("data", {}).get("date"),
+                    "filters": query.get("filters"),
+                    "groupBys": query.get("groupBys"),
+                    "date": config.get("date"),
                 }
             )
 
