@@ -269,6 +269,25 @@ async def root():
     """Serve the web UI"""
     return HTMLResponse(content=open(os.path.join(os.path.dirname(__file__), "static", "index.html")).read())
 
+@app.get("/share/{share_token}")
+async def share_view(share_token: str):
+    """Serve the share view page"""
+    # For now, redirect to main page with token in hash
+    # Frontend will load the shared conversation
+    return HTMLResponse(content=f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta http-equiv="refresh" content="0;url=/#share={share_token}">
+        <title>Shared Conversation - ASAF</title>
+    </head>
+    <body>
+        <p>Loading shared conversation...</p>
+    </body>
+    </html>
+    """)
+
 @app.get("/api/health")
 async def health():
     """Health check endpoint"""

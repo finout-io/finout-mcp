@@ -766,6 +766,9 @@
             </div>
 
             <div class="sidebar-footer">
+                <button class="export-button" onclick="saveConversation(event)">
+                    💾 Save Conversation
+                </button>
                 <button class="export-button" onclick="exportConversation(event)">
                     📋 Export Chat
                 </button>
@@ -1187,6 +1190,66 @@
             });
         }
 
+        async function saveConversation(event) {
+            // Check if there's a conversation to save
+            if (conversationHistory.length === 0) {
+                alert('No conversation to save!');
+                return;
+            }
+
+            // Prompt for conversation name
+            const name = prompt('Enter a name for this conversation:', `Conversation ${new Date().toLocaleDateString()}`);
+            if (!name) return; // User cancelled
+
+            try {
+                const response = await fetch('/api/conversations/save', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        account_id: currentAccountId,
+                        model: currentModel,
+                        messages: conversationHistory,
+                        tool_calls: currentToolCalls,
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to save conversation');
+                }
+
+                const data = await response.json();
+
+                // Show success with share link
+                const shareUrl = `${window.location.origin}/share/${data.share_token}`;
+                const message = `✅ Conversation saved!\n\nShare link (copied to clipboard):\n${shareUrl}`;
+
+                // Copy share link to clipboard
+                navigator.clipboard.writeText(shareUrl).then(() => {
+                    alert(message);
+
+                    // Visual feedback on button
+                    const btn = event.target;
+                    const originalText = btn.textContent;
+                    btn.textContent = '✅ Saved!';
+                    btn.style.background = 'rgba(56, 178, 142, 0.3)'; // Green highlight
+
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = '';
+                    }, 2000);
+                }).catch(() => {
+                    alert(message + '\n\n(Failed to copy to clipboard)');
+                });
+
+            } catch (error) {
+                console.error('Error saving conversation:', error);
+                alert('Failed to save conversation: ' + error.message);
+            }
+        }
+
         // Account management
         let currentAccountId = null;
         let allAccounts = [];
@@ -1590,15 +1653,69 @@
         }
 
         // Focus input on load and load accounts
-        window.onload = () => {
+        window.onload = async () => {
             const input = document.getElementById('messageInput');
             input.focus();
 
             // Add auto-resize listener
             input.addEventListener('input', autoResizeTextarea);
 
-            loadAccounts();
+            // Check if loading a shared conversation
+            const hash = window.location.hash;
+            if (hash.startsWith('#share=')) {
+                const shareToken = hash.substring(7);
+                await loadSharedConversation(shareToken);
+            } else {
+                loadAccounts();
+            }
         };
+
+        async function loadSharedConversation(shareToken) {
+            try {
+                const response = await fetch(`/api/share/${shareToken}`);
+                if (!response.ok) {
+                    throw new Error('Shared conversation not found');
+                }
+
+                const conversation = await response.json();
+
+                // Clear current chat
+                const chatContainer = document.getElementById('chatContainer');
+                chatContainer.innerHTML = '';
+
+                // Add header showing this is a shared conversation
+                const header = document.createElement('div');
+                header.style.cssText = 'background: #FFD632; padding: 15px; margin-bottom: 20px; border-radius: 8px; text-align: center;';
+                header.innerHTML = `
+                    <strong>📤 Shared Conversation</strong><br>
+                    <span style="font-size: 14px;">${conversation.name}</span><br>
+                    <span style="font-size: 12px; color: #666;">
+                        Shared on ${new Date(conversation.created_at).toLocaleString()}
+                    </span>
+                `;
+                chatContainer.appendChild(header);
+
+                // Render conversation messages
+                conversation.messages.forEach(msg => {
+                    if (msg.role === 'user' && typeof msg.content === 'string') {
+                        addMessage('user', msg.content);
+                    } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
+                        addMessage('assistant', msg.content);
+                    }
+                });
+
+                // Disable input for shared view
+                document.getElementById('messageInput').disabled = true;
+                document.getElementById('sendButton').disabled = true;
+                document.getElementById('micButton').disabled = true;
+                document.getElementById('messageInput').placeholder = 'Viewing shared conversation (read-only)';
+
+            } catch (error) {
+                console.error('Error loading shared conversation:', error);
+                alert('Failed to load shared conversation');
+                loadAccounts(); // Fallback to normal mode
+            }
+        }
     </script>
 </body>
 </html>
