@@ -216,9 +216,7 @@ def format_search_results(results: list[dict[str, Any]], max_results: int = 50) 
             value_count = result.get("value_count", 0)
 
             lines.append(
-                f"{i}. **{key}** "
-                f"[{cost_center.upper()}] "
-                f"- path: `{path}` ({value_count} values)"
+                f"{i}. **{key}** [{cost_center.upper()}] - path: `{path}` ({value_count} values)"
             )
 
     # Then columns (standard filters)
@@ -231,9 +229,7 @@ def format_search_results(results: list[dict[str, Any]], max_results: int = 50) 
             value_count = result.get("value_count", 0)
 
             lines.append(
-                f"{i}. **{key}** "
-                f"[{cost_center.upper()}] "
-                f"- path: `{path}` ({value_count} values)"
+                f"{i}. **{key}** [{cost_center.upper()}] - path: `{path}` ({value_count} values)"
             )
 
     # Any other types

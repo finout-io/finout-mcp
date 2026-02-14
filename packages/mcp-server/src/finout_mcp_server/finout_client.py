@@ -64,6 +64,17 @@ class FinoutClient:
         self.internal_api_url = internal_api_url or os.getenv("FINOUT_INTERNAL_API_URL")
         self.account_id = account_id or os.getenv("FINOUT_ACCOUNT_ID")
 
+        # Log account initialization
+        import sys
+
+        if self.account_id:
+            print(f"✓ MCP initialized with account: {self.account_id}", file=sys.stderr)
+        else:
+            print(
+                "✗ WARNING: MCP started without account_id! Cross-account data leak possible!",
+                file=sys.stderr,
+            )
+
         if not self.client_id or not self.secret_key:
             if not allow_missing_credentials:
                 raise ValueError(
@@ -81,16 +92,12 @@ class FinoutClient:
         self.client = httpx.AsyncClient(base_url=self.base_url, headers=headers, timeout=30.0)
 
         self.internal_client: httpx.AsyncClient | None
+        self._account_info: dict[str, Any] | None = None
+
         if self.internal_api_url:
-            # Internal API requires additional authorization headers
-            internal_headers = headers.copy()
-            internal_headers["authorized-user-roles"] = "sysAdmin"
-
-            if self.account_id:
-                internal_headers["authorized-account-id"] = self.account_id
-
+            # Internal API client - headers will be set per-request with full account context
             self.internal_client = httpx.AsyncClient(
-                base_url=self.internal_api_url, headers=internal_headers, timeout=30.0
+                base_url=self.internal_api_url, headers=headers.copy(), timeout=30.0
             )
         else:
             self.internal_client = None
@@ -343,6 +350,8 @@ class FinoutClient:
         if self._filter_cache is None:
             from .filter_cache import FilterCache
 
+            # Ensure account info is fetched before creating cache
+            # This is a sync property but we'll handle async in the actual API calls
             self._filter_cache = FilterCache(self)
 
         return self._filter_cache
@@ -356,38 +365,107 @@ class FinoutClient:
         """
         return self._build_date_payload("last_30_days")
 
-    def _get_internal_headers(self, account_id: str | None = None) -> dict[str, str]:
+    async def _fetch_account_info(self) -> dict[str, Any]:
         """
-        Get headers for internal API requests with optional account_id override.
-
-        Args:
-            account_id: Optional account ID to override the default
+        Fetch full account information from account-service.
+        Required to get payerId and other context needed for internal API calls.
 
         Returns:
-            Dictionary of headers with account ID set
+            Account object with payerId, generalConfig, featureFlags, etc.
+        """
+        if not self.internal_client or not self.account_id:
+            raise ValueError("Internal API client and account_id required")
+
+        # Headers for account-service call
+        # Use 'admin' role to scope to this account (NOT 'sysAdmin' which bypasses tenancy)
+        headers = {
+            "Content-Type": "application/json",
+            "authorized-user-roles": "admin",
+            "authorized-account-id": self.account_id,
+        }
+
+        response = await self.internal_client.get(
+            f"/account-service/account/{self.account_id}",
+            headers=headers,
+            params={
+                "fields": [
+                    "name",
+                    "payerId",
+                    "defaultContextId",
+                    "generalConfig",
+                    "featureFlags",
+                    "groups",
+                    "latestCompletedRunTimestamp",
+                ]
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _get_internal_headers(self) -> dict[str, str]:
+        """
+        Get headers for internal API calls with full account context.
+        Mimics what api-gateway does via setAuthorizationHeaders().
+
+        Returns:
+            Dictionary of headers including all required authorization context
         """
         if not self.internal_client:
             raise ValueError("Internal API client not configured")
 
-        # Start with base headers
-        headers = {"Content-Type": "application/json", "authorized-user-roles": "sysAdmin"}
+        if not self.account_id:
+            import sys
 
-        # Use provided account_id or fall back to instance default
-        effective_account_id = account_id or self.account_id
-        if effective_account_id:
-            headers["authorized-account-id"] = effective_account_id
+            print("✗ WARNING: Making API call without account_id!", file=sys.stderr)
+            return {"Content-Type": "application/json", "authorized-user-roles": "admin"}
+
+        # Base headers
+        # CRITICAL: Use 'admin' NOT 'sysAdmin' - sysAdmin bypasses account tenancy!
+        headers = {
+            "Content-Type": "application/json",
+            "authorized-user-roles": "admin",
+            "authorized-account-id": self.account_id,
+        }
+
+        # Add account context if we have it
+        if self._account_info:
+            import json
+
+            # Required: payerId for S3 path construction
+            if "payerId" in self._account_info:
+                headers["authorized-payer-id"] = self._account_info["payerId"]
+
+            # Optional but helpful context
+            if "name" in self._account_info:
+                headers["authorized-account-name"] = self._account_info["name"]
+
+            if "defaultContextId" in self._account_info:
+                headers["authorized-context-id"] = str(self._account_info["defaultContextId"])
+
+            if "generalConfig" in self._account_info:
+                headers["authorized-account-general-config"] = json.dumps(
+                    self._account_info["generalConfig"]
+                )
+
+            if "featureFlags" in self._account_info:
+                headers["authorized-feature-flags"] = json.dumps(self._account_info["featureFlags"])
+
+            if "groups" in self._account_info:
+                headers["authorized-groups"] = json.dumps(self._account_info["groups"])
+
+            if "latestCompletedRunTimestamp" in self._account_info:
+                headers["authorized-last-completed-run-timestamp"] = str(
+                    self._account_info["latestCompletedRunTimestamp"]
+                )
 
         return headers
 
-    async def _fetch_filters_metadata(
-        self, date: dict[str, int] | None = None, account_id: str | None = None
-    ) -> dict[str, Any]:
+    async def _fetch_filters_metadata(self, date: dict[str, int] | None = None) -> dict[str, Any]:
         """
         Fetch filter metadata WITHOUT values (internal method for cache).
 
         Args:
             date: Date range for filter query
-            account_id: Optional account ID override
 
         Returns:
             Filter metadata organized by cost center
@@ -398,11 +476,26 @@ class FinoutClient:
         if not self.internal_client:
             raise ValueError("Internal API client not configured. Set FINOUT_INTERNAL_API_URL.")
 
+        # Fetch account info on first API call (if needed for headers)
+        if self.account_id and not self._account_info:
+            import sys
+
+            print(f"→ Fetching account info for {self.account_id}...", file=sys.stderr)
+            try:
+                self._account_info = await self._fetch_account_info()
+                print(
+                    f"✓ Account info loaded: payerId={self._account_info.get('payerId')}",
+                    file=sys.stderr,
+                )
+            except Exception as e:
+                print(f"✗ Failed to fetch account info: {e}", file=sys.stderr)
+                print("  Proceeding without full context - API calls may fail!", file=sys.stderr)
+
         if date is None:
             date = self._current_date_range()
 
-        # Get headers with account_id override
-        headers = self._get_internal_headers(account_id)
+        # Get headers with full account context
+        headers = self._get_internal_headers()
 
         try:
             # Call the filters endpoint with includeValues=false
@@ -414,11 +507,29 @@ class FinoutClient:
             response = await self.internal_client.post(
                 "/cost-service/filters",
                 json=payload,
-                headers=headers,  # Use custom headers with account_id
+                headers=headers,
             )
             response.raise_for_status()
 
             result = response.json()
+
+            # SECURITY: Filter results by account (defensive measure)
+            # The API should filter by account, but we add this as a safety layer
+            if self.account_id and isinstance(result, list):
+                original_count = len(result)
+                result = [
+                    item
+                    for item in result
+                    if item.get("accountId") == self.account_id or not item.get("accountId")
+                ]
+                filtered_count = original_count - len(result)
+                if filtered_count > 0:
+                    import sys
+
+                    print(
+                        f"⚠️  Filtered out {filtered_count} cross-account filters (security)",
+                        file=sys.stderr,
+                    )
 
             # API returns a list of filters, not a nested dict
             if isinstance(result, list):
@@ -503,7 +614,6 @@ class FinoutClient:
         cost_center: str | None = None,
         filter_type: str | None = None,
         date: dict[str, int] | None = None,
-        account_id: str | None = None,
     ) -> list[Any]:
         """
         Fetch values for a specific filter (internal method for cache).
@@ -513,7 +623,6 @@ class FinoutClient:
             cost_center: Cost center filter belongs to
             filter_type: Type of filter
             date: Date range for value query
-            account_id: Optional account ID override
 
         Returns:
             List of filter values
@@ -524,8 +633,8 @@ class FinoutClient:
         if date is None:
             date = self._current_date_range()
 
-        # Get headers with account_id override
-        headers = self._get_internal_headers(account_id)
+        # Get headers
+        headers = self._get_internal_headers()
 
         # Call the filters endpoint with specific filter request
         payload = {"date": date, "includeValues": True, "filterKey": filter_key}
@@ -538,7 +647,7 @@ class FinoutClient:
         response = await self.internal_client.post(
             "/cost-service/filters",
             json=payload,
-            headers=headers,  # Use custom headers with account_id
+            headers=headers,
         )
         response.raise_for_status()
 
@@ -588,7 +697,6 @@ class FinoutClient:
         self,
         date: dict[str, int] | None = None,
         use_cache: bool = True,
-        account_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Get filter metadata (without values) using cache.
@@ -596,16 +704,10 @@ class FinoutClient:
         Args:
             date: Date range for filter query
             use_cache: Whether to use cached metadata
-            account_id: Optional account ID override
 
         Returns:
             Filter metadata organized by cost center
         """
-        # TODO: Pass account_id to cache for per-account caching
-        # For now, bypass cache if account_id differs from default
-        if account_id and account_id != self.account_id:
-            # Fetch directly without cache for different account
-            return await self._fetch_filters_metadata(date, account_id)
         return await self.filter_cache.get_metadata(date, use_cache)
 
     async def get_filter_values(
@@ -616,7 +718,6 @@ class FinoutClient:
         date: dict[str, int] | None = None,
         limit: int = 100,
         use_cache: bool = True,
-        account_id: str | None = None,
     ) -> list[Any]:
         """
         Get values for a specific filter (lazy-loaded from cache).
@@ -628,7 +729,6 @@ class FinoutClient:
             date: Date range for value query
             limit: Maximum number of values to return
             use_cache: Whether to use cached values
-            account_id: Optional account ID override
 
         Returns:
             List of filter values (truncated to limit)
@@ -641,12 +741,6 @@ class FinoutClient:
         if cost_center:
             cost_center = cost_center.lower()
 
-        # If account_id differs, bypass cache and fetch directly
-        if account_id and account_id != self.account_id:
-            return await self._fetch_filter_values(
-                filter_key, cost_center, filter_type, date, account_id
-            )
-
         return await self.filter_cache.get_filter_values(
             filter_key, cost_center, filter_type, date, limit, use_cache
         )
@@ -656,7 +750,6 @@ class FinoutClient:
         query: str,
         cost_center: str | None = None,
         limit: int = 50,
-        account_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Search filters by keyword with relevance ranking.
@@ -665,7 +758,6 @@ class FinoutClient:
             query: Search query (case-insensitive)
             cost_center: Optional cost center to filter by (case-insensitive, will be normalized)
             limit: Maximum number of results
-            account_id: Optional account ID override
 
         Returns:
             List of matching filters, sorted by relevance
@@ -676,8 +768,8 @@ class FinoutClient:
         if cost_center:
             cost_center = cost_center.lower()
 
-        # Get metadata (with account_id override)
-        metadata = await self.get_filters_metadata(account_id=account_id)
+        # Get metadata
+        metadata = await self.get_filters_metadata()
 
         # Search using utility function
         return search_filters_by_keyword(metadata, query, cost_center, limit)
@@ -797,7 +889,6 @@ class FinoutClient:
         group_by: list[str] | None = None,
         x_axis_group_by: str | None = None,
         cost_type: CostType = CostType.NET_AMORTIZED,
-        account_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Query costs using internal API with flexible filters.
@@ -808,7 +899,6 @@ class FinoutClient:
             group_by: List of dimensions to group by
             x_axis_group_by: X-axis grouping (e.g., "daily", "monthly")
             cost_type: Type of cost metric to retrieve
-            account_id: Optional account ID to query (overrides instance default)
 
         Returns:
             Cost query results
@@ -827,7 +917,6 @@ class FinoutClient:
                 ],
                 group_by=["account", "service"],
                 x_axis_group_by="daily",
-                account_id="abc-123"  # Optional: query specific account
             )
         """
         if not self.internal_client:
@@ -836,8 +925,8 @@ class FinoutClient:
                 "environment variable to your cost-service endpoint."
             )
 
-        # Get headers with account_id override
-        headers = self._get_internal_headers(account_id)
+        # Get headers
+        headers = self._get_internal_headers()
 
         try:
             # Build payload with correct date format
@@ -862,7 +951,7 @@ class FinoutClient:
                     raise ValueError("x_axis_group_by must be 'daily' or 'monthly'")
                 payload["xAxisGroupBy"] = x_axis_group_by
 
-            # Call internal cost API with custom headers (account_id override)
+            # Call internal cost API
             response = await self.internal_client.post(
                 "/cost-service/cost", json=payload, headers=headers
             )

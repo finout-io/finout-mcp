@@ -35,7 +35,6 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     conversation_history: List[ChatMessage] = []
-    account_id: Optional[str] = None  # Current account ID for tool calls
     model: Optional[str] = "claude-sonnet-4-5-20250929"  # Model to use for this request
 
 class MCPBridge:
@@ -69,7 +68,7 @@ class MCPBridge:
             ["uv", "run", "finout-mcp"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=None,  # Let stderr go to parent (visible in logs)
             cwd=str(mcp_server_path),
             env=env,
             text=True,
@@ -198,9 +197,9 @@ async def lifespan(app: FastAPI):
     """Manage MCP server lifecycle"""
     global mcp_bridge
 
-    # Startup
+    # Startup - create bridge but don't start MCP yet
+    # MCP will be started when user selects an account
     mcp_bridge = MCPBridge()
-    await mcp_bridge.start()
 
     yield
 
@@ -255,6 +254,13 @@ async def chat(request: ChatRequest):
     if not mcp_bridge:
         raise HTTPException(status_code=500, detail="MCP server not initialized")
 
+    # Check if MCP process is running
+    if not mcp_bridge.process or mcp_bridge.process.poll() is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="No account selected. Please select an account first."
+        )
+
     try:
         # Get available tools from MCP
         mcp_tools = await mcp_bridge.list_tools()
@@ -292,13 +298,7 @@ async def chat(request: ChatRequest):
                     print(f"Calling tool: {tool_name} with {tool_input}")
 
                     try:
-                        # Inject account_id into ALL tool calls if provided
-                        # (Tools that don't support it will ignore it)
-                        if request.account_id:
-                            tool_input = {**tool_input, "account_id": request.account_id}
-                            print(f"  → Injected account_id: {request.account_id}")
-
-                        # Call MCP tool
+                        # Call MCP tool (account context is set at MCP startup)
                         result = await mcp_bridge.call_tool(tool_name, tool_input)
 
                         # Track for display
@@ -365,6 +365,10 @@ async def list_tools():
     """List available tools from MCP server"""
     if not mcp_bridge:
         raise HTTPException(status_code=500, detail="MCP server not initialized")
+
+    # Check if MCP process is running
+    if not mcp_bridge.process or mcp_bridge.process.poll() is not None:
+        return {"tools": [], "message": "No account selected"}
 
     try:
         tools = await mcp_bridge.list_tools()
@@ -463,14 +467,24 @@ async def get_accounts():
 @app.post("/api/switch-account")
 async def switch_account(request: dict):
     """
-    Switch to a different account (no restart needed!).
-    The account_id will be passed with each tool call.
+    Switch to a different account by restarting the MCP server.
+    Each MCP instance operates within a single account context.
     """
+    if not mcp_bridge:
+        raise HTTPException(status_code=500, detail="MCP server not initialized")
+
     account_id = request.get("account_id")
     if not account_id:
         raise HTTPException(status_code=400, detail="account_id is required")
 
-    # No MCP restart needed - account_id will be passed with tool calls
+    # Start or restart MCP server with account context
+    if not mcp_bridge.process or mcp_bridge.process.poll() is not None:
+        # MCP not running - start it
+        await mcp_bridge.start(account_id)
+    else:
+        # MCP running - restart with new account
+        await mcp_bridge.restart_with_account(account_id)
+
     return {
         "success": True,
         "account_id": account_id,

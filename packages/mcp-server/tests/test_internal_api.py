@@ -74,7 +74,7 @@ class TestFinoutClientInternalAPI:
             client_id="test",
             secret_key="test",
             internal_api_url="http://localhost:3000",
-            account_id="test-account-123",  # Add account_id
+            account_id="test-account-123",
         )
 
         # Should lazy-initialize
@@ -118,7 +118,7 @@ class TestFinoutClientInternalAPI:
             client_id="test",
             secret_key="test",
             internal_api_url="http://localhost:3000",
-            account_id="test-account-123",  # Add account_id
+            account_id="test-account-123",
         )
 
         with patch.object(
@@ -160,7 +160,7 @@ class TestFinoutClientInternalAPI:
             client_id="test",
             secret_key="test",
             internal_api_url="http://localhost:3000",
-            account_id="test-account-123",  # Add account_id
+            account_id="test-account-123",
         )
 
         with patch.object(
@@ -188,7 +188,7 @@ class TestFinoutClientInternalAPI:
             client_id="test",
             secret_key="test",
             internal_api_url="http://localhost:3000",
-            account_id="test-account-123",  # Add account_id
+            account_id="test-account-123",
         )
 
         with patch.object(
@@ -216,7 +216,7 @@ class TestFinoutClientInternalAPI:
             client_id="test",
             secret_key="test",
             internal_api_url="http://localhost:3000",
-            account_id="test-account-123",  # Add account_id
+            account_id="test-account-123",
         )
 
         with patch.object(client.internal_client, "post", return_value=mock_internal_response):
@@ -294,7 +294,7 @@ class TestFinoutClientInternalAPI:
             client_id="test",
             secret_key="test",
             internal_api_url="http://localhost:3000",
-            account_id="test-account-123",  # Add account_id
+            account_id="test-account-123",
         )
 
         with patch.object(

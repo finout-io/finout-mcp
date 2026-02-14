@@ -216,10 +216,6 @@ async def list_tools() -> list[Tool]:
                         "enum": ["daily", "monthly"],
                         "description": "Optional: Time-based grouping for x-axis",
                     },
-                    "account_id": {
-                        "type": "string",
-                        "description": "Optional: Account ID to query (if not provided, uses default from environment)",
-                    },
                 },
                 "required": ["time_period"],
             },
@@ -303,10 +299,6 @@ async def list_tools() -> list[Tool]:
                             "required": ["costCenter", "key", "path", "type"],
                         },
                         "description": "Optional: Dimensions to group comparison by (full metadata from search_filters)",
-                    },
-                    "account_id": {
-                        "type": "string",
-                        "description": "Optional: Account ID to query (if not provided, uses default from environment)",
                     },
                 },
                 "required": ["current_period", "comparison_period"],
@@ -596,7 +588,6 @@ async def query_costs_impl(args: dict) -> dict:
     filters = args.get("filters", [])
     group_by = args.get("group_by")
     x_axis_group_by = args.get("x_axis_group_by")
-    account_id = args.get("account_id")  # Optional account ID override
 
     # Check if internal API is configured
     if not finout_client.internal_api_url:
@@ -654,7 +645,6 @@ async def query_costs_impl(args: dict) -> dict:
         filters=filters if filters else None,
         group_by=group_by,
         x_axis_group_by=x_axis_group_by,
-        account_id=account_id,  # Pass account ID override if provided
     )
 
     # Summarize to avoid context overload
@@ -678,7 +668,6 @@ async def compare_costs_impl(args: dict) -> dict:
     comparison_period = args["comparison_period"]
     filters = args.get("filters", [])
     group_by = args.get("group_by")
-    account_id = args.get("account_id")  # Optional account ID override
 
     # Check if internal API is configured
     if not finout_client.internal_api_url:
@@ -690,19 +679,17 @@ async def compare_costs_impl(args: dict) -> dict:
             ),
         }
 
-    # Query both periods with same filters and account ID
+    # Query both periods with same filters
     current_data = await finout_client.query_costs_with_filters(
         time_period=current_period,
         filters=filters if filters else None,
         group_by=group_by,
-        account_id=account_id,  # Pass account ID override if provided
     )
 
     comparison_data = await finout_client.query_costs_with_filters(
         time_period=comparison_period,
         filters=filters if filters else None,
         group_by=group_by,
-        account_id=account_id,  # Pass account ID override if provided
     )
 
     # Extract totals from API response
@@ -925,7 +912,6 @@ async def search_filters_impl(args: dict) -> dict:
 
     query = args["query"]
     cost_center = args.get("cost_center")
-    account_id = args.get("account_id")  # Optional account ID override
 
     # Check if internal API is configured
     if not finout_client.internal_api_url:
@@ -939,10 +925,8 @@ async def search_filters_impl(args: dict) -> dict:
 
     from .filter_utils import format_search_results
 
-    # Search filters (with account_id)
-    results = await finout_client.search_filters(
-        query, cost_center, limit=50, account_id=account_id
-    )
+    # Search filters
+    results = await finout_client.search_filters(query, cost_center, limit=50)
 
     # Format for LLM
     formatted = format_search_results(results, max_results=50)
@@ -962,7 +946,6 @@ async def debug_filters_impl(args: dict) -> dict:
 
     cost_center_filter = args.get("cost_center")
     type_filter = args.get("filter_type")
-    account_id = args.get("account_id")  # Optional account ID override
 
     # Check if internal API is configured
     if not finout_client.internal_api_url:
@@ -971,8 +954,8 @@ async def debug_filters_impl(args: dict) -> dict:
             "message": "Set FINOUT_INTERNAL_API_URL environment variable.",
         }
 
-    # Get raw metadata (with account_id)
-    metadata = await finout_client.get_filters_metadata(account_id=account_id)
+    # Get raw metadata
+    metadata = await finout_client.get_filters_metadata()
 
     # Build diagnostic info
     summary = {"total_cost_centers": len(metadata), "cost_centers": {}}
@@ -1013,7 +996,6 @@ async def get_filter_values_impl(args: dict) -> dict:
     cost_center = args.get("cost_center")
     filter_type = args.get("filter_type")
     limit = args.get("limit", 100)
-    account_id = args.get("account_id")  # Optional account ID override
 
     # Check if internal API is configured
     if not finout_client.internal_api_url:
@@ -1027,9 +1009,9 @@ async def get_filter_values_impl(args: dict) -> dict:
 
     from .filter_utils import format_filter_values, truncate_filter_values
 
-    # Get values (with account_id)
+    # Get values
     values = await finout_client.get_filter_values(
-        filter_key, cost_center, filter_type, limit=limit, account_id=account_id
+        filter_key, cost_center, filter_type, limit=limit
     )
 
     # Truncate and format
