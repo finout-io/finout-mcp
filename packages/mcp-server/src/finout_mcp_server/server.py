@@ -89,7 +89,9 @@ async def list_tools() -> list[Tool]:
                 "WORKFLOW:\n"
                 "1) Use search_filters to find relevant filters (e.g., search_filters('service'))\n"
                 "2) Copy the FULL filter object from search results (costCenter, key, path, type)\n"
-                "3) Add operator ('is' for equals) and value (single string), then query\n\n"
+                "3) ⚠️ PRESERVE EXACT CAPITALIZATION - Cost centers are case-sensitive!\n"
+                "   Examples: 'virtualTag' (NOT 'VIRTUALTAG'), 'amazon-cur', 'kubernetes'\n"
+                "4) Add operator ('is' for equals) and value (single string), then query\n\n"
                 "COMPLETE EXAMPLES:\n\n"
                 "Example 1 - Standard column (service):\n"
                 "filters: [{\n"
@@ -883,15 +885,15 @@ async def get_waste_recommendations_impl(args: dict) -> dict:
     total_savings = 0
 
     for rec in recommendations[:50]:  # Limit to top 50
-        saving = rec["projected_savings"]
+        saving = rec.get("projected_savings") or rec.get("potential_savings", 0)
         total_savings += saving
 
         formatted.append(
             {
-                "resource": rec["resource_name"] or rec["resource_id"],
-                "service": rec["service"],
-                "type": rec["scan_type"],
-                "current_monthly_cost": format_currency(rec["current_cost"]),
+                "resource": rec.get("resource_name") or rec.get("resource_id", "Unknown"),
+                "service": rec.get("service", "Unknown"),
+                "type": rec.get("scan_type") or rec.get("recommendation_type", "Unknown"),
+                "current_monthly_cost": format_currency(rec.get("current_cost", 0)),
                 "potential_monthly_savings": format_currency(saving),
                 "recommendation": rec["recommendation"],
                 "details": rec.get("details", ""),
@@ -1203,7 +1205,13 @@ async def discover_context_impl(args: dict) -> dict:
         matching_explorers = [
             e
             for e in explorers
-            if query in e.get("name", "").lower() or query in e.get("description", "").lower()
+            if (
+                (isinstance(e.get("name"), str) and query in e.get("name", "").lower())
+                or (
+                    isinstance(e.get("description"), str)
+                    and query in e.get("description", "").lower()
+                )
+            )
         ][:max_results]
 
         for explorer in matching_explorers:
