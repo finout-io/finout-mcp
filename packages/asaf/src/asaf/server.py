@@ -608,20 +608,26 @@ async def get_accounts(http_request: Request, response: Response):
             accounts_response.raise_for_status()
             accounts = accounts_response.json()
 
-            # Extract name and accountId
+            # Extract name and accountId, filter by AI features enabled
             account_list = []
             if isinstance(accounts, list):
                 for account in accounts:
-                    account_list.append({
-                        "name": account.get("name", "Unknown"),
-                        "accountId": account.get("accountId", "")
-                    })
+                    # Only include accounts with AI features enabled
+                    general_config = account.get("generalConfig", {})
+                    if general_config.get("aiFeaturesEnabled", False):
+                        account_list.append({
+                            "name": account.get("name", "Unknown"),
+                            "accountId": account.get("accountId", "")
+                        })
             elif isinstance(accounts, dict) and "accounts" in accounts:
                 for account in accounts["accounts"]:
-                    account_list.append({
-                        "name": account.get("name", "Unknown"),
-                        "accountId": account.get("accountId", "")
-                    })
+                    # Only include accounts with AI features enabled
+                    general_config = account.get("generalConfig", {})
+                    if general_config.get("aiFeaturesEnabled", False):
+                        account_list.append({
+                            "name": account.get("name", "Unknown"),
+                            "accountId": account.get("accountId", "")
+                        })
 
             print(f"Loaded {len(account_list)} accounts (cached for {_account_cache_ttl.seconds}s)")
 
