@@ -755,6 +755,15 @@ async def get_conversation(conversation_id: str):
         conversation = await db.get_conversation(conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Ensure messages is an array (backward compatibility)
+        if isinstance(conversation.get("messages"), str):
+            conversation["messages"] = json.loads(conversation["messages"])
+
+        # Ensure tool_calls is an array if present
+        if conversation.get("tool_calls") and isinstance(conversation["tool_calls"], str):
+            conversation["tool_calls"] = json.loads(conversation["tool_calls"])
+
         return conversation
     except HTTPException:
         raise
@@ -786,6 +795,15 @@ async def get_shared_conversation(share_token: str):
         conversation = await db.get_conversation_by_token(share_token)
         if not conversation:
             raise HTTPException(status_code=404, detail="Shared conversation not found")
+
+        # Ensure messages is an array (backward compatibility)
+        if isinstance(conversation.get("messages"), str):
+            conversation["messages"] = json.loads(conversation["messages"])
+
+        # Ensure tool_calls is an array if present
+        if conversation.get("tool_calls") and isinstance(conversation["tool_calls"], str):
+            conversation["tool_calls"] = json.loads(conversation["tool_calls"])
+
         return conversation
     except HTTPException:
         raise

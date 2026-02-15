@@ -1,10 +1,29 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: asaf-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=asaf
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - finout
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   asaf:
     build:
       context: .
-      dockerfile: Dockerfile.asaf
+      dockerfile: packages/asaf/Dockerfile
     container_name: asaf
     ports:
       - "8000:8000"
@@ -14,20 +33,25 @@ services:
       - FINOUT_SECRET_KEY=${FINOUT_SECRET_KEY}
       - FINOUT_INTERNAL_API_URL=${FINOUT_INTERNAL_API_URL}
       - FINOUT_ACCOUNT_ID=${FINOUT_ACCOUNT_ID}
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/asaf
     env_file:
       - .env
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-    volumes:
-      - ./logs:/app/logs
+      start_period: 40s
     networks:
       - finout
 
 networks:
   finout:
     driver: bridge
+
+volumes:
+  postgres_data:
