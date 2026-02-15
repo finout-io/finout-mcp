@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ASAF - Ask the Super AI of Finout
+ASAF - Ask the Smart AI of Finout
 Web server that provides chat interface to Finout MCP Server
 """
 import asyncio
@@ -303,7 +303,7 @@ async def lifespan(app: FastAPI):
     print("Database disconnected")
 
 # Create FastAPI app
-app = FastAPI(title="ASAF - Ask the Super AI of Finout", lifespan=lifespan)
+app = FastAPI(title="ASAF - Ask the Smart AI of Finout", lifespan=lifespan)
 
 # CORS middleware for development
 app.add_middleware(

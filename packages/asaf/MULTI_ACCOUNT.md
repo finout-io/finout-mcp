@@ -28,7 +28,7 @@ ASAF now supports querying multiple Finout accounts! Users can switch between ac
 ### Account Selector (Header)
 ```
 🤖 ASAF                                      Account: [Production ▼]
-   Ask the Super AI of Finout
+   Ask the Smart AI of Finout
 ```
 
 **Features:**

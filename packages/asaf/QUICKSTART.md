@@ -2,7 +2,7 @@
 
 ## What is ASAF?
 
-**ASAF** (Ask the Super AI of Finout) is a web-based chat interface for your Finout MCP Server.
+**ASAF** (Ask the Smart AI of Finout) is a web-based chat interface for your Finout MCP Server.
 
 - 🌐 **Web-based** - No Claude Desktop installation needed
 - 🤖 **Same AI** - Uses Claude Sonnet 4.5 via Anthropic API

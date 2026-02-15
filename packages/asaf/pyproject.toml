@@ -1,7 +1,7 @@
 [project]
 name = "asaf"
 version = "0.1.0"
-description = "ASAF - Ask the Super AI of Finout (Internal Diagnostic Tool)"
+description = "ASAF - Ask the Smart AI of Finout (Internal Diagnostic Tool)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

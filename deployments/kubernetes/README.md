@@ -1,6 +1,6 @@
 # ASAF Kubernetes Deployment
 
-Deploy ASAF (Ask the Super AI of Finout) to Kubernetes for internal use.
+Deploy ASAF (Ask the Smart AI of Finout) to Kubernetes for internal use.
 
 ## Quick Start
 
