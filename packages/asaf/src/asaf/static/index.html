@@ -843,7 +843,7 @@
                     </div>
                     <div class="acronym-line">
                         <span class="letter">S</span>
-                        <span class="word">uper</span>
+                        <span class="word">mart</span>
                     </div>
                     <div class="acronym-line">
                         <span class="letter">A</span>
@@ -1940,8 +1940,11 @@
         }
 
         async function autoSaveConversation() {
-            // Only save if we have messages and an account selected
+            // Only save if we have messages, an account selected, and haven't saved yet
             if (conversationHistory.length === 0 || !currentAccountId) return;
+
+            // Don't create duplicate conversations - only save once
+            if (currentConversationId) return;
 
             // Generate title from first user message
             const firstUserMessage = conversationHistory.find(m => m.role === 'user' && typeof m.content === 'string');

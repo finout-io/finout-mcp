@@ -1,7 +1,6 @@
 """Database module for conversation persistence"""
 import asyncpg
 import os
-import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import secrets
@@ -82,14 +81,14 @@ class Database:
             row = await conn.fetchrow(
                 """
                 INSERT INTO conversations (name, account_id, model, messages, tool_calls, share_token)
-                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 RETURNING id, name, account_id, model, created_at, share_token
                 """,
                 name,
                 account_id,
                 model,
-                json.dumps(messages),  # Convert to JSON string for JSONB column
-                json.dumps(tool_calls) if tool_calls else None,  # Convert to JSON string for JSONB column
+                messages,  # asyncpg handles JSONB conversion automatically
+                tool_calls,  # asyncpg handles JSONB conversion automatically
                 share_token,
             )
 
