@@ -1,7 +1,6 @@
 """Database module for conversation persistence"""
 import asyncpg
 import os
-import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import secrets
@@ -88,8 +87,8 @@ class Database:
                 name,
                 account_id,
                 model,
-                json.dumps(messages),
-                json.dumps(tool_calls) if tool_calls else None,
+                messages,  # asyncpg handles JSONB encoding automatically
+                tool_calls,  # asyncpg handles JSONB encoding automatically
                 share_token,
             )
 

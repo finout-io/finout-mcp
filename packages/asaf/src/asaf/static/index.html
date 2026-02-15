@@ -1241,9 +1241,13 @@
                 // Add assistant response with tool calls and timing
                 addMessage('assistant', data.response, data.tool_calls || [], totalTime, data.tool_time);
 
-                // Update conversation history
+                // Update conversation history with tool calls
                 conversationHistory.push({role: 'user', content: message});
-                conversationHistory.push({role: 'assistant', content: data.response});
+                conversationHistory.push({
+                    role: 'assistant',
+                    content: data.response,
+                    tool_calls: data.tool_calls || []  // Save tool calls with message
+                });
 
                 // Auto-save conversation
                 await autoSaveConversation();
@@ -1288,6 +1292,17 @@
                 } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
                     output += `## Assistant Response ${index + 1}\n`;
                     output += `${msg.content}\n\n`;
+
+                    // Export tool calls if present
+                    if (msg.tool_calls && msg.tool_calls.length > 0) {
+                        output += `### Tool Calls (${msg.tool_calls.length})\n`;
+                        msg.tool_calls.forEach((toolCall) => {
+                            output += `\n**Tool: ${toolCall.name}**\n`;
+                            output += `Input:\n\`\`\`json\n${JSON.stringify(toolCall.input, null, 2)}\n\`\`\`\n`;
+                            output += `Output:\n\`\`\`\n${toolCall.output}\n\`\`\`\n`;
+                        });
+                        output += `\n`;
+                    }
                 } else if (msg.role === 'user' && Array.isArray(msg.content)) {
                     // Tool results
                     output += `## Tool Results\n`;
@@ -1347,7 +1362,7 @@
                         account_id: currentAccountId,
                         model: currentModel,
                         messages: conversationHistory,
-                        tool_calls: currentToolCalls,
+                        tool_calls: [],  // Tool calls now stored with each message
                     })
                 });
 
@@ -1867,12 +1882,13 @@
                 const chatContainer = document.getElementById('chatContainer');
                 chatContainer.innerHTML = '';
 
-                // Load messages
+                // Load messages with tool calls
                 conversation.messages.forEach(msg => {
                     if (msg.role === 'user' && typeof msg.content === 'string') {
                         addMessage('user', msg.content);
                     } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
-                        addMessage('assistant', msg.content);
+                        // Display assistant message with tool calls if present
+                        addMessage('assistant', msg.content, msg.tool_calls || []);
                     }
                 });
 
