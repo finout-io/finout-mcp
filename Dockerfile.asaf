@@ -1,4 +1,4 @@
-# ASAF - Ask the Super AI of Finout
+# ASAF - Ask the Smart AI of Finout
 # Docker image for internal deployment
 
 FROM python:3.11-slim

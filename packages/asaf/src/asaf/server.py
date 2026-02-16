@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import secrets
+import shutil
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -67,8 +68,15 @@ class MCPBridge:
         # Start MCP server - use repo_root to find packages/mcp-server
         mcp_server_path = repo_root / "packages" / "mcp-server"
 
+        mcp_cmd = (
+            ["uv", "run", "finout-mcp"]
+            if shutil.which("uv")
+            else ["finout-mcp"]
+        )
+        print(f"Starting MCP command: {' '.join(mcp_cmd)}")
+
         self.process = subprocess.Popen(
-            ["uv", "run", "finout-mcp"],
+            mcp_cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=None,  # Let stderr go to parent (visible in logs)
@@ -317,6 +325,70 @@ app.add_middleware(
 # Initialize Anthropic client
 anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+# Approximate model pricing in USD per 1M tokens.
+MODEL_PRICING_PER_MTOKEN = {
+    "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0},
+    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
+    "claude-opus-4-6": {"input": 15.0, "output": 75.0},
+}
+
+
+def _empty_usage_totals() -> Dict[str, int]:
+    """Create an empty usage accumulator."""
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+    }
+
+
+def _accumulate_usage(usage_totals: Dict[str, int], usage_obj: Any) -> None:
+    """Accumulate usage values from an Anthropic response usage object."""
+    for field in usage_totals:
+        usage_totals[field] += int(getattr(usage_obj, field, 0) or 0)
+
+
+def _get_pricing_for_model(model: str) -> Optional[Dict[str, float]]:
+    """Return pricing for the configured model, if known."""
+    return MODEL_PRICING_PER_MTOKEN.get(model)
+
+
+def _estimate_usage_cost_usd(model: str, usage_totals: Dict[str, int]) -> Optional[float]:
+    """Estimate request cost from token usage and model pricing."""
+    pricing = _get_pricing_for_model(model)
+    if not pricing:
+        return None
+
+    # Approximation: cached token pricing is ignored for simplicity.
+    input_tokens = usage_totals["input_tokens"] + usage_totals["cache_creation_input_tokens"]
+    output_tokens = usage_totals["output_tokens"]
+    total_cost = (
+        (input_tokens * pricing["input"]) + (output_tokens * pricing["output"])
+    ) / 1_000_000
+    return round(total_cost, 6)
+
+
+def _build_usage_summary(model: str, usage_totals: Dict[str, int]) -> Dict[str, Any]:
+    """Build a compact usage payload for frontend display."""
+    total_tokens = (
+        usage_totals["input_tokens"]
+        + usage_totals["output_tokens"]
+        + usage_totals["cache_creation_input_tokens"]
+        + usage_totals["cache_read_input_tokens"]
+    )
+
+    return {
+        "model": model,
+        "input_tokens": usage_totals["input_tokens"],
+        "output_tokens": usage_totals["output_tokens"],
+        "cache_creation_input_tokens": usage_totals["cache_creation_input_tokens"],
+        "cache_read_input_tokens": usage_totals["cache_read_input_tokens"],
+        "total_tokens": total_tokens,
+        "estimated_cost_usd": _estimate_usage_cost_usd(model, usage_totals),
+    }
+
+
 def save_last_account(account_id: str) -> None:
     """Save the last selected account ID to file"""
     try:
@@ -441,6 +513,9 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
             tools=claude_tools,
             messages=messages
         )
+        usage_totals = _empty_usage_totals()
+        if getattr(response, "usage", None):
+            _accumulate_usage(usage_totals, response.usage)
 
         # Track tool calls for display
         all_tool_calls = []
@@ -507,6 +582,8 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
                 tools=claude_tools,
                 messages=messages
             )
+            if getattr(response, "usage", None):
+                _accumulate_usage(usage_totals, response.usage)
 
         # Extract final text response
         response_text = ""
@@ -518,6 +595,7 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
             "response": response_text,
             "tool_calls": all_tool_calls,  # Include tool call details
             "tool_time": round(total_tool_time, 2),  # Time spent in tool execution
+            "usage": _build_usage_summary(request.model, usage_totals),
             "conversation_history": messages + [{"role": "assistant", "content": response_text}]
         }
 

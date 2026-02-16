@@ -50,7 +50,7 @@ ENV ANTHROPIC_API_KEY=""
 ENV FINOUT_CLIENT_ID=""
 ENV FINOUT_SECRET_KEY=""
 ENV FINOUT_INTERNAL_API_URL=""
-ENV DATABASE_URL="postgresql://postgres:postgres@localhost:5432/asaf"
+# DATABASE_URL will be set by docker-compose or runtime environment
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \

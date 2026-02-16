@@ -593,6 +593,16 @@
             margin-left: auto;
         }
 
+        .usage-tokens {
+            color: #0f766e;
+            font-weight: 600;
+        }
+
+        .usage-cost {
+            color: #0b5f44;
+            font-weight: 700;
+        }
+
         .input-container {
             padding: 20px;
             background: white;
@@ -950,7 +960,7 @@
         let currentToolCalls = [];
         let toolCallIdCounter = 0; // Counter for unique IDs
 
-        function addMessage(role, content, toolCalls = [], totalTime = null, toolTime = null) {
+        function addMessage(role, content, toolCalls = [], totalTime = null, toolTime = null, usage = null, model = null) {
             const chatContainer = document.getElementById('chatContainer');
 
             // Remove welcome message if it exists
@@ -1026,19 +1036,18 @@
                 contentDiv.appendChild(toolCallsDiv);
             }
 
-            // Add timing summary if available
-            if (totalTime && role === 'assistant') {
+            // Add assistant summary (timing + usage) if available
+            if (role === 'assistant' && (totalTime || usage)) {
                 const timingDiv = document.createElement('div');
                 timingDiv.className = 'timing-summary';
-                const toolCount = toolCalls ? toolCalls.length : 0;
-                const modelName = getModelName(currentModel);
+                const modelName = getModelName(model || currentModel);
 
                 // Calculate thinking time (total - tool time)
                 const thinkingTime = toolTime ? (totalTime - toolTime).toFixed(1) : totalTime;
 
                 let timingHTML = `<span class="timing-model">${modelName}</span>`;
 
-                if (toolTime && toolTime > 0) {
+                if (totalTime && toolTime && toolTime > 0) {
                     // Show breakdown: tools + thinking
                     timingHTML += `
                         <span class="timing-tools">🔧 ${toolTime}s</span>
@@ -1046,7 +1055,17 @@
                     `;
                 }
 
-                timingHTML += `<span class="timing-duration">${totalTime}s total</span>`;
+                if (usage && usage.total_tokens) {
+                    timingHTML += `<span class="usage-tokens">🧮 ${Number(usage.total_tokens).toLocaleString()} tokens</span>`;
+                }
+
+                if (usage && usage.estimated_cost_usd !== null && usage.estimated_cost_usd !== undefined) {
+                    timingHTML += `<span class="usage-cost">~$${Number(usage.estimated_cost_usd).toFixed(4)}</span>`;
+                }
+
+                if (totalTime) {
+                    timingHTML += `<span class="timing-duration">${totalTime}s total</span>`;
+                }
 
                 timingDiv.innerHTML = timingHTML;
                 contentDiv.appendChild(timingDiv);
@@ -1239,14 +1258,24 @@
                 const totalTime = ((Date.now() - requestStartTime) / 1000).toFixed(1);
 
                 // Add assistant response with tool calls and timing
-                addMessage('assistant', data.response, data.tool_calls || [], totalTime, data.tool_time);
+                addMessage(
+                    'assistant',
+                    data.response,
+                    data.tool_calls || [],
+                    totalTime,
+                    data.tool_time,
+                    data.usage || null,
+                    data.usage?.model || currentModel
+                );
 
                 // Update conversation history with tool calls
                 conversationHistory.push({role: 'user', content: message});
                 conversationHistory.push({
                     role: 'assistant',
                     content: data.response,
-                    tool_calls: data.tool_calls || []  // Save tool calls with message
+                    tool_calls: data.tool_calls || [],  // Save tool calls with message
+                    usage: data.usage || null,
+                    model: data.usage?.model || currentModel
                 });
 
                 // Auto-save conversation
@@ -1888,7 +1917,7 @@
                         addMessage('user', msg.content);
                     } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
                         // Display assistant message with tool calls if present
-                        addMessage('assistant', msg.content, msg.tool_calls || []);
+                        addMessage('assistant', msg.content, msg.tool_calls || [], null, null, msg.usage || null, msg.model || currentModel);
                     }
                 });
 
@@ -2026,7 +2055,7 @@
                     if (msg.role === 'user' && typeof msg.content === 'string') {
                         addMessage('user', msg.content);
                     } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
-                        addMessage('assistant', msg.content);
+                        addMessage('assistant', msg.content, msg.tool_calls || [], null, null, msg.usage || null, msg.model || currentModel);
                     }
                 });
 

@@ -1,6 +1,7 @@
 """Database module for conversation persistence"""
 import asyncpg
 import os
+import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import secrets
@@ -81,14 +82,14 @@ class Database:
             row = await conn.fetchrow(
                 """
                 INSERT INTO conversations (name, account_id, model, messages, tool_calls, share_token)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
                 RETURNING id, name, account_id, model, created_at, share_token
                 """,
                 name,
                 account_id,
                 model,
-                messages,  # asyncpg handles JSONB conversion automatically
-                tool_calls,  # asyncpg handles JSONB conversion automatically
+                json.dumps(messages),  # JSONB requires JSON string
+                json.dumps(tool_calls) if tool_calls else None,  # JSONB requires JSON string
                 share_token,
             )
 
@@ -137,7 +138,16 @@ class Database:
                 conversation_id,
             )
 
-            return dict(row) if row else None
+            if not row:
+                return None
+
+            result = dict(row)
+            # Parse JSONB fields if they're strings (shouldn't happen with proper JSONB, but handle it)
+            if isinstance(result.get("messages"), str):
+                result["messages"] = json.loads(result["messages"])
+            if result.get("tool_calls") and isinstance(result["tool_calls"], str):
+                result["tool_calls"] = json.loads(result["tool_calls"])
+            return result
 
     async def get_conversation_by_token(self, share_token: str) -> Optional[Dict[str, Any]]:
         """Get a conversation by share token"""
@@ -152,7 +162,16 @@ class Database:
                 share_token,
             )
 
-            return dict(row) if row else None
+            if not row:
+                return None
+
+            result = dict(row)
+            # Parse JSONB fields if they're strings (shouldn't happen with proper JSONB, but handle it)
+            if isinstance(result.get("messages"), str):
+                result["messages"] = json.loads(result["messages"])
+            if result.get("tool_calls") and isinstance(result["tool_calls"], str):
+                result["tool_calls"] = json.loads(result["tool_calls"])
+            return result
 
     async def update_note(self, conversation_id: str, note: str) -> bool:
         """Update user note for a conversation"""

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   asaf:
     build:
@@ -14,7 +12,8 @@ services:
       - FINOUT_SECRET_KEY=${FINOUT_SECRET_KEY}
       - FINOUT_INTERNAL_API_URL=${FINOUT_INTERNAL_API_URL}
       - FINOUT_ACCOUNT_ID=${FINOUT_ACCOUNT_ID}
-      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:5432/asaf}
+      # Override DATABASE_URL for Docker - point to host machine's PostgreSQL
+      - DATABASE_URL=postgresql://fobo:fobo@host.docker.internal:5432/asaf
     env_file:
       - .env
     extra_hosts:
