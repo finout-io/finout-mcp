@@ -2,35 +2,24 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: asaf
-  namespace: finout-tools
+  namespace: asaf
   labels:
     app: asaf
   annotations:
-    # NGINX Ingress annotations
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-
-    # For Azure Application Gateway (if using)
-    # appgw.ingress.kubernetes.io/ssl-redirect: "true"
-
-    # For AWS ALB (if using)
-    # alb.ingress.kubernetes.io/scheme: internal
-    # alb.ingress.kubernetes.io/target-type: ip
-
-    # Rate limiting (optional)
-    nginx.ingress.kubernetes.io/limit-rps: "100"
-
-    # CORS (if needed)
-    nginx.ingress.kubernetes.io/enable-cors: "true"
-    nginx.ingress.kubernetes.io/cors-allow-origin: "https://your-domain.com"
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-path: /api/health
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    external-dns.alpha.kubernetes.io/hostname: asaf.internal.finout.io
+    external-dns.alpha.kubernetes.io/zone-type: private
+    external-dns.alpha.kubernetes.io/hosted-zone-id: Z067649217K758I13UCY2
+    # Set ACM certificate ARN before applying:
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:ACCOUNT:certificate/CERT_ID
 spec:
-  ingressClassName: nginx  # or azure-application-gateway, alb, etc.
-  tls:
-  - hosts:
-    - asaf.your-company.internal
-    secretName: asaf-tls-cert
+  ingressClassName: alb
   rules:
-  - host: asaf.your-company.internal
+  - host: asaf.internal.finout.io
     http:
       paths:
       - path: /

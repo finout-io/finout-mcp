@@ -911,6 +911,9 @@
             </div>
 
             <div class="sidebar-footer">
+                <button class="export-button" onclick="shareConversation(event)">
+                    🔗 Share Conversation
+                </button>
                 <button class="export-button" onclick="exportConversation(event)">
                     📋 Export Chat
                 </button>
@@ -959,6 +962,7 @@
         let conversationHistory = [];
         let currentToolCalls = [];
         let toolCallIdCounter = 0; // Counter for unique IDs
+        let currentShareToken = null;
 
         function addMessage(role, content, toolCalls = [], totalTime = null, toolTime = null, usage = null, model = null) {
             const chatContainer = document.getElementById('chatContainer');
@@ -1369,6 +1373,62 @@
             });
         }
 
+        async function shareConversation(event) {
+            if (conversationHistory.length === 0) {
+                alert('No conversation to share yet!');
+                return;
+            }
+
+            const button = event.target;
+            const originalText = button.textContent;
+            const originalBackground = button.style.background;
+
+            try {
+                button.disabled = true;
+                button.textContent = '⏳ Preparing...';
+
+                // Ensure there is a persisted conversation record
+                if (!currentConversationId) {
+                    await autoSaveConversation();
+                }
+
+                if (!currentConversationId) {
+                    throw new Error('Conversation could not be saved for sharing');
+                }
+
+                // Reuse known share token if available, otherwise fetch conversation details
+                if (!currentShareToken) {
+                    const response = await fetch(`/api/conversations/${currentConversationId}`);
+                    if (!response.ok) {
+                        throw new Error('Failed to load conversation share token');
+                    }
+                    const conversation = await response.json();
+                    currentShareToken = conversation.share_token;
+                }
+
+                if (!currentShareToken) {
+                    throw new Error('Share token is missing for this conversation');
+                }
+
+                const shareUrl = `${window.location.origin}/share/${currentShareToken}`;
+                await navigator.clipboard.writeText(shareUrl);
+
+                button.textContent = '✅ Link Copied!';
+                button.style.background = 'rgba(56, 178, 142, 0.3)';
+            } catch (error) {
+                console.error('Error sharing conversation:', error);
+                alert('Failed to share conversation: ' + error.message);
+                button.textContent = '❌ Share Failed';
+                button.style.background = 'rgba(239, 68, 68, 0.35)';
+            } finally {
+                setTimeout(() => {
+                    button.disabled = false;
+                    button.textContent = originalText;
+                    button.style.background = originalBackground;
+                }, 2000);
+            }
+        }
+
         async function saveConversation(event) {
             // Check if there's a conversation to save
             if (conversationHistory.length === 0) {
@@ -1653,6 +1713,7 @@
                 // Clear conversation history
                 conversationHistory = [];
                 currentConversationId = null;
+                currentShareToken = null;
 
                 // Load conversations for new account
                 await loadConversations();
@@ -1924,6 +1985,7 @@
                 // Update conversation history
                 conversationHistory = conversation.messages;
                 currentConversationId = conversationId;
+                currentShareToken = conversation.share_token || null;
                 renderConversations();
 
             } catch (error) {
@@ -1959,6 +2021,7 @@
             // Reset conversation state
             conversationHistory = [];
             currentConversationId = null;
+            currentShareToken = null;
 
             // Clear message input
             const messageInput = document.getElementById('messageInput');
@@ -1996,6 +2059,7 @@
                 if (response.ok) {
                     const data = await response.json();
                     currentConversationId = data.conversation_id;
+                    currentShareToken = data.share_token || null;
                     await loadConversations(); // Refresh list
                 }
             } catch (error) {

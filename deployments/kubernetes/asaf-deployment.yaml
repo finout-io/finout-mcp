@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: asaf
-  namespace: finout-tools  # Change to your namespace
+  namespace: asaf
   labels:
     app: asaf
     component: diagnostic-tool
@@ -19,24 +19,33 @@ spec:
     spec:
       containers:
       - name: asaf
-        image: your-registry.azurecr.io/asaf:latest  # Update with your registry
+        image: 277411487094.dkr.ecr.us-east-1.amazonaws.com/asaf:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
           name: http
           protocol: TCP
         env:
+        # Database configuration (required)
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: asaf-secrets
+              key: database-url
         # Finout API Configuration
+        # Optional: only needed if MCP tools require direct Finout API auth.
         - name: FINOUT_CLIENT_ID
           valueFrom:
             secretKeyRef:
               name: asaf-secrets
               key: finout-client-id
+              optional: true
         - name: FINOUT_SECRET_KEY
           valueFrom:
             secretKeyRef:
               name: asaf-secrets
               key: finout-secret-key
+              optional: true
         - name: FINOUT_INTERNAL_API_URL
           valueFrom:
             configMapKeyRef:
@@ -76,5 +85,3 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 2
-      imagePullSecrets:
-      - name: registry-credentials  # If using private registry

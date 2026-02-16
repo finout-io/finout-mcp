@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: finout-tools
+namespace: asaf
 
 resources:
 - namespace.yaml
@@ -20,8 +20,8 @@ commonLabels:
 
 # Image configuration
 images:
-- name: your-registry.azurecr.io/asaf
-  newName: your-registry.azurecr.io/asaf
+- name: 277411487094.dkr.ecr.us-east-1.amazonaws.com/asaf
+  newName: 277411487094.dkr.ecr.us-east-1.amazonaws.com/asaf
   newTag: latest
 
 # ConfigMap generator (alternative to separate file)

@@ -874,7 +874,7 @@ async def get_shared_conversation(share_token: str):
 def main():
     """Main entry point for ASAF server"""
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, access_log=False)
 
 if __name__ == "__main__":
     main()

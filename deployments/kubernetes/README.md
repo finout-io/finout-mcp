@@ -67,14 +67,14 @@ docker push gcr.io/your-project/asaf:v1.0.0
 
 ```bash
 # Create namespace
-kubectl create namespace finout-tools
+kubectl create namespace asaf
 
 # Create secret
 kubectl create secret generic asaf-secrets \
   --from-literal=finout-client-id="your-client-id" \
   --from-literal=finout-secret-key="your-secret-key" \
   --from-literal=anthropic-api-key="your-anthropic-key" \
-  -n finout-tools
+  -n asaf
 ```
 
 **Option B: Using YAML file**
@@ -104,7 +104,7 @@ apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
 metadata:
   name: asaf-secrets-provider
-  namespace: finout-tools
+  namespace: asaf
 spec:
   provider: azure
   parameters:
@@ -211,29 +211,29 @@ kubectl apply -k deployments/kubernetes/
 
 ```bash
 # Get all resources
-kubectl get all -n finout-tools -l app=asaf
+kubectl get all -n asaf -l app=asaf
 
 # Check pods
-kubectl get pods -n finout-tools
+kubectl get pods -n asaf
 
 # Check deployment
-kubectl describe deployment asaf -n finout-tools
+kubectl describe deployment asaf -n asaf
 
 # View logs
-kubectl logs -n finout-tools -l app=asaf -f
+kubectl logs -n asaf -l app=asaf -f
 
 # Check service
-kubectl get svc asaf -n finout-tools
+kubectl get svc asaf -n asaf
 
 # Check ingress
-kubectl get ingress asaf -n finout-tools
+kubectl get ingress asaf -n asaf
 ```
 
 ### Health Check
 
 ```bash
 # Port forward for local testing
-kubectl port-forward -n finout-tools svc/asaf 8000:80
+kubectl port-forward -n asaf svc/asaf 8000:80
 
 # Test health endpoint
 curl http://localhost:8000/api/health
@@ -243,7 +243,7 @@ curl http://localhost:8000/api/health
 
 ```bash
 # Get ingress URL
-kubectl get ingress asaf -n finout-tools
+kubectl get ingress asaf -n asaf
 
 # Access via browser
 https://asaf.your-company.internal
@@ -255,10 +255,10 @@ https://asaf.your-company.internal
 
 ```bash
 # Scale up
-kubectl scale deployment asaf -n finout-tools --replicas=5
+kubectl scale deployment asaf -n asaf --replicas=5
 
 # Scale down
-kubectl scale deployment asaf -n finout-tools --replicas=1
+kubectl scale deployment asaf -n asaf --replicas=1
 ```
 
 ### Auto-scaling (HPA)
@@ -270,7 +270,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: asaf
-  namespace: finout-tools
+  namespace: asaf
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -307,23 +307,23 @@ kubectl apply -f asaf-hpa.yaml
 ./scripts/build-asaf.sh v1.1.0
 
 # Update deployment image
-kubectl set image deployment/asaf asaf=your-registry.azurecr.io/asaf:v1.1.0 -n finout-tools
+kubectl set image deployment/asaf asaf=your-registry.azurecr.io/asaf:v1.1.0 -n asaf
 
 # Watch rollout
-kubectl rollout status deployment/asaf -n finout-tools
+kubectl rollout status deployment/asaf -n asaf
 
 # Rollback if needed
-kubectl rollout undo deployment/asaf -n finout-tools
+kubectl rollout undo deployment/asaf -n asaf
 ```
 
 ### Update Configuration
 
 ```bash
 # Edit configmap
-kubectl edit configmap asaf-config -n finout-tools
+kubectl edit configmap asaf-config -n asaf
 
 # Restart pods to pick up changes
-kubectl rollout restart deployment/asaf -n finout-tools
+kubectl rollout restart deployment/asaf -n asaf
 ```
 
 ## Monitoring
@@ -332,30 +332,30 @@ kubectl rollout restart deployment/asaf -n finout-tools
 
 ```bash
 # Stream logs from all pods
-kubectl logs -n finout-tools -l app=asaf -f
+kubectl logs -n asaf -l app=asaf -f
 
 # Logs from specific pod
-kubectl logs -n finout-tools <pod-name> -f
+kubectl logs -n asaf <pod-name> -f
 
 # Previous logs (after crash)
-kubectl logs -n finout-tools <pod-name> --previous
+kubectl logs -n asaf <pod-name> --previous
 ```
 
 ### Metrics
 
 ```bash
 # Resource usage
-kubectl top pods -n finout-tools -l app=asaf
+kubectl top pods -n asaf -l app=asaf
 
 # Detailed pod info
-kubectl describe pod <pod-name> -n finout-tools
+kubectl describe pod <pod-name> -n asaf
 ```
 
 ### Events
 
 ```bash
 # Recent events
-kubectl get events -n finout-tools --sort-by='.lastTimestamp'
+kubectl get events -n asaf --sort-by='.lastTimestamp'
 ```
 
 ## Troubleshooting
@@ -364,13 +364,13 @@ kubectl get events -n finout-tools --sort-by='.lastTimestamp'
 
 ```bash
 # Check pod status
-kubectl get pods -n finout-tools
+kubectl get pods -n asaf
 
 # Describe pod
-kubectl describe pod <pod-name> -n finout-tools
+kubectl describe pod <pod-name> -n asaf
 
 # Check logs
-kubectl logs <pod-name> -n finout-tools
+kubectl logs <pod-name> -n asaf
 
 # Common issues:
 # - ImagePullBackOff: Check image name and registry credentials
@@ -382,29 +382,29 @@ kubectl logs <pod-name> -n finout-tools
 
 ```bash
 # Verify secret exists
-kubectl get secret asaf-secrets -n finout-tools
+kubectl get secret asaf-secrets -n asaf
 
 # Check secret contents (base64 encoded)
-kubectl get secret asaf-secrets -n finout-tools -o yaml
+kubectl get secret asaf-secrets -n asaf -o yaml
 
 # Recreate secret
-kubectl delete secret asaf-secrets -n finout-tools
+kubectl delete secret asaf-secrets -n asaf
 kubectl create secret generic asaf-secrets \
   --from-literal=finout-client-id="..." \
-  -n finout-tools
+  -n asaf
 ```
 
 ### Service Not Accessible
 
 ```bash
 # Check service
-kubectl get svc asaf -n finout-tools
+kubectl get svc asaf -n asaf
 
 # Check endpoints
-kubectl get endpoints asaf -n finout-tools
+kubectl get endpoints asaf -n asaf
 
 # Port forward for testing
-kubectl port-forward svc/asaf 8000:80 -n finout-tools
+kubectl port-forward svc/asaf 8000:80 -n asaf
 curl http://localhost:8000/api/health
 ```
 
@@ -412,13 +412,13 @@ curl http://localhost:8000/api/health
 
 ```bash
 # Check ingress
-kubectl describe ingress asaf -n finout-tools
+kubectl describe ingress asaf -n asaf
 
 # Check ingress controller logs
 kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx -f
 
 # Test with port-forward first
-kubectl port-forward svc/asaf 8000:80 -n finout-tools
+kubectl port-forward svc/asaf 8000:80 -n asaf
 ```
 
 ## Security Best Practices
@@ -433,7 +433,7 @@ kubectl port-forward svc/asaf 8000:80 -n finout-tools
    kind: NetworkPolicy
    metadata:
      name: asaf-network-policy
-     namespace: finout-tools
+     namespace: asaf
    spec:
      podSelector:
        matchLabels:
@@ -493,12 +493,12 @@ kubectl port-forward svc/asaf 8000:80 -n finout-tools
 kubectl delete -k deployments/kubernetes/
 
 # Or manually
-kubectl delete namespace finout-tools
+kubectl delete namespace asaf
 
 # Delete specific resources
-kubectl delete deployment asaf -n finout-tools
-kubectl delete service asaf -n finout-tools
-kubectl delete ingress asaf -n finout-tools
+kubectl delete deployment asaf -n asaf
+kubectl delete service asaf -n asaf
+kubectl delete ingress asaf -n asaf
 ```
 
 ## CI/CD Integration
@@ -528,12 +528,12 @@ jobs:
 
     - name: Deploy to Kubernetes
       run: |
-        kubectl set image deployment/asaf asaf=${{ secrets.REGISTRY }}/asaf:${{ github.sha }} -n finout-tools
+        kubectl set image deployment/asaf asaf=${{ secrets.REGISTRY }}/asaf:${{ github.sha }} -n asaf
 ```
 
 ## Support
 
-- Check logs: `kubectl logs -n finout-tools -l app=asaf -f`
-- Check health: `kubectl get pods -n finout-tools`
-- Port forward for testing: `kubectl port-forward -n finout-tools svc/asaf 8000:80`
-- Describe resources: `kubectl describe deployment asaf -n finout-tools`
+- Check logs: `kubectl logs -n asaf -l app=asaf -f`
+- Check health: `kubectl get pods -n asaf`
+- Port forward for testing: `kubectl port-forward -n asaf svc/asaf 8000:80`
+- Describe resources: `kubectl describe deployment asaf -n asaf`

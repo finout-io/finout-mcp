@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: finout-tools
+  name: asaf
   labels:
-    name: finout-tools
+    name: asaf
     purpose: internal-diagnostic-tools
