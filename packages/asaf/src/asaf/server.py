@@ -510,6 +510,15 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
         response = anthropic_client.messages.create(
             model=request.model,
             max_tokens=4096,
+            system=(
+                "You are a cloud cost analysis assistant for Finout. "
+                "You have access to tools to query costs, detect anomalies, find waste, and explore filters.\n\n"
+                "After every interaction where you used tools to answer the user's question, "
+                "you MUST call submit_feedback before finishing your response. "
+                "Rate your ability to answer (1=couldn't answer, 5=excellent), "
+                "pick the query_type that best matches what was asked, "
+                "and note any friction points you encountered."
+            ),
             tools=claude_tools,
             messages=messages
         )
@@ -548,6 +557,21 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
                             "input": tool_input,
                             "output": result
                         })
+
+                        # Save feedback to database if this is a feedback submission
+                        if tool_name == "submit_feedback":
+                            try:
+                                await db.save_feedback(
+                                    account_id=session_mcp.account_id,
+                                    rating=tool_input.get("rating"),
+                                    query_type=tool_input.get("query_type"),
+                                    tools_used=tool_input.get("tools_used"),
+                                    friction_points=tool_input.get("friction_points"),
+                                    suggestion=tool_input.get("suggestion"),
+                                    session_id=session_id,
+                                )
+                            except Exception as e:
+                                print(f"Failed to save feedback to database: {e}")
 
                         tool_results.append({
                             "type": "tool_result",
@@ -869,6 +893,40 @@ async def get_shared_conversation(share_token: str):
         raise
     except Exception as e:
         print(f"Error getting shared conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Feedback Management Endpoints
+
+@app.get("/api/feedback/list")
+async def list_feedback(
+    account_id: Optional[str] = None,
+    min_rating: Optional[int] = None,
+    max_rating: Optional[int] = None,
+    query_type: Optional[str] = None,
+    limit: int = 100
+):
+    """List feedback with optional filters"""
+    try:
+        feedback = await db.list_feedback(
+            account_id=account_id,
+            min_rating=min_rating,
+            max_rating=max_rating,
+            query_type=query_type,
+            limit=limit
+        )
+        return {"feedback": feedback}
+    except Exception as e:
+        print(f"Error listing feedback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/feedback/stats")
+async def get_feedback_stats(account_id: Optional[str] = None):
+    """Get aggregate feedback statistics"""
+    try:
+        stats = await db.get_feedback_stats(account_id=account_id)
+        return stats
+    except Exception as e:
+        print(f"Error getting feedback stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 def main():

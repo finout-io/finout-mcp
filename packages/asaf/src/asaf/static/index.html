@@ -516,6 +516,25 @@
             user-select: none;
         }
 
+        .copy-curl-btn {
+            font-size: 11px;
+            padding: 2px 6px;
+            background: #38B28E;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: auto;
+        }
+
+        .copy-curl-btn:hover {
+            background: #2e9373;
+        }
+
+        .copy-curl-btn:active {
+            background: #267a5e;
+        }
+
         .tool-call-icon {
             font-size: 16px;
         }
@@ -1014,12 +1033,34 @@
 
                 toolCalls.forEach((toolCall, index) => {
                     const uniqueId = toolCallIdCounter++; // Increment counter for unique ID
+
+                    // Extract _debug_curl from output if present
+                    let debugCurl = null;
+                    try {
+                        const output = typeof toolCall.output === 'string'
+                            ? JSON.parse(toolCall.output)
+                            : toolCall.output;
+                        if (output && output._debug_curl) {
+                            debugCurl = output._debug_curl;
+                        }
+                    } catch (e) {
+                        // Output not JSON or no _debug_curl, that's fine
+                    }
+
                     const toolDiv = document.createElement('div');
                     toolDiv.className = 'tool-call';
+
+                    // Generate copy button HTML if curl commands exist
+                    const copyButtonId = `copy-btn-${uniqueId}`;
+                    const copyButtonHTML = debugCurl
+                        ? `<button class="copy-curl-btn" id="${copyButtonId}">📋 Copy curl</button>`
+                        : '';
+
                     toolDiv.innerHTML = `
                         <div class="tool-call-header" onclick="toggleToolCall('${uniqueId}')">
                             <span class="tool-call-icon">🔧</span>
                             <span class="tool-call-name">${toolCall.name}</span>
+                            ${copyButtonHTML}
                             <span class="tool-call-toggle" id="toggle-${uniqueId}">▼ Show details</span>
                         </div>
                         <div class="tool-call-details" id="details-${uniqueId}">
@@ -1034,6 +1075,16 @@
                         </div>
                     `;
                     listDiv.appendChild(toolDiv);
+
+                    // Attach click handler programmatically if curl exists
+                    // NOTE: Use toolDiv.querySelector, not document.getElementById - the element
+                    // is not yet in the document at this point, so getElementById won't find it.
+                    if (debugCurl) {
+                        const button = toolDiv.querySelector(`#${copyButtonId}`);
+                        if (button) {
+                            button.addEventListener('click', (event) => copyCurl(event, debugCurl));
+                        }
+                    }
                 });
 
                 toolCallsDiv.appendChild(listDiv);
@@ -1106,6 +1157,27 @@
                 details.classList.add('expanded');
                 toggle.textContent = '▲ Hide details';
             }
+        }
+
+        function copyCurl(event, curlCommands) {
+            event.stopPropagation(); // Don't trigger toggle
+
+            const text = Array.isArray(curlCommands) ? curlCommands.join('\n\n') : curlCommands;
+
+            navigator.clipboard.writeText(text).then(() => {
+                const button = event.target;
+                const originalText = button.textContent;
+                button.textContent = '✓ Copied';
+                button.style.background = '#28a745';
+
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.style.background = '#38B28E';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy curl command');
+            });
         }
 
         function formatToolOutput(output) {
@@ -1523,7 +1595,7 @@
         }
 
         async function autoStartMCP(accountId, accountName) {
-            // Silently start MCP server with the account (no UI feedback)
+            // Start MCP server with the account
             try {
                 const response = await fetch('/api/switch-account', {
                     method: 'POST',
@@ -1536,10 +1608,13 @@
                 });
 
                 if (!response.ok) {
-                    console.warn('Failed to auto-start MCP for account:', accountName);
+                    const error = await response.text();
+                    console.error('Failed to auto-start MCP for account:', accountName, error);
+                    throw new Error(`Failed to initialize session: ${error}`);
                 }
             } catch (error) {
                 console.error('Error auto-starting MCP:', error);
+                throw error; // Re-throw so caller knows it failed
             }
         }
 
@@ -1563,7 +1638,12 @@
                         input.placeholder = 'Select account';
 
                         // Auto-start MCP with last selected account
-                        await autoStartMCP(currentAccountId, accountName);
+                        try {
+                            await autoStartMCP(currentAccountId, accountName);
+                        } catch (error) {
+                            input.placeholder = 'Session failed - select account';
+                            console.error('Session initialization failed:', error);
+                        }
                     } else {
                         // No current account found, show first account or placeholder
                         if (allAccounts.length > 0) {
@@ -1574,7 +1654,12 @@
                             currentAccountId = firstAccount.accountId;
 
                             // Auto-start MCP with first account
-                            await autoStartMCP(currentAccountId, accountName);
+                            try {
+                                await autoStartMCP(currentAccountId, accountName);
+                            } catch (error) {
+                                input.placeholder = 'Session failed - select account';
+                                console.error('Session initialization failed:', error);
+                            }
                         } else {
                             input.placeholder = 'Select account';
                         }
@@ -2070,7 +2155,12 @@
         // Focus input on load and load accounts
         window.onload = async () => {
             const input = document.getElementById('messageInput');
-            input.focus();
+            const sendButton = document.getElementById('sendButton');
+
+            // Disable input until session ready
+            input.disabled = true;
+            input.placeholder = 'Initializing...';
+            if (sendButton) sendButton.disabled = true;
 
             // Add auto-resize listener
             input.addEventListener('input', autoResizeTextarea);
@@ -2080,12 +2170,22 @@
             if (hash.startsWith('#share=')) {
                 const shareToken = hash.substring(7);
                 await loadSharedConversation(shareToken);
+                // Re-enable after loading
+                input.disabled = false;
+                input.placeholder = 'Type your message...';
+                if (sendButton) sendButton.disabled = false;
+                input.focus();
             } else {
                 await loadAccounts();
                 // Load conversations after account is selected
                 if (currentAccountId) {
                     await loadConversations();
                 }
+                // Re-enable after session ready
+                input.disabled = false;
+                input.placeholder = 'Type your message...';
+                if (sendButton) sendButton.disabled = false;
+                input.focus();
             }
         };
 

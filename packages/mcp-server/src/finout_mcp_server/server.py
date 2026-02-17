@@ -30,6 +30,9 @@ server = Server("finout-mcp-server")
 # Global client instance (will be initialized on startup)
 finout_client: FinoutClient | None = None
 
+# In-memory feedback storage
+feedback_log: list[dict[str, Any]] = []
+
 
 def format_currency(amount: float) -> str:
     """Format currency with thousands separator"""
@@ -86,61 +89,38 @@ async def list_tools() -> list[Tool]:
             name="query_costs",
             description=(
                 "Query cloud costs AND usage with flexible filters and grouping.\n\n"
-                "⚠️ COST + USAGE IN ONE QUERY:\n"
+                "WHEN TO USE: When the user asks about spending, costs, bills, expenses, "
+                "or usage for any cloud service or resource.\n\n"
+                "WORKFLOW (follow this order):\n"
+                "1) ALWAYS call search_filters first to find relevant filters (unless you already have filter metadata)\n"
+                "2) Copy the FULL filter object from search results (costCenter, key, path, type)\n"
+                "3) Preserve EXACT capitalization - cost centers are case-sensitive!\n"
+                "4) Add operator ('is' for equals) and value (single string), then query\n\n"
+                "PRESENTING RESULTS: Summarize with total cost, top 5 items, and percentage of total. "
+                "Use a table if more than 3 items. Mention the time period.\n\n"
+                "COST + USAGE IN ONE QUERY:\n"
                 "- Cost is ALWAYS returned in results\n"
                 "- To ALSO get usage: Provide usage_configuration\n"
-                "- When usage_configuration has 'units', results include BOTH cost AND usage\n"
-                "- No need for separate queries - get cost and usage together!\n\n"
-                "USAGE CONFIGURATION:\n"
-                "- usageType: 'usageAmount' (raw usage) OR 'normalizedUsageAmount' (normalized across resources)\n"
-                "- costCenter: Cost center name (e.g., 'amazon-cur', 'Azure', 'GCP')\n"
-                "- units: Unit type (discover with get_usage_unit_types tool)\n\n"
+                "- Call get_usage_unit_types BEFORE any usage query to discover valid units\n"
+                "- Chain: get_usage_unit_types → query_costs with usage_configuration\n\n"
                 "USAGE EXAMPLES:\n"
                 '- AWS EC2 hours: {"usageType": "usageAmount", "costCenter": "amazon-cur", "units": "Hrs"}\n'
                 '- Azure hours: {"usageType": "usageAmount", "costCenter": "Azure", "units": "1 Hour"}\n'
-                '- GCP hours: {"usageType": "usageAmount", "costCenter": "GCP", "units": "Hour"}\n'
-                '- Normalized: {"usageType": "normalizedUsageAmount", "costCenter": "amazon-cur", "units": "Hrs"}\n\n'
-                "WORKFLOW:\n"
-                "1) Use search_filters to find relevant filters (e.g., search_filters('service'))\n"
-                "2) Copy the FULL filter object from search results (costCenter, key, path, type)\n"
-                "3) ⚠️ PRESERVE EXACT CAPITALIZATION - Cost centers are case-sensitive!\n"
-                "   Examples: 'virtualTag' (NOT 'VIRTUALTAG'), 'amazon-cur', 'kubernetes'\n"
-                "4) Add operator ('is' for equals) and value (single string), then query\n\n"
-                "COMPLETE EXAMPLES:\n\n"
-                "Example 1 - Standard column (service):\n"
-                "filters: [{\n"
-                "  'costCenter': 'amazon-cur',\n"
-                "  'key': 'finrichment_product_name',\n"
-                "  'path': 'AMAZON-CUR/Product',\n"
-                "  'type': 'col',\n"
-                "  'operator': 'is',\n"
-                "  'value': 'ec2'\n"
-                "}]\n\n"
-                "Example 2 - Kubernetes deployment (namespace_object type):\n"
-                "filters: [{\n"
-                "  'costCenter': 'kubernetes',\n"
-                "  'key': 'deployment',\n"
-                "  'path': 'Kubernetes/Resources/deployment',\n"
-                "  'type': 'namespace_object',  ← EXACT type from search_filters!\n"
-                "  'operator': 'oneOf',\n"
-                "  'value': ['refresh-web', 'refresh-notifications']\n"
-                "}]\n\n"
-                "Example 3 - Custom tag:\n"
-                "filters: [{\n"
-                "  'costCenter': 'amazon-cur',\n"
-                "  'key': 'environment',\n"
-                "  'path': 'AWS/Tags/environment',\n"
-                "  'type': 'tag',  ← EXACT type from search_filters!\n"
-                "  'operator': 'is',\n"
-                "  'value': 'production'\n"
-                "}]\n\n"
-                "⚠️ CRITICAL - Filter Types:\n"
-                "- NEVER guess the type value!\n"
-                "- ALWAYS use search_filters FIRST to get the exact type\n"
+                '- GCP hours: {"usageType": "usageAmount", "costCenter": "GCP", "units": "Hour"}\n\n'
+                "FILTER EXAMPLES:\n\n"
+                "Standard column (service):\n"
+                "filters: [{'costCenter': 'amazon-cur', 'key': 'finrichment_product_name', "
+                "'path': 'AMAZON-CUR/Product', 'type': 'col', 'operator': 'is', 'value': 'ec2'}]\n\n"
+                "Kubernetes deployment:\n"
+                "filters: [{'costCenter': 'kubernetes', 'key': 'deployment', "
+                "'path': 'Kubernetes/Resources/deployment', 'type': 'namespace_object', "
+                "'operator': 'oneOf', 'value': ['refresh-web', 'refresh-notifications']}]\n\n"
+                "Custom tag:\n"
+                "filters: [{'costCenter': 'amazon-cur', 'key': 'environment', "
+                "'path': 'AWS/Tags/environment', 'type': 'tag', 'operator': 'is', 'value': 'production'}]\n\n"
+                "CRITICAL RULES:\n"
+                "- NEVER guess the filter type - ALWAYS use search_filters first\n"
                 "- COPY the exact 'type' value from search results\n"
-                "- Common types: 'col' (columns), 'tag' (tags), 'namespace_object' (K8s resources)\n"
-                "- Different resources may have different type values - always check search results!\n\n"
-                "⚠️ CRITICAL - Operators:\n"
                 "- operator: 'is' for single value, 'oneOf' for multiple values (OR)\n"
                 "- value: String for 'is', array for 'oneOf'"
             ),
@@ -272,9 +252,14 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="compare_costs",
             description=(
-                "Compare cloud costs between two time periods with optional filters. "
-                "Useful for questions like 'How do this month's EC2 costs compare to last month?' "
-                "Returns delta and percentage change. Supports same filters as query_costs."
+                "Compare cloud costs between two time periods with optional filters.\n\n"
+                "WHEN TO USE: When the user says 'compare', 'vs', 'change', 'trend', "
+                "'grew', 'shrank', 'increased', 'decreased', or asks about cost differences "
+                "between periods (e.g., 'How do this month's EC2 costs compare to last month?').\n\n"
+                "WORKFLOW: Same as query_costs - call search_filters first for filter metadata.\n\n"
+                "PRESENTING RESULTS: Always include the percentage change AND absolute delta. "
+                "Lead with the trend direction (up/down), then the delta, then the breakdown. "
+                "Use a table for grouped comparisons."
             ),
             inputSchema={
                 "type": "object",
@@ -356,9 +341,10 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="debug_filters",
             description=(
-                "🔍 DEBUG TOOL: Shows raw filter metadata to diagnose issues. "
-                "Use this when filters seem to be missing or search isn't working. "
-                "Returns a sample of what's in the filter cache."
+                "Internal diagnostic tool for inspecting raw filter metadata.\n\n"
+                "WHEN TO USE: Only when filter searches return unexpected results or "
+                "you suspect the filter cache is stale/incomplete.\n\n"
+                "DO NOT use for normal queries - use search_filters instead."
             ),
             inputSchema={
                 "type": "object",
@@ -378,9 +364,12 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_anomalies",
             description=(
-                "Retrieve detected cost anomalies and spikes. "
-                "Use this to answer questions like 'Were there any unusual cost spikes?' "
-                "or 'What anomalies were detected this week?'"
+                "Retrieve detected cost anomalies and spikes.\n\n"
+                "WHEN TO USE: When the user mentions 'spike', 'anomaly', 'unusual', "
+                "'unexpected cost', 'sudden increase', or asks about irregular spending.\n\n"
+                "PRESENTING RESULTS: Highlight the biggest impact first. "
+                "Show severity, affected service, cost impact, and date. "
+                "Suggest investigating the top anomalies with compare_costs for root cause analysis."
             ),
             inputSchema={
                 "type": "object",
@@ -403,10 +392,12 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_waste_recommendations",
             description=(
-                "Get CostGuard waste detection and optimization recommendations. "
-                "Identifies idle resources, rightsizing opportunities, and commitment gaps. "
-                "Use for questions like 'What resources can I shut down to save money?' "
-                "or 'Show me idle EC2 instances.'"
+                "Get CostGuard waste detection and optimization recommendations.\n\n"
+                "WHEN TO USE: When the user asks about 'savings', 'waste', 'idle', 'optimize', "
+                "'reduce costs', 'shut down', 'unused resources', or 'rightsizing'.\n\n"
+                "PRESENTING RESULTS: Present as a prioritized numbered action list sorted by savings. "
+                "Show total potential savings at the top. Include annual projection. "
+                "For each recommendation, show resource, current cost, and potential savings."
             ),
             inputSchema={
                 "type": "object",
@@ -441,9 +432,11 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="list_available_filters",
             description=(
-                "List all available cost filters organized by cost center. "
-                "⚠️ WARNING: Returns large response. Only use if user explicitly asks 'what filters are available?' "
-                "For normal cost queries, use search_filters instead to find specific filters."
+                "List all available cost filters organized by cost center.\n\n"
+                "WHEN TO USE: ONLY when the user explicitly asks 'what filters exist?', "
+                "'what can I filter by?', or 'show me all available filters'.\n\n"
+                "DO NOT use for normal cost queries - use search_filters instead. "
+                "This returns a large response and should be a last resort."
             ),
             inputSchema={
                 "type": "object",
@@ -462,17 +455,18 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="search_filters",
             description=(
-                "🎯 PRIMARY TOOL for finding filters (columns AND tags). Search by keyword to discover filters. "
-                "Use this when building cost queries from natural language questions.\n\n"
-                "SEARCHES BOTH:\n"
-                "- 📊 COLUMNS: Standard filters (service, region, account, etc.)\n"
-                "- 🏷️ TAGS: Custom labels (environment, team, db_purpose, etc.)\n\n"
+                "Your FIRST STEP for any cost question. Extract entities from the user's question "
+                "and search for matching filters.\n\n"
+                "WHEN TO USE: Before ANY call to query_costs or compare_costs. "
+                "This discovers the filter metadata (costCenter, key, path, type) needed for queries.\n\n"
+                "CHAIN: search_filters → get_filter_values (if needed to verify exact values) → query_costs\n\n"
+                "Searches BOTH columns (service, region, account) AND tags (environment, team, custom labels).\n\n"
                 "Examples:\n"
                 "- search_filters('service') → AWS/GCP services\n"
-                "- search_filters('db_purpose') → Custom database tags\n"
                 "- search_filters('environment') → Environment tags\n"
                 "- search_filters('pod') → Kubernetes pods\n\n"
-                "Returns up to 50 matches sorted by relevance, grouped by type (TAGS vs COLUMNS)."
+                "DO NOT show raw search results to the user. Use them to build the next query.\n\n"
+                "Returns up to 50 matches sorted by relevance."
             ),
             inputSchema={
                 "type": "object",
@@ -492,17 +486,16 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_filter_values",
             description=(
-                "Get the values for a specific filter (lazy-loaded on demand). "
-                "Returns up to 100 values by default to prevent context overload. "
-                "Use this after discovering filters with search_filters.\n\n"
-                "⚠️ IMPORTANT: When searching for values containing a substring (e.g., 'deployments containing refresh'), "
-                "increase the limit (e.g., limit=300-500) to ensure all matching values are included!\n\n"
+                "Get the actual values for a specific filter (lazy-loaded on demand).\n\n"
+                "WHEN TO USE: After search_filters, when you need to verify exact values "
+                "or the user asks 'what X do we have?' (e.g., 'what services do we have?', "
+                "'what environments exist?').\n\n"
+                "CHAIN: search_filters → get_filter_values → query_costs\n\n"
+                "Increase limit (300-500) when searching for values containing a substring.\n\n"
                 "EXAMPLES:\n"
-                "1. Get specific values:\n"
-                "   get_filter_values(filter_key='service', cost_center='amazon-cur', filter_type='col', limit=50)\n\n"
-                "2. Search for values containing 'refresh' (K8s deployments):\n"
-                "   get_filter_values(filter_key='deployment', cost_center='kubernetes', filter_type='namespace_object', limit=500)\n"
-                "   Then filter results for values containing 'refresh'"
+                "- get_filter_values(filter_key='service', cost_center='amazon-cur', filter_type='col', limit=50)\n"
+                "- get_filter_values(filter_key='deployment', cost_center='kubernetes', "
+                "filter_type='namespace_object', limit=500)"
             ),
             inputSchema={
                 "type": "object",
@@ -537,36 +530,13 @@ async def list_tools() -> list[Tool]:
             name="get_usage_unit_types",
             description=(
                 "Discover available usage units for a cost center (AWS, Azure, GCP, etc.).\n\n"
-                "Use this BEFORE creating usage queries to find valid unit types.\n\n"
-                "WORKFLOW:\n"
-                "1. Call this tool to discover units for a cost center\n"
-                "2. Pick a unit from the results (e.g., 'Hour', 'Gibibyte', 'Count')\n"
-                "3. Use it in query_costs with usage_configuration\n\n"
-                "EXAMPLES:\n\n"
-                "Find AWS usage units:\n"
-                "get_usage_unit_types(\n"
-                "  filters=[{\n"
-                "    'costCenter': 'global',\n"
-                "    'key': 'cost_center_type',\n"
-                "    'path': 'Global/Cost Center',\n"
-                "    'type': 'col',\n"
-                "    'operator': 'is',\n"
-                "    'value': 'AWS'\n"
-                "  }]\n"
-                ")\n"
-                "→ Returns: [{'costCenter': 'amazon-cur', 'units': 'Hrs'}, ...]\n\n"
-                "Find GCP usage units:\n"
-                "get_usage_unit_types(\n"
-                "  filters=[{\n"
-                "    'costCenter': 'global',\n"
-                "    'key': 'cost_center_type',\n"
-                "    'path': 'Global/Cost Center',\n"
-                "    'type': 'col',\n"
-                "    'operator': 'is',\n"
-                "    'value': 'GCP'\n"
-                "  }]\n"
-                ")\n"
-                "→ Returns: [{'costCenter': 'GCP', 'units': 'Hour'}, {'costCenter': 'GCP', 'units': 'Gibibyte'}, ...]"
+                "WHEN TO USE: Call this BEFORE any usage query to discover valid units. "
+                "Without this, you won't know what unit types are available.\n\n"
+                "CHAIN: get_usage_unit_types → query_costs with usage_configuration\n\n"
+                "EXAMPLE:\n"
+                "get_usage_unit_types(filters=[{'costCenter': 'global', 'key': 'cost_center_type', "
+                "'path': 'Global/Cost Center', 'type': 'col', 'operator': 'is', 'value': 'AWS'}])\n"
+                "→ Returns: [{'costCenter': 'amazon-cur', 'units': 'Hrs'}, ...]"
             ),
             inputSchema={
                 "type": "object",
@@ -606,21 +576,19 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="discover_context",
             description=(
-                "Search for how the account organizes cost/usage data related to a query.\n\n"
-                "Discovers business context by searching across:\n"
-                "- **Dashboards**: Named collections of widgets showing cost breakdowns\n"
-                "- **Views**: Saved queries with specific filters and groupings (semantic layer)\n"
-                "- **Data Explorers**: Complex multi-dimensional analysis queries\n\n"
-                "Returns information about filters, virtual tags, dimensions, and groupings commonly used for the queried topic. "
-                "This helps understand the business logic and existing organizational patterns before querying costs.\n\n"
-                "**When to use:**\n"
-                '- User asks about a named concept ("vikings", "production", "team X")\n'
-                "- Need to understand how they organize/filter data\n"
-                "- Before making cost queries for unfamiliar topics\n\n"
-                "**Example queries:**\n"
-                '- "vikings" → finds "Vikings dashboard", shows what filters/groupings they use\n'
+                "Search for how the account organizes cost/usage data related to a concept.\n\n"
+                "WHEN TO USE: When the user mentions a named concept you don't recognize "
+                "(team name, project name, custom grouping, application name). "
+                "This reveals how the org structures their data by searching dashboards, "
+                "views, and data explorers.\n\n"
+                "Discovers business context including filters, virtual tags, dimensions, "
+                "and groupings commonly used for the queried topic.\n\n"
+                "EXAMPLES:\n"
+                '- "vikings" → finds "Vikings dashboard", shows filters/groupings\n'
                 '- "production" → finds production views, shows env=prod filters\n'
-                '- "kafka" → finds Kafka-related dashboards/views and their configurations'
+                '- "kafka" → finds Kafka-related dashboards and their configurations\n\n'
+                "DO NOT use for standard cost queries where you already know the filter. "
+                "Use search_filters instead."
             ),
             inputSchema={
                 "type": "object",
@@ -651,6 +619,71 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["query"],
+            },
+        ),
+        Tool(
+            name="get_account_context",
+            description=(
+                "Get account context: name, connected cost centers, and available filter counts.\n\n"
+                "WHEN TO USE: Call this at the START of a conversation to understand "
+                "what data is available. Helps you give better answers by knowing "
+                "which cloud providers are connected and how much data exists.\n\n"
+                "DO NOT call repeatedly - the result is stable within a session."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
+            name="submit_feedback",
+            description=(
+                "Submit feedback about your experience answering the user's question. "
+                "Rate how well you were able to answer and note any friction points.\n\n"
+                "WHEN TO CALL: After every completed interaction where you queried data.\n"
+                "DO NOT call for simple questions that didn't need tools."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "rating": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5,
+                        "description": "1=couldn't answer, 2=poor, 3=adequate, 4=good, 5=excellent",
+                    },
+                    "query_type": {
+                        "type": "string",
+                        "enum": [
+                            "cost_query",
+                            "comparison",
+                            "anomaly",
+                            "waste",
+                            "filter_discovery",
+                            "context",
+                            "other",
+                        ],
+                    },
+                    "tools_used": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of tools used to answer",
+                    },
+                    "friction_points": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "What made answering difficult "
+                            "(e.g., 'filter not found', 'ambiguous user question', 'slow API')"
+                        ),
+                    },
+                    "suggestion": {
+                        "type": "string",
+                        "description": "How the MCP could be improved to handle this better",
+                    },
+                },
+                "required": ["rating", "query_type", "tools_used"],
             },
         ),
     ]
@@ -685,6 +718,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         ]
 
     try:
+        # Clear stale curls before each tool call
+        finout_client.collect_curls()
+
         if name == "query_costs":
             result = await query_costs_impl(arguments)
         elif name == "compare_costs":
@@ -705,8 +741,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await debug_filters_impl(arguments)
         elif name == "discover_context":
             result = await discover_context_impl(arguments or {})
+        elif name == "get_account_context":
+            result = await get_account_context_impl()
+        elif name == "submit_feedback":
+            result = await submit_feedback_impl(arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
+
+        # Attach debug curl commands if any HTTP requests were made
+        curls = finout_client.collect_curls()
+        if curls and isinstance(result, dict):
+            result["_debug_curl"] = curls
 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
@@ -832,6 +877,10 @@ async def query_costs_impl(args: dict) -> dict:
         "group_by": group_by,
         "data": summarized,
         "query_timestamp": datetime.now().isoformat(),
+        "_presentation_hint": (
+            "Summarize: total cost, top 5 items, percentage of total. "
+            "Use a table if more than 3 items."
+        ),
     }
 
 
@@ -944,6 +993,11 @@ async def compare_costs_impl(args: dict) -> dict:
     if breakdown:
         result["breakdown_by_group"] = breakdown[:10]  # Top 10 changes
 
+    result["_presentation_hint"] = (
+        "Lead with the trend (up/down), then the delta, then the breakdown. "
+        "Always include both percentage and absolute dollar change."
+    )
+
     return result
 
 
@@ -1028,6 +1082,10 @@ async def get_waste_recommendations_impl(args: dict) -> dict:
         "total_potential_savings": format_currency(total_savings),
         "annual_savings_potential": format_currency(total_savings * 12),
         "recommendations": formatted,
+        "_presentation_hint": (
+            "Present as numbered action list sorted by savings. "
+            "Include total potential savings at top."
+        ),
     }
 
 
@@ -1112,6 +1170,7 @@ async def search_filters_impl(args: dict) -> dict:
         "result_count": len(results),
         "results": formatted,
         "note": "Use get_filter_values to fetch values for any of these filters",
+        "_presentation_hint": ("Don't show raw results to user. Use them to build the next query."),
     }
 
 
@@ -1439,6 +1498,56 @@ async def discover_context_impl(args: dict) -> dict:
         results["summary"] = "".join(summary_parts)
 
     return results
+
+
+async def get_account_context_impl() -> dict:
+    """Implementation of get_account_context tool"""
+    assert finout_client is not None
+
+    return await finout_client.get_account_context()
+
+
+async def submit_feedback_impl(args: dict) -> dict:
+    """Implementation of submit_feedback tool"""
+    import sys
+
+    rating = args.get("rating")
+    query_type = args.get("query_type")
+    tools_used = args.get("tools_used", [])
+    friction_points = args.get("friction_points", [])
+    suggestion = args.get("suggestion")
+
+    if not isinstance(rating, int) or rating < 1 or rating > 5:
+        raise ValueError("rating must be an integer between 1 and 5")
+
+    valid_types = [
+        "cost_query",
+        "comparison",
+        "anomaly",
+        "waste",
+        "filter_discovery",
+        "context",
+        "other",
+    ]
+    if query_type not in valid_types:
+        raise ValueError(f"query_type must be one of: {valid_types}")
+
+    entry = {
+        "rating": rating,
+        "query_type": query_type,
+        "tools_used": tools_used,
+        "friction_points": friction_points,
+        "suggestion": suggestion,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    feedback_log.append(entry)
+    print(f"[feedback] {json.dumps(entry)}", file=sys.stderr)
+
+    return {
+        "status": "recorded",
+        "total_feedback_count": len(feedback_log),
+    }
 
 
 # Resource Definitions

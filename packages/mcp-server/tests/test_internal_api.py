@@ -453,3 +453,220 @@ class TestFinoutClientInternalAPI:
         # Test unknown cost centers (pass through as-is)
         assert client._normalize_cost_center("unknown-center") == "unknown-center"
         assert client._normalize_cost_center("CustomCenter") == "CustomCenter"
+
+    @pytest.mark.asyncio
+    async def test_get_account_context(self, mock_internal_response, sample_filters):
+        """Test get_account_context returns expected structure"""
+        mock_internal_response.json.return_value = sample_filters
+
+        client = FinoutClient(
+            client_id="test",
+            secret_key="test",
+            internal_api_url="http://localhost:3000",
+            account_id="test-account-123",
+        )
+
+        # Pre-populate account info to avoid extra API call
+        client._account_info = {
+            "name": "Test Account",
+            "payerId": "payer-123",
+            "featureFlags": {"mcp_enabled": True},
+        }
+
+        with patch.object(client.internal_client, "post", return_value=mock_internal_response):
+            result = await client.get_account_context()
+
+            assert result["account_name"] == "Test Account"
+            assert result["account_id"] == "test-account-123"
+            assert "cost_centers" in result
+            assert "feature_flags" in result
+            assert result["feature_flags"]["mcp_enabled"] is True
+            # Verify cost_centers have filter_count
+            for cc_info in result["cost_centers"].values():
+                assert "filter_count" in cc_info
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_get_account_context_without_account_info(self):
+        """Test get_account_context without internal API returns minimal info"""
+        with patch.dict("os.environ", {}, clear=True):
+            client = FinoutClient(
+                client_id="test", secret_key="test", allow_missing_credentials=False
+            )
+
+            result = await client.get_account_context()
+
+            assert result["account_name"] == "Unknown"
+            assert result["cost_centers"] == {}
+
+            await client.close()
+
+
+class TestDebugCurl:
+    """Tests for debug curl capture"""
+
+    def test_request_to_curl_post(self):
+        """Test POST request generates correct curl with masked secrets"""
+        request = httpx.Request(
+            "POST",
+            "http://internal-api:3000/cost-service/cost",
+            headers={
+                "Content-Type": "application/json",
+                "x-finout-client-id": "real-id",
+                "x-finout-secret-key": "real-secret",
+                "authorized-account-id": "acct-123",
+            },
+            json={"date": {"relativeRange": "last30Days"}},
+        )
+
+        curl = FinoutClient._request_to_curl(request)
+
+        assert "curl -X POST" in curl
+        assert "x-finout-client-id: ***" in curl
+        assert "x-finout-secret-key: ***" in curl
+        assert "real-id" not in curl
+        assert "real-secret" not in curl
+        assert "authorized-account-id: acct-123" in curl
+        assert "-d '" in curl
+        assert "last30Days" in curl
+        assert "http://internal-api:3000/cost-service/cost" in curl
+
+    def test_request_to_curl_get(self):
+        """Test GET request produces correct curl without -d"""
+        request = httpx.Request(
+            "GET",
+            "http://internal-api:3000/account-service/account/123",
+            headers={"Content-Type": "application/json"},
+        )
+
+        curl = FinoutClient._request_to_curl(request)
+
+        assert "curl -X GET" in curl
+        assert "-d " not in curl
+        assert "account-service/account/123" in curl
+
+    @pytest.mark.asyncio
+    async def test_collect_curls_returns_and_clears(self):
+        """Test collect_curls returns captured curls and clears the list"""
+        client = FinoutClient(
+            client_id="test",
+            secret_key="test",
+            internal_api_url="http://localhost:3000",
+            account_id="test-account",
+        )
+
+        # Simulate captured curls
+        client._recent_curls = ["curl -X POST ...", "curl -X GET ..."]
+
+        curls = client.collect_curls()
+        assert len(curls) == 2
+        assert curls[0] == "curl -X POST ..."
+
+        # Should be cleared
+        assert client._recent_curls == []
+        assert client.collect_curls() == []
+
+        await client.close()
+
+
+class TestSubmitFeedback:
+    """Tests for submit_feedback tool handler"""
+
+    @pytest.mark.asyncio
+    async def test_submit_feedback_valid(self):
+        """Test submit_feedback accepts valid input"""
+        from src.finout_mcp_server.server import feedback_log, submit_feedback_impl
+
+        initial_count = len(feedback_log)
+
+        result = await submit_feedback_impl(
+            {
+                "rating": 4,
+                "query_type": "cost_query",
+                "tools_used": ["search_filters", "query_costs"],
+                "friction_points": ["slow API"],
+                "suggestion": "Cache filter results",
+            }
+        )
+
+        assert result["status"] == "recorded"
+        assert result["total_feedback_count"] == initial_count + 1
+        assert feedback_log[-1]["rating"] == 4
+        assert feedback_log[-1]["query_type"] == "cost_query"
+
+    @pytest.mark.asyncio
+    async def test_submit_feedback_invalid_rating(self):
+        """Test submit_feedback rejects invalid rating"""
+        from src.finout_mcp_server.server import submit_feedback_impl
+
+        with pytest.raises(ValueError, match="rating must be an integer"):
+            await submit_feedback_impl({"rating": 6, "query_type": "cost_query", "tools_used": []})
+
+    @pytest.mark.asyncio
+    async def test_submit_feedback_invalid_query_type(self):
+        """Test submit_feedback rejects invalid query_type"""
+        from src.finout_mcp_server.server import submit_feedback_impl
+
+        with pytest.raises(ValueError, match="query_type must be one of"):
+            await submit_feedback_impl(
+                {"rating": 3, "query_type": "invalid_type", "tools_used": []}
+            )
+
+
+class TestToolDescriptions:
+    """Tests that tool descriptions contain coaching keywords"""
+
+    @pytest.mark.asyncio
+    async def test_descriptions_contain_coaching(self):
+        """Verify tool descriptions include when-to-use coaching"""
+        from src.finout_mcp_server.server import list_tools
+
+        tools = await list_tools()
+        tool_map = {t.name: t.description for t in tools}
+
+        # query_costs should coach on workflow
+        assert "WHEN TO USE" in tool_map["query_costs"]
+        assert "search_filters" in tool_map["query_costs"]
+
+        # compare_costs should mention trigger words
+        assert "compare" in tool_map["compare_costs"].lower()
+        assert "trend" in tool_map["compare_costs"].lower()
+
+        # search_filters should emphasize it's the first step
+        assert "FIRST STEP" in tool_map["search_filters"]
+
+        # get_filter_values should reference chaining
+        assert "CHAIN" in tool_map["get_filter_values"]
+
+        # get_waste_recommendations should mention trigger words
+        assert "savings" in tool_map["get_waste_recommendations"].lower()
+        assert "waste" in tool_map["get_waste_recommendations"].lower()
+
+        # get_anomalies should mention trigger words
+        assert "spike" in tool_map["get_anomalies"].lower()
+        assert "anomaly" in tool_map["get_anomalies"].lower()
+
+        # list_available_filters should warn against casual use
+        assert "ONLY" in tool_map["list_available_filters"]
+
+        # get_usage_unit_types should mention chaining
+        assert "CHAIN" in tool_map["get_usage_unit_types"]
+
+        # discover_context should mention named concepts
+        assert "named concept" in tool_map["discover_context"].lower()
+
+        # debug_filters should discourage normal use
+        assert "DO NOT" in tool_map["debug_filters"]
+
+    @pytest.mark.asyncio
+    async def test_new_tools_registered(self):
+        """Verify get_account_context and submit_feedback are listed"""
+        from src.finout_mcp_server.server import list_tools
+
+        tools = await list_tools()
+        tool_names = {t.name for t in tools}
+
+        assert "get_account_context" in tool_names
+        assert "submit_feedback" in tool_names
+        assert len(tools) == 12  # 10 original + 2 new

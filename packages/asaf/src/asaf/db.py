@@ -67,6 +67,56 @@ class Database:
                 """
             )
 
+            # Create feedback table
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+                    account_id VARCHAR(255) NOT NULL,
+                    session_id VARCHAR(255),
+                    rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+                    query_type VARCHAR(50) NOT NULL,
+                    tools_used TEXT[],
+                    friction_points TEXT[],
+                    suggestion TEXT,
+                    created_at TIMESTAMP DEFAULT NOW()
+                );
+                """
+            )
+
+            # Create feedback indexes
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_feedback_created_at
+                ON feedback(created_at DESC);
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_feedback_account_id
+                ON feedback(account_id);
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_feedback_rating
+                ON feedback(rating);
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_feedback_query_type
+                ON feedback(query_type);
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_feedback_conversation_id
+                ON feedback(conversation_id);
+                """
+            )
+
     async def save_conversation(
         self,
         name: str,
@@ -187,6 +237,140 @@ class Database:
             )
 
             return result == "UPDATE 1"
+
+    async def save_feedback(
+        self,
+        account_id: str,
+        rating: int,
+        query_type: str,
+        tools_used: Optional[List[str]] = None,
+        friction_points: Optional[List[str]] = None,
+        suggestion: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Save feedback and return the record"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO feedback (
+                    conversation_id, account_id, session_id, rating, query_type,
+                    tools_used, friction_points, suggestion
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id, account_id, rating, query_type, created_at
+                """,
+                conversation_id,
+                account_id,
+                session_id,
+                rating,
+                query_type,
+                tools_used or [],
+                friction_points or [],
+                suggestion,
+            )
+
+            return dict(row)
+
+    async def list_feedback(
+        self,
+        account_id: Optional[str] = None,
+        min_rating: Optional[int] = None,
+        max_rating: Optional[int] = None,
+        query_type: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """List feedback with optional filtering"""
+        async with self.pool.acquire() as conn:
+            query = """
+                SELECT id, conversation_id, account_id, session_id, rating, query_type,
+                       tools_used, friction_points, suggestion, created_at
+                FROM feedback
+                WHERE 1=1
+            """
+            params = []
+            param_idx = 1
+
+            if account_id:
+                query += f" AND account_id = ${param_idx}"
+                params.append(account_id)
+                param_idx += 1
+
+            if min_rating:
+                query += f" AND rating >= ${param_idx}"
+                params.append(min_rating)
+                param_idx += 1
+
+            if max_rating:
+                query += f" AND rating <= ${param_idx}"
+                params.append(max_rating)
+                param_idx += 1
+
+            if query_type:
+                query += f" AND query_type = ${param_idx}"
+                params.append(query_type)
+                param_idx += 1
+
+            query += f" ORDER BY created_at DESC LIMIT ${param_idx}"
+            params.append(limit)
+
+            rows = await conn.fetch(query, *params)
+            return [dict(row) for row in rows]
+
+    async def get_feedback_stats(
+        self, account_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get aggregate feedback statistics"""
+        async with self.pool.acquire() as conn:
+            # Get basic stats
+            if account_id:
+                basic_stats = await conn.fetchrow(
+                    """
+                    SELECT
+                        COUNT(*) as total_count,
+                        COALESCE(AVG(rating)::numeric(3,2), 0) as avg_rating,
+                        COUNT(*) FILTER (WHERE rating >= 4) as positive_count,
+                        COUNT(*) FILTER (WHERE rating <= 2) as negative_count
+                    FROM feedback
+                    WHERE account_id = $1
+                    """,
+                    account_id,
+                )
+                # Get breakdown by query type
+                type_breakdown = await conn.fetch(
+                    """
+                    SELECT query_type, COUNT(*) as count
+                    FROM feedback
+                    WHERE account_id = $1
+                    GROUP BY query_type
+                    ORDER BY count DESC
+                    """,
+                    account_id,
+                )
+            else:
+                basic_stats = await conn.fetchrow(
+                    """
+                    SELECT
+                        COUNT(*) as total_count,
+                        COALESCE(AVG(rating)::numeric(3,2), 0) as avg_rating,
+                        COUNT(*) FILTER (WHERE rating >= 4) as positive_count,
+                        COUNT(*) FILTER (WHERE rating <= 2) as negative_count
+                    FROM feedback
+                    """
+                )
+                # Get breakdown by query type
+                type_breakdown = await conn.fetch(
+                    """
+                    SELECT query_type, COUNT(*) as count
+                    FROM feedback
+                    GROUP BY query_type
+                    ORDER BY count DESC
+                    """
+                )
+
+            result = dict(basic_stats) if basic_stats else {}
+            result["by_query_type"] = {row["query_type"]: row["count"] for row in type_breakdown}
+            return result
 
 
 # Global database instance

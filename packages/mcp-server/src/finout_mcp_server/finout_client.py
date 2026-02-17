@@ -13,6 +13,8 @@ import httpx
 if TYPE_CHECKING:
     from .filter_cache import FilterCache
 
+MASKED_HEADERS = {"x-finout-client-id", "x-finout-secret-key"}
+
 
 class CostType(StrEnum):
     """Cost metric types supported by Finout"""
@@ -89,15 +91,25 @@ class FinoutClient:
         if self.secret_key:
             headers["x-finout-secret-key"] = self.secret_key
 
-        self.client = httpx.AsyncClient(base_url=self.base_url, headers=headers, timeout=30.0)
+        self._recent_curls: list[str] = []
+
+        async def _capture_request(request: httpx.Request) -> None:
+            self._recent_curls.append(self._request_to_curl(request))
+
+        event_hooks: dict[str, list[Any]] = {"request": [_capture_request]}
+
+        self.client = httpx.AsyncClient(
+            base_url=self.base_url, headers=headers, timeout=30.0, event_hooks=event_hooks
+        )
 
         self.internal_client: httpx.AsyncClient | None
         self._account_info: dict[str, Any] | None = None
 
         if self.internal_api_url:
-            # Internal API client - headers will be set per-request with full account context
             self.internal_client = httpx.AsyncClient(
-                base_url=self.internal_api_url, headers=headers.copy(), timeout=30.0
+                base_url=self.internal_api_url,
+                timeout=30.0,
+                event_hooks={"request": [_capture_request]},
             )
         else:
             self.internal_client = None
@@ -115,6 +127,30 @@ class FinoutClient:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
+
+    @staticmethod
+    def _request_to_curl(request: httpx.Request) -> str:
+        """Convert an httpx Request to a replayable curl command."""
+        parts = [f"curl -X {request.method}"]
+        for key, value in request.headers.items():
+            if key.lower() in MASKED_HEADERS:
+                value = "***"
+            parts.append(f"  -H '{key}: {value}'")
+        body = request.content
+        if body:
+            try:
+                body_str = body.decode("utf-8")
+            except UnicodeDecodeError:
+                body_str = "<binary>"
+            parts.append(f"  -d '{body_str}'")
+        parts.append(f"  '{request.url}'")
+        return " \\\n".join(parts)
+
+    def collect_curls(self) -> list[str]:
+        """Return and clear captured curl commands."""
+        curls = self._recent_curls.copy()
+        self._recent_curls.clear()
+        return curls
 
     def _parse_time_period(self, period: str) -> tuple[int, int]:
         """
@@ -379,7 +415,6 @@ class FinoutClient:
         # Headers for account-service call
         # Use 'admin' role to scope to this account (NOT 'sysAdmin' which bypasses tenancy)
         headers = {
-            "Content-Type": "application/json",
             "authorized-user-roles": "admin",
             "authorized-account-id": self.account_id,
         }
@@ -404,11 +439,11 @@ class FinoutClient:
 
     def _get_internal_headers(self) -> dict[str, str]:
         """
-        Get headers for internal API calls with full account context.
-        Mimics what api-gateway does via setAuthorizationHeaders().
+        Get headers for internal API calls.
+        Internal API should only receive account-scoped authorization headers.
 
         Returns:
-            Dictionary of headers including all required authorization context
+            Dictionary of headers for account-scoped authorization
         """
         if not self.internal_client:
             raise ValueError("Internal API client not configured")
@@ -417,48 +452,14 @@ class FinoutClient:
             import sys
 
             print("✗ WARNING: Making API call without account_id!", file=sys.stderr)
-            return {"Content-Type": "application/json", "authorized-user-roles": "admin"}
+            return {"authorized-user-roles": "admin"}
 
-        # Base headers
-        # CRITICAL: Use 'admin' NOT 'sysAdmin' - sysAdmin bypasses account tenancy!
-        headers = {
-            "Content-Type": "application/json",
+        # CRITICAL: Use 'admin' NOT 'sysAdmin' - sysAdmin bypasses account tenancy.
+        # Keep this minimal by design.
+        return {
             "authorized-user-roles": "admin",
             "authorized-account-id": self.account_id,
         }
-
-        # Add account context if we have it
-        if self._account_info:
-            import json
-
-            # Required: payerId for S3 path construction
-            if "payerId" in self._account_info:
-                headers["authorized-payer-id"] = self._account_info["payerId"]
-
-            # Optional but helpful context
-            if "name" in self._account_info:
-                headers["authorized-account-name"] = self._account_info["name"]
-
-            if "defaultContextId" in self._account_info:
-                headers["authorized-context-id"] = str(self._account_info["defaultContextId"])
-
-            if "generalConfig" in self._account_info:
-                headers["authorized-account-general-config"] = json.dumps(
-                    self._account_info["generalConfig"]
-                )
-
-            if "featureFlags" in self._account_info:
-                headers["authorized-feature-flags"] = json.dumps(self._account_info["featureFlags"])
-
-            if "groups" in self._account_info:
-                headers["authorized-groups"] = json.dumps(self._account_info["groups"])
-
-            if "latestCompletedRunTimestamp" in self._account_info:
-                headers["authorized-last-completed-run-timestamp"] = str(
-                    self._account_info["latestCompletedRunTimestamp"]
-                )
-
-        return headers
 
     async def _fetch_filters_metadata(self, date: dict[str, int] | None = None) -> dict[str, Any]:
         """
@@ -1120,6 +1121,33 @@ class FinoutClient:
             raise ValueError(
                 "Request timed out. The usage-unit-types API may be slow or unavailable."
             ) from e
+
+    async def get_account_context(self) -> dict[str, Any]:
+        """Get account context summary for the LLM."""
+        if not self._account_info:
+            if self.account_id and self.internal_client:
+                self._account_info = await self._fetch_account_info()
+            else:
+                return {
+                    "account_name": "Unknown",
+                    "account_id": self.account_id or "Not configured",
+                    "cost_centers": {},
+                    "feature_flags": {},
+                }
+
+        metadata = await self.get_filters_metadata()
+
+        cost_centers = {}
+        for cc, types in metadata.items():
+            filter_count = sum(len(filters) for filters in types.values())
+            cost_centers[cc] = {"filter_count": filter_count}
+
+        return {
+            "account_name": self._account_info.get("name", "Unknown"),
+            "account_id": self.account_id,
+            "cost_centers": cost_centers,
+            "feature_flags": self._account_info.get("featureFlags", {}),
+        }
 
     # Context Discovery Methods
 
