@@ -10,7 +10,9 @@ load_dotenv()
 
 # ruff: noqa: E402
 import json
+import os
 from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import Any
 
 from mcp.server import Server
@@ -22,16 +24,35 @@ from mcp.types import (
     Tool,
 )
 
-from .finout_client import FinoutClient
+from .finout_client import FinoutClient, InternalAuthMode
 
 # Initialize MCP server
 server = Server("finout-mcp-server")
 
 # Global client instance (will be initialized on startup)
 finout_client: FinoutClient | None = None
+runtime_mode: str | None = None
 
 # In-memory feedback storage
 feedback_log: list[dict[str, Any]] = []
+
+
+class MCPMode(StrEnum):
+    """Runtime mode for MCP deployment."""
+
+    PUBLIC = "public"
+    VECTIQOR_INTERNAL = "vectiqor-internal"
+
+
+def _load_runtime_mode() -> MCPMode:
+    raw_mode = os.getenv("MCP_MODE", MCPMode.PUBLIC).strip().lower()
+    try:
+        return MCPMode(raw_mode)
+    except ValueError as e:
+        raise ValueError(
+            f"Invalid MCP_MODE={raw_mode!r}. Supported values: "
+            f"{MCPMode.PUBLIC.value}, {MCPMode.VECTIQOR_INTERNAL.value}"
+        ) from e
 
 
 def format_currency(amount: float) -> str:
@@ -719,6 +740,18 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         # Keep anomalies here for future external API support.
         "get_anomalies",
     }
+
+    if runtime_mode == MCPMode.VECTIQOR_INTERNAL.value and name in key_secret_tools:
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    "Error: Tool not available in vectiqor-internal mode.\n\n"
+                    "This deployment uses internal account-scoped headers and does not allow "
+                    "public key/secret tool execution."
+                ),
+            )
+        ]
 
     if name in internal_api_tools and not finout_client.internal_api_url:
         return [
@@ -1919,25 +1952,45 @@ async def get_prompt(name: str, arguments: dict | None = None) -> dict:
 
 def main():
     """Main entry point for the MCP server"""
-    global finout_client
+    global finout_client, runtime_mode
 
     # Initialize Finout client
-    # Allow missing credentials for testing/inspection - tools will fail if credentials missing
     try:
-        finout_client = FinoutClient(allow_missing_credentials=True)
+        mode = _load_runtime_mode()
+        runtime_mode = mode.value
 
-        # Check if credentials are actually available
+        internal_api_url = os.getenv("FINOUT_INTERNAL_API_URL")
+        if not internal_api_url and mode == MCPMode.PUBLIC:
+            internal_api_url = "https://app.finout.io"
+
+        account_id = os.getenv("FINOUT_ACCOUNT_ID")
+        if not account_id:
+            raise ValueError(
+                "FINOUT_ACCOUNT_ID is required in all modes to enforce account-scoped queries."
+            )
+
+        if mode == MCPMode.PUBLIC:
+            finout_client = FinoutClient(
+                internal_api_url=internal_api_url,
+                account_id=account_id,
+                internal_auth_mode=InternalAuthMode.KEY_SECRET,
+                allow_missing_credentials=False,
+            )
+        else:
+            if not internal_api_url:
+                raise ValueError("FINOUT_INTERNAL_API_URL is required in vectiqor-internal mode.")
+            finout_client = FinoutClient(
+                internal_api_url=internal_api_url,
+                account_id=account_id,
+                internal_auth_mode=InternalAuthMode.AUTHORIZED_HEADERS,
+                allow_missing_credentials=True,
+            )
+
         import sys
 
-        if finout_client.client_id and finout_client.secret_key:
-            print("✓ Finout MCP Server initialized with credentials", file=sys.stderr)
-        else:
-            print("⚠ Finout MCP Server started WITHOUT credentials", file=sys.stderr)
-            print("  Tools will be visible but API calls will fail", file=sys.stderr)
-            print(
-                "  Set FINOUT_CLIENT_ID and FINOUT_SECRET_KEY to enable functionality",
-                file=sys.stderr,
-            )
+        print(f"✓ Finout MCP Server started in mode: {mode.value}", file=sys.stderr)
+        print(f"✓ Internal API URL: {internal_api_url}", file=sys.stderr)
+        print(f"✓ Account ID: {account_id}", file=sys.stderr)
     except Exception as e:
         import sys
 
