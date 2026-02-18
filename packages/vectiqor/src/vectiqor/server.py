@@ -8,7 +8,7 @@ import json
 import os
 import subprocess
 import secrets
-import shutil
+import sys
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -69,11 +69,19 @@ class MCPBridge:
         # Start MCP server - use repo_root to find packages/mcp-server
         mcp_server_path = repo_root / "packages" / "mcp-server"
 
-        mcp_cmd = (
-            ["uv", "run", "finout-mcp-internal"]
-            if shutil.which("uv")
-            else ["finout-mcp-internal"]
+        mcp_src_path = mcp_server_path / "src"
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (
+            f"{mcp_src_path}{os.pathsep}{existing_pythonpath}"
+            if existing_pythonpath
+            else str(mcp_src_path)
         )
+
+        mcp_cmd = [
+            sys.executable,
+            "-c",
+            "from finout_mcp_server.server import main_vectiqor_internal; main_vectiqor_internal()",
+        ]
         print(f"Starting MCP command: {' '.join(mcp_cmd)}")
 
         self.process = subprocess.Popen(

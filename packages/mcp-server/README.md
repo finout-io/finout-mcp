@@ -13,8 +13,8 @@ cat > ~/.config/claude/claude_desktop_config.json <<EOF
 {
   "mcpServers": {
     "finout": {
-      "command": "python",
-      "args": ["-m", "finout_mcp_server"],
+      "command": "finout-mcp",
+      "args": [],
       "env": {
         "FINOUT_INTERNAL_API_URL": "https://your-finout-instance.com",
         "FINOUT_ACCOUNT_ID": "your-account-id",
