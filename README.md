@@ -247,7 +247,7 @@ See [deployments/kubernetes/README.md](deployments/kubernetes/README.md)
 
 ## ⚙️ CI/CD
 
-Pipeline: `.github/workflows/cicd.yml`
+Pipeline: `.circleci/config.yml`
 
 On every PR and push, CI:
 - validates MCP (`ruff`, `mypy`, `pytest`)
@@ -258,10 +258,15 @@ On every PR and push, CI:
 - builds VECTIQOR Docker image
 
 Optional publish steps:
-- GHCR image push: on `main` and internal PRs
-- ECR image push: enabled when these repository secrets are set:
-  - `AWS_ROLE_TO_ASSUME`
+- GHCR image push: when Circle env vars are set:
+  - `GHCR_USERNAME`
+  - `GHCR_TOKEN`
+  - `GHCR_ORG`
+- ECR image push: when Circle env vars are set:
   - `ECR_REGISTRY` (for example `277411487094.dkr.ecr.us-east-1.amazonaws.com`)
+  - `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
+  - `AWS_REGION` (for example `us-east-1`)
 - PyPI package publish (main only): enabled with `PYPI_API_TOKEN`
 
 ---

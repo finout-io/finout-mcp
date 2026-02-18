@@ -1,0 +1,174 @@
+version: 2.1
+
+executors:
+  python:
+    docker:
+      - image: cimg/python:3.11
+  node:
+    docker:
+      - image: cimg/node:20.11
+  docker:
+    docker:
+      - image: cimg/base:stable
+
+jobs:
+  mcp_quality:
+    executor: python
+    steps:
+      - checkout
+      - run:
+          name: Install MCP dependencies
+          command: |
+            python -m pip install --upgrade pip
+            cd packages/mcp-server
+            pip install -e .
+            pip install pytest pytest-asyncio ruff mypy
+      - run:
+          name: Ruff
+          command: |
+            cd packages/mcp-server
+            ruff check .
+            ruff format --check .
+      - run:
+          name: Mypy
+          command: |
+            cd packages/mcp-server
+            mypy src
+      - run:
+          name: Pytest
+          command: |
+            cd packages/mcp-server
+            pytest -q
+
+  vectiqor_quality:
+    executor: node
+    steps:
+      - checkout
+      - run:
+          name: Python compile check
+          command: |
+            python3 -m py_compile \
+              packages/vectiqor/src/vectiqor/server.py \
+              packages/vectiqor/src/vectiqor/db.py \
+              packages/vectiqor/src/vectiqor/dev.py
+      - run:
+          name: Build frontend
+          command: |
+            cd packages/vectiqor/frontend
+            corepack enable
+            pnpm install --frozen-lockfile
+            pnpm build
+
+  build_python_packages:
+    executor: python
+    steps:
+      - checkout
+      - run:
+          name: Build package distributions
+          command: |
+            python -m pip install --upgrade pip build
+            mkdir -p dist/mcp-server dist/vectiqor
+            python -m build packages/mcp-server --outdir dist/mcp-server
+            python -m build packages/vectiqor --outdir dist/vectiqor
+      - persist_to_workspace:
+          root: .
+          paths:
+            - dist
+      - store_artifacts:
+          path: dist
+
+  docker_build_and_optional_push:
+    executor: docker
+    steps:
+      - checkout
+      - setup_remote_docker:
+          docker_layer_caching: true
+      - run:
+          name: Build VECTIQOR image
+          command: |
+            TAG="${CIRCLE_SHA1:0:12}"
+            docker buildx create --name vectiqor-builder --use >/dev/null 2>&1 || docker buildx use vectiqor-builder
+            docker buildx build \
+              --platform linux/amd64 \
+              -f packages/vectiqor/Dockerfile \
+              -t local/vectiqor:${TAG} \
+              --load .
+      - run:
+          name: Optional push to GHCR
+          command: |
+            set -e
+            TAG="${CIRCLE_SHA1:0:12}"
+            if [ -z "${GHCR_USERNAME:-}" ] || [ -z "${GHCR_TOKEN:-}" ] || [ -z "${GHCR_ORG:-}" ]; then
+              echo "Skipping GHCR push (GHCR_USERNAME/GHCR_TOKEN/GHCR_ORG not set)."
+              exit 0
+            fi
+
+            IMAGE="ghcr.io/${GHCR_ORG}/vectiqor"
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+            docker tag local/vectiqor:${TAG} ${IMAGE}:${TAG}
+            docker push ${IMAGE}:${TAG}
+            if [ "${CIRCLE_BRANCH}" = "main" ]; then
+              docker tag local/vectiqor:${TAG} ${IMAGE}:latest
+              docker push ${IMAGE}:latest
+            fi
+      - run:
+          name: Optional push to ECR
+          command: |
+            set -e
+            TAG="${CIRCLE_SHA1:0:12}"
+            if [ -z "${ECR_REGISTRY:-}" ] || [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ] || [ -z "${AWS_REGION:-}" ]; then
+              echo "Skipping ECR push (ECR/AWS env vars not fully set)."
+              exit 0
+            fi
+
+            sudo apt-get update
+            sudo apt-get install -y awscli
+            aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+
+            IMAGE="${ECR_REGISTRY}/vectiqor"
+            docker tag local/vectiqor:${TAG} ${IMAGE}:${TAG}
+            docker push ${IMAGE}:${TAG}
+            if [ "${CIRCLE_BRANCH}" = "main" ]; then
+              docker tag local/vectiqor:${TAG} ${IMAGE}:latest
+              docker push ${IMAGE}:latest
+            fi
+
+  publish_python_packages:
+    executor: python
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: Optional publish to PyPI (main only)
+          command: |
+            if [ "${CIRCLE_BRANCH}" != "main" ]; then
+              echo "Skipping PyPI publish on non-main branch."
+              exit 0
+            fi
+            if [ -z "${PYPI_API_TOKEN:-}" ]; then
+              echo "Skipping PyPI publish (PYPI_API_TOKEN not set)."
+              exit 0
+            fi
+
+            python -m pip install --upgrade pip twine
+            export TWINE_USERNAME="__token__"
+            export TWINE_PASSWORD="${PYPI_API_TOKEN}"
+            python -m twine upload --skip-existing dist/mcp-server/*
+            python -m twine upload --skip-existing dist/vectiqor/*
+
+workflows:
+  ci_cd:
+    jobs:
+      - mcp_quality
+      - vectiqor_quality
+      - build_python_packages:
+          requires:
+            - mcp_quality
+            - vectiqor_quality
+      - docker_build_and_optional_push:
+          requires:
+            - mcp_quality
+            - vectiqor_quality
+      - publish_python_packages:
+          requires:
+            - build_python_packages
