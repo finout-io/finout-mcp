@@ -1,0 +1,2240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VECTIQOR - Ask the Smart AI of Finout</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            /* Finout brand colors - Teal to Dark */
+            background: linear-gradient(135deg, #38B28E 0%, #1B1F1D 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            width: 90%;
+            max-width: 1100px;
+            height: 90vh;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            display: flex;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 350px;
+            background: #38B28E; /* Finout teal */
+            color: white;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            position: relative;
+        }
+
+        .logo {
+            font-size: 40px;
+            flex-shrink: 0;
+        }
+
+        .vectiqor-acronym {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+        }
+
+        .acronym-line {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            line-height: 1.2;
+        }
+
+        .acronym-line .letter {
+            font-size: 14px;
+            font-weight: 700;
+            color: #FFD632; /* Finout yellow */
+            min-width: 12px;
+        }
+
+        .acronym-line .word {
+            font-size: 11px;
+            font-weight: 400;
+            opacity: 0.95;
+        }
+
+        .sidebar-section {
+            /* Regular spacing for sections */
+        }
+
+        .sidebar-footer {
+            margin-top: auto;  /* Push to bottom */
+        }
+
+        .conversation-search {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 6px;
+            color: white;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .conversation-search::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .conversation-search:focus {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .new-chat-button {
+            padding: 8px 16px;
+            background: rgba(255, 214, 50, 0.2);
+            border: 1px solid rgba(255, 214, 50, 0.5);
+            border-radius: 6px;
+            color: #FFD632;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: auto;
+            white-space: nowrap;
+        }
+
+        .new-chat-button:hover {
+            background: rgba(255, 214, 50, 0.3);
+            border-color: #FFD632;
+            transform: translateY(-1px);
+        }
+
+        .conversations-list {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+            margin: 0 -5px;
+            padding: 0 5px;
+        }
+
+        .conversations-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .conversations-list::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+
+        .conversations-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+        }
+
+        .conversations-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        .conversation-item {
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .conversation-item:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateX(3px);
+        }
+
+        .conversation-item.active {
+            background: rgba(255, 214, 50, 0.3);
+            border-left: 3px solid #FFD632;
+        }
+
+        .conversation-title {
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 4px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .conversation-meta {
+            font-size: 11px;
+            opacity: 0.7;
+        }
+
+        .conversations-empty {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            opacity: 0.6;
+        }
+
+        .account-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            opacity: 0.8;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .model-selector {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 6px;
+            padding: 10px;
+            font-size: 13px;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.3s;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='white' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            padding-right: 30px;
+        }
+
+        .model-selector:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+
+        .model-selector option {
+            background: #2d2d2d;
+            color: white;
+        }
+
+        .export-button {
+            width: 100%;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 10px;
+        }
+
+        .export-button:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .export-button:active {
+            transform: scale(0.98);
+        }
+
+        .account-selector-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        .account-selector-input {
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 6px;
+            padding: 10px 28px 10px 10px;
+            font-size: 13px;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.3s;
+            width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .account-selector-input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .account-selector-input:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .account-selector-input:focus {
+            background: rgba(255, 255, 255, 0.2);
+            cursor: text;
+        }
+
+        .account-selector-arrow {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            pointer-events: none;
+            font-size: 12px;
+        }
+
+        .account-dropdown {
+            position: fixed;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin-top: 4px;
+            max-height: 400px;
+            width: 280px;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            display: none;
+        }
+
+        .account-dropdown::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .account-dropdown::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        .account-dropdown::-webkit-scrollbar-thumb {
+            background: #38B28E;
+            border-radius: 4px;
+        }
+
+        .account-dropdown::-webkit-scrollbar-thumb:hover {
+            background: #2d9471;
+        }
+
+        .account-dropdown.show {
+            display: block;
+        }
+
+        .account-dropdown-item {
+            padding: 10px 12px;
+            cursor: pointer;
+            color: #333;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .account-dropdown-item:hover {
+            background: #f5f5f5;
+        }
+
+        .account-dropdown-item.selected {
+            background: #38B28E;
+            color: white;
+        }
+
+        .account-dropdown-item.selected:hover {
+            background: #2d9471;
+        }
+
+        .account-dropdown-empty {
+            padding: 10px 12px;
+            color: #999;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px;
+            background: #f8f9fa;
+            min-height: 0; /* Allow flex shrinking */
+        }
+
+        .message {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 12px;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .message.user .message-avatar {
+            background: #38B28E; /* Finout teal */
+            color: white;
+        }
+
+        .message.assistant .message-avatar {
+            background: #FFD632; /* Finout yellow */
+            color: #1B1F1D;
+        }
+
+        .message-content {
+            max-width: 70%;
+        }
+
+        .message-bubble {
+            padding: 12px 18px;
+            border-radius: 18px;
+            line-height: 1.5;
+        }
+
+        .message.user .message-bubble {
+            background: #38B28E; /* Finout teal */
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant .message-bubble {
+            background: white;
+            color: #333;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Tool call display (like Claude Desktop) */
+        .tool-calls {
+            margin-top: 8px;
+            font-size: 13px;
+        }
+
+        .tool-calls-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #f0f4ff;
+            border: 1px solid #d0dfff;
+            border-radius: 8px;
+            cursor: pointer;
+            user-select: none;
+            margin-bottom: 4px;
+        }
+
+        .tool-calls-header:hover {
+            background: #e6edff;
+        }
+
+        .tool-calls-icon {
+            font-size: 14px;
+        }
+
+        .tool-calls-count {
+            font-weight: 600;
+            color: #38B28E;
+            flex: 1;
+        }
+
+        .tool-calls-toggle {
+            color: #666;
+            font-size: 12px;
+        }
+
+        .tool-calls-list {
+            display: none;
+            padding-top: 4px;
+        }
+
+        .tool-calls-list.expanded {
+            display: block;
+        }
+
+        .tool-call {
+            background: #f0f4ff;
+            border: 1px solid #d0dfff;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+        }
+
+        .tool-call-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .copy-curl-btn {
+            font-size: 11px;
+            padding: 2px 6px;
+            background: #38B28E;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: auto;
+        }
+
+        .copy-curl-btn:hover {
+            background: #2e9373;
+        }
+
+        .copy-curl-btn:active {
+            background: #267a5e;
+        }
+
+        .tool-call-icon {
+            font-size: 16px;
+        }
+
+        .tool-call-name {
+            font-weight: 600;
+            color: #38B28E; /* Finout teal */
+            flex: 1;
+        }
+
+        .tool-call-toggle {
+            color: #666;
+            font-size: 12px;
+        }
+
+        .tool-call-details {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #d0dfff;
+            display: none;
+        }
+
+        .tool-call-details.expanded {
+            display: block;
+        }
+
+        .tool-call-section {
+            margin-bottom: 8px;
+        }
+
+        .tool-call-label {
+            font-weight: 600;
+            color: #666;
+            font-size: 11px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .tool-call-value {
+            background: white;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .timing-summary {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-top: 12px;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.03);
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .timing-model {
+            color: #666;
+            font-weight: 600;
+        }
+
+        .timing-tools {
+            color: #FF6B35;
+            font-weight: 500;
+        }
+
+        .timing-duration {
+            color: #999;
+            font-family: 'Monaco', 'Courier New', monospace;
+            margin-left: auto;
+        }
+
+        .usage-tokens {
+            color: #0f766e;
+            font-weight: 600;
+        }
+
+        .usage-cost {
+            color: #0b5f44;
+            font-weight: 700;
+        }
+
+        .input-container {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+        }
+
+        #messageInput {
+            flex: 1;
+            padding: 12px 18px;
+            border: 2px solid #e0e0e0;
+            border-radius: 25px;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.3s;
+            resize: none; /* Prevent manual resize */
+            overflow-y: hidden; /* Hide scrollbar initially */
+            min-height: 44px; /* Match button height */
+            max-height: 200px; /* Limit growth */
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.5;
+        }
+
+        #messageInput:focus {
+            border-color: #38B28E; /* Finout teal */
+        }
+
+        #micButton {
+            padding: 12px 20px;
+            background: white;
+            color: #38B28E;
+            border: 2px solid #38B28E;
+            border-radius: 25px;
+            font-size: 18px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #micButton:hover:not(:disabled) {
+            background: #f0f9f6;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(56, 178, 142, 0.2);
+        }
+
+        #micButton:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #micButton.recording {
+            background: #FF6B35;
+            border-color: #FF6B35;
+            color: white;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
+        }
+
+        #sendButton {
+            padding: 12px 30px;
+            background: #38B28E; /* Finout teal */
+            color: white;
+            border: none;
+            border-radius: 25px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        #sendButton:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(56, 178, 142, 0.4);
+        }
+
+        #sendButton:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .typing-indicator {
+            padding: 12px 18px;
+        }
+
+        .typing-phase {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dots span {
+            width: 8px;
+            height: 8px;
+            background: #999;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        .typing-status {
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .typing-time {
+            font-size: 11px;
+            color: #999;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+                opacity: 0.5;
+            }
+            30% {
+                transform: translateY(-10px);
+                opacity: 1;
+            }
+        }
+
+        .welcome-message {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+
+        .welcome-message h2 {
+            font-size: 28px;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .welcome-message p {
+            font-size: 16px;
+            margin-bottom: 30px;
+        }
+
+        .example-questions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .example-question {
+            padding: 10px 20px;
+            background: white;
+            border: 2px solid #38B28E; /* Finout teal */
+            border-radius: 20px;
+            color: #38B28E;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .example-question:hover {
+            background: #38B28E;
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(56, 178, 142, 0.3);
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 12px 18px;
+            border-radius: 8px;
+            border: 1px solid #f5c6cb;
+            margin: 10px 0;
+        }
+
+        /* Markdown-like formatting */
+        .message-bubble pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+
+        .message-bubble code {
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .message-bubble strong {
+            font-weight: 600;
+        }
+
+        /* Scrollbar styling */
+        .chat-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .chat-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .chat-container::-webkit-scrollbar-thumb {
+            background: #38B28E; /* Finout teal */
+            border-radius: 4px;
+        }
+
+        .chat-container::-webkit-scrollbar-thumb:hover {
+            background: #FFD632; /* Finout yellow */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Sidebar with logo and account selector -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">🤖</div>
+                <div class="vectiqor-acronym">
+                    <div class="acronym-line">
+                        <span class="letter">A</span>
+                        <span class="word">sk the</span>
+                    </div>
+                    <div class="acronym-line">
+                        <span class="letter">S</span>
+                        <span class="word">mart</span>
+                    </div>
+                    <div class="acronym-line">
+                        <span class="letter">A</span>
+                        <span class="word">I of</span>
+                    </div>
+                    <div class="acronym-line">
+                        <span class="letter">F</span>
+                        <span class="word">inout</span>
+                    </div>
+                </div>
+                <button class="new-chat-button" onclick="startNewChat()">
+                    ✨ New Chat
+                </button>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="account-label">Model</div>
+                <select id="modelSelector" class="model-selector" onchange="updateSelectedModel()">
+                    <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+                    <option value="claude-sonnet-4-5-20250929" selected>Sonnet 4.5</option>
+                    <option value="claude-opus-4-6">Opus 4.6</option>
+                </select>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="account-label">Account</div>
+                <div class="account-selector-wrapper">
+                    <input
+                        type="text"
+                        id="accountSelectorInput"
+                        class="account-selector-input"
+                        placeholder="Loading..."
+                        readonly
+                        onfocus="showAccountDropdown()"
+                        onblur="hideAccountDropdownDelayed()"
+                    />
+                    <span class="account-selector-arrow">▼</span>
+                    <div id="accountDropdown" class="account-dropdown"></div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="account-label">Conversations</div>
+                <input
+                    type="text"
+                    id="conversationSearch"
+                    class="conversation-search"
+                    placeholder="Search conversations..."
+                    oninput="filterConversations()"
+                />
+            </div>
+
+            <div class="conversations-list" id="conversationsList">
+                <div class="conversations-empty">No conversations yet</div>
+            </div>
+
+            <div class="sidebar-footer">
+                <button class="export-button" onclick="shareConversation(event)">
+                    🔗 Share Conversation
+                </button>
+                <button class="export-button" onclick="exportConversation(event)">
+                    📋 Export Chat
+                </button>
+            </div>
+        </div>
+
+        <!-- Main content area -->
+        <div class="main-content">
+            <div class="chat-container" id="chatContainer">
+            <div class="welcome-message">
+                <h2>👋 Welcome to VECTIQOR!</h2>
+                <p>Ask me anything about your cloud costs and I'll help you understand them better.</p>
+                <div class="example-questions">
+                    <div class="example-question" onclick="askExample('What were my AWS costs last month?')">
+                        💰 What were my AWS costs last month?
+                    </div>
+                    <div class="example-question" onclick="askExample('Compare this week to last week')">
+                        📊 Compare this week to last week
+                    </div>
+                    <div class="example-question" onclick="askExample('Show me my top 5 services by cost')">
+                        🔝 Show me my top 5 services
+                    </div>
+                    <div class="example-question" onclick="askExample('Compare the last 7 days of the last 4 months')">
+                        📈 Last 7 days of last 4 months
+                    </div>
+                </div>
+            </div>
+        </div>
+
+            <div class="input-container">
+                <textarea
+                    id="messageInput"
+                    placeholder="Ask about your cloud costs... (Shift+Enter for new line)"
+                    onkeypress="handleKeyPress(event)"
+                    rows="1"
+                ></textarea>
+                <button id="micButton" onclick="toggleVoiceInput()" title="Voice input">🎤</button>
+                <button id="sendButton" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+        <!-- End main-content -->
+    </div>
+    <!-- End container -->
+
+    <script>
+        let conversationHistory = [];
+        let currentToolCalls = [];
+        let toolCallIdCounter = 0; // Counter for unique IDs
+        let currentShareToken = null;
+
+        function addMessage(role, content, toolCalls = [], totalTime = null, toolTime = null, usage = null, model = null) {
+            const chatContainer = document.getElementById('chatContainer');
+
+            // Remove welcome message if it exists
+            const welcomeMessage = chatContainer.querySelector('.welcome-message');
+            if (welcomeMessage) {
+                welcomeMessage.remove();
+            }
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = role === 'user' ? '👤' : getModelAvatar(currentModel);
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+
+            // Add message bubble
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.innerHTML = formatMessage(content);
+            contentDiv.appendChild(bubble);
+
+            // Add tool calls if present
+            if (toolCalls && toolCalls.length > 0) {
+                const toolCallsDiv = document.createElement('div');
+                toolCallsDiv.className = 'tool-calls';
+
+                const listId = `tool-list-${toolCallIdCounter++}`;
+
+                // Add collapsible header
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'tool-calls-header';
+                headerDiv.onclick = () => toggleToolCallsList(listId);
+                headerDiv.innerHTML = `
+                    <span class="tool-calls-icon">🔧</span>
+                    <span class="tool-calls-count">${toolCalls.length} tool call${toolCalls.length > 1 ? 's' : ''}</span>
+                    <span class="tool-calls-toggle" id="toggle-${listId}">▶ Show tools</span>
+                `;
+                toolCallsDiv.appendChild(headerDiv);
+
+                // Add collapsible list
+                const listDiv = document.createElement('div');
+                listDiv.className = 'tool-calls-list';
+                listDiv.id = listId;
+
+                toolCalls.forEach((toolCall, index) => {
+                    const uniqueId = toolCallIdCounter++; // Increment counter for unique ID
+
+                    // Extract _debug_curl from output if present
+                    let debugCurl = null;
+                    try {
+                        const output = typeof toolCall.output === 'string'
+                            ? JSON.parse(toolCall.output)
+                            : toolCall.output;
+                        if (output && output._debug_curl) {
+                            debugCurl = output._debug_curl;
+                        }
+                    } catch (e) {
+                        // Output not JSON or no _debug_curl, that's fine
+                    }
+
+                    const toolDiv = document.createElement('div');
+                    toolDiv.className = 'tool-call';
+
+                    // Generate copy button HTML if curl commands exist
+                    const copyButtonId = `copy-btn-${uniqueId}`;
+                    const copyButtonHTML = debugCurl
+                        ? `<button class="copy-curl-btn" id="${copyButtonId}">📋 Copy curl</button>`
+                        : '';
+
+                    toolDiv.innerHTML = `
+                        <div class="tool-call-header" onclick="toggleToolCall('${uniqueId}')">
+                            <span class="tool-call-icon">🔧</span>
+                            <span class="tool-call-name">${toolCall.name}</span>
+                            ${copyButtonHTML}
+                            <span class="tool-call-toggle" id="toggle-${uniqueId}">▼ Show details</span>
+                        </div>
+                        <div class="tool-call-details" id="details-${uniqueId}">
+                            <div class="tool-call-section">
+                                <div class="tool-call-label">Input</div>
+                                <div class="tool-call-value">${JSON.stringify(toolCall.input, null, 2)}</div>
+                            </div>
+                            <div class="tool-call-section">
+                                <div class="tool-call-label">Output</div>
+                                <div class="tool-call-value">${formatToolOutput(toolCall.output)}</div>
+                            </div>
+                        </div>
+                    `;
+                    listDiv.appendChild(toolDiv);
+
+                    // Attach click handler programmatically if curl exists
+                    // NOTE: Use toolDiv.querySelector, not document.getElementById - the element
+                    // is not yet in the document at this point, so getElementById won't find it.
+                    if (debugCurl) {
+                        const button = toolDiv.querySelector(`#${copyButtonId}`);
+                        if (button) {
+                            button.addEventListener('click', (event) => copyCurl(event, debugCurl));
+                        }
+                    }
+                });
+
+                toolCallsDiv.appendChild(listDiv);
+                contentDiv.appendChild(toolCallsDiv);
+            }
+
+            // Add assistant summary (timing + usage) if available
+            if (role === 'assistant' && (totalTime || usage)) {
+                const timingDiv = document.createElement('div');
+                timingDiv.className = 'timing-summary';
+                const modelName = getModelName(model || currentModel);
+
+                // Calculate thinking time (total - tool time)
+                const thinkingTime = toolTime ? (totalTime - toolTime).toFixed(1) : totalTime;
+
+                let timingHTML = `<span class="timing-model">${modelName}</span>`;
+
+                if (totalTime && toolTime && toolTime > 0) {
+                    // Show breakdown: tools + thinking
+                    timingHTML += `
+                        <span class="timing-tools">🔧 ${toolTime}s</span>
+                        <span class="timing-model">💭 ${thinkingTime}s</span>
+                    `;
+                }
+
+                if (usage && usage.total_tokens) {
+                    timingHTML += `<span class="usage-tokens">🧮 ${Number(usage.total_tokens).toLocaleString()} tokens</span>`;
+                }
+
+                if (usage && usage.estimated_cost_usd !== null && usage.estimated_cost_usd !== undefined) {
+                    timingHTML += `<span class="usage-cost">~$${Number(usage.estimated_cost_usd).toFixed(4)}</span>`;
+                }
+
+                if (totalTime) {
+                    timingHTML += `<span class="timing-duration">${totalTime}s total</span>`;
+                }
+
+                timingDiv.innerHTML = timingHTML;
+                contentDiv.appendChild(timingDiv);
+            }
+
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function toggleToolCallsList(listId) {
+            const list = document.getElementById(listId);
+            const toggle = document.getElementById(`toggle-${listId}`);
+
+            if (list.classList.contains('expanded')) {
+                list.classList.remove('expanded');
+                toggle.textContent = '▶ Show tools';
+            } else {
+                list.classList.add('expanded');
+                toggle.textContent = '▼ Hide tools';
+            }
+        }
+
+        function toggleToolCall(id) {
+            const details = document.getElementById(`details-${id}`);
+            const toggle = document.getElementById(`toggle-${id}`);
+
+            if (details.classList.contains('expanded')) {
+                details.classList.remove('expanded');
+                toggle.textContent = '▼ Show details';
+            } else {
+                details.classList.add('expanded');
+                toggle.textContent = '▲ Hide details';
+            }
+        }
+
+        function copyCurl(event, curlCommands) {
+            event.stopPropagation(); // Don't trigger toggle
+
+            const text = Array.isArray(curlCommands) ? curlCommands.join('\n\n') : curlCommands;
+
+            navigator.clipboard.writeText(text).then(() => {
+                const button = event.target;
+                const originalText = button.textContent;
+                button.textContent = '✓ Copied';
+                button.style.background = '#28a745';
+
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.style.background = '#38B28E';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy curl command');
+            });
+        }
+
+        function formatToolOutput(output) {
+            if (typeof output === 'string') {
+                // Try to parse as JSON for better formatting
+                try {
+                    const parsed = JSON.parse(output);
+                    return JSON.stringify(parsed, null, 2);
+                } catch (e) {
+                    return output;
+                }
+            }
+            return JSON.stringify(output, null, 2);
+        }
+
+        function formatMessage(text) {
+            // Basic markdown-like formatting
+            text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            text = text.replace(/```(.*?)```/gs, '<pre>$1</pre>');
+            text = text.replace(/`(.*?)`/g, '<code>$1</code>');
+            text = text.replace(/\n/g, '<br>');
+            return text;
+        }
+
+        // Phase tracking for loading animation
+        let phaseStartTime = null;
+        let phaseTimes = {};
+
+        function showTypingIndicator() {
+            const chatContainer = document.getElementById('chatContainer');
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'message assistant';
+            typingDiv.id = 'typingIndicator';
+
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = getModelAvatar(currentModel);
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+
+            const indicator = document.createElement('div');
+            indicator.className = 'message-bubble typing-indicator';
+            indicator.innerHTML = `
+                <div class="typing-phase">
+                    <span class="typing-dots"><span></span><span></span><span></span></span>
+                    <div class="typing-status" id="typingStatus">Thinking...</div>
+                    <div class="typing-time" id="typingTime"></div>
+                </div>
+            `;
+
+            contentDiv.appendChild(indicator);
+            typingDiv.appendChild(avatar);
+            typingDiv.appendChild(contentDiv);
+
+            chatContainer.appendChild(typingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            // Start phase tracking
+            phaseStartTime = Date.now();
+            phaseTimes = {};
+            updateTypingTime();
+        }
+
+        function updateTypingPhase(phase) {
+            const statusEl = document.getElementById('typingStatus');
+            if (statusEl) {
+                const phaseMessages = {
+                    'thinking': 'Thinking...',
+                    'tool': 'Using tools...',
+                    'waiting': 'Waiting for data...',
+                    'finalizing': 'Finalizing response...'
+                };
+                statusEl.textContent = phaseMessages[phase] || phase;
+            }
+        }
+
+        function updateTypingTime() {
+            const timeEl = document.getElementById('typingTime');
+            if (timeEl && phaseStartTime) {
+                const elapsed = ((Date.now() - phaseStartTime) / 1000).toFixed(1);
+                timeEl.textContent = `${elapsed}s`;
+
+                // Continue updating if indicator is visible
+                if (document.getElementById('typingIndicator')) {
+                    requestAnimationFrame(() => setTimeout(updateTypingTime, 100));
+                }
+            }
+        }
+
+        function hideTypingIndicator() {
+            const indicator = document.getElementById('typingIndicator');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+
+        function showError(message) {
+            const chatContainer = document.getElementById('chatContainer');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.textContent = `Error: ${message}`;
+            chatContainer.appendChild(errorDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const sendButton = document.getElementById('sendButton');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // Disable input
+            input.disabled = true;
+            sendButton.disabled = true;
+
+            // Add user message
+            addMessage('user', message);
+            input.value = '';
+            input.style.height = '44px'; // Reset textarea height
+
+            // Show typing indicator
+            showTypingIndicator();
+
+            // Reset tool calls
+            currentToolCalls = [];
+
+            try {
+                const requestStartTime = Date.now();
+
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        conversation_history: conversationHistory,
+                        account_id: currentAccountId,  // Pass current account ID with each request
+                        model: currentModel  // Pass selected model
+                    })
+                });
+
+                hideTypingIndicator();
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to get response');
+                }
+
+                const data = await response.json();
+
+                const totalTime = ((Date.now() - requestStartTime) / 1000).toFixed(1);
+
+                // Add assistant response with tool calls and timing
+                addMessage(
+                    'assistant',
+                    data.response,
+                    data.tool_calls || [],
+                    totalTime,
+                    data.tool_time,
+                    data.usage || null,
+                    data.usage?.model || currentModel
+                );
+
+                // Update conversation history with tool calls
+                conversationHistory.push({role: 'user', content: message});
+                conversationHistory.push({
+                    role: 'assistant',
+                    content: data.response,
+                    tool_calls: data.tool_calls || [],  // Save tool calls with message
+                    usage: data.usage || null,
+                    model: data.usage?.model || currentModel
+                });
+
+                // Auto-save conversation
+                await autoSaveConversation();
+
+            } catch (error) {
+                hideTypingIndicator();
+                showError(error.message);
+                console.error('Error:', error);
+            } finally {
+                // Re-enable input
+                input.disabled = false;
+                sendButton.disabled = false;
+                input.focus();
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); // Prevent default newline
+                sendMessage();
+            }
+            // If Shift+Enter, allow default behavior (new line)
+        }
+
+        function askExample(question) {
+            document.getElementById('messageInput').value = question;
+            sendMessage();
+        }
+
+        function exportConversation(event) {
+            // Build diagnostic export
+            let output = `# VECTIQOR Conversation Export\n`;
+            output += `Date: ${new Date().toISOString()}\n`;
+            output += `Account: ${currentAccountId || 'Unknown'}\n\n`;
+            output += `---\n\n`;
+
+            // Export conversation history with tool calls
+            conversationHistory.forEach((msg, index) => {
+                if (msg.role === 'user' && typeof msg.content === 'string') {
+                    output += `## User Message ${index + 1}\n`;
+                    output += `${msg.content}\n\n`;
+                } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
+                    output += `## Assistant Response ${index + 1}\n`;
+                    output += `${msg.content}\n\n`;
+
+                    // Export tool calls if present
+                    if (msg.tool_calls && msg.tool_calls.length > 0) {
+                        output += `### Tool Calls (${msg.tool_calls.length})\n`;
+                        msg.tool_calls.forEach((toolCall) => {
+                            output += `\n**Tool: ${toolCall.name}**\n`;
+                            output += `Input:\n\`\`\`json\n${JSON.stringify(toolCall.input, null, 2)}\n\`\`\`\n`;
+                            output += `Output:\n\`\`\`\n${toolCall.output}\n\`\`\`\n`;
+                        });
+                        output += `\n`;
+                    }
+                } else if (msg.role === 'user' && Array.isArray(msg.content)) {
+                    // Tool results
+                    output += `## Tool Results\n`;
+                    msg.content.forEach((item) => {
+                        if (item.type === 'tool_result') {
+                            output += `\`\`\`json\n${item.content}\n\`\`\`\n\n`;
+                        }
+                    });
+                } else if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+                    // Tool calls
+                    msg.content.forEach((block) => {
+                        if (block.type === 'tool_use') {
+                            output += `### Tool: ${block.name}\n`;
+                            output += `**Input:**\n\`\`\`json\n${JSON.stringify(block.input, null, 2)}\n\`\`\`\n\n`;
+                        }
+                    });
+                }
+            });
+
+            // Copy to clipboard
+            navigator.clipboard.writeText(output).then(() => {
+                // Show success feedback
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = '✅ Copied!';
+                btn.style.background = 'rgba(255, 214, 50, 0.3)'; // Yellow highlight
+
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.style.background = '';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy to clipboard');
+            });
+        }
+
+        async function shareConversation(event) {
+            if (conversationHistory.length === 0) {
+                alert('No conversation to share yet!');
+                return;
+            }
+
+            const button = event.target;
+            const originalText = button.textContent;
+            const originalBackground = button.style.background;
+
+            try {
+                button.disabled = true;
+                button.textContent = '⏳ Preparing...';
+
+                // Ensure there is a persisted conversation record
+                if (!currentConversationId) {
+                    await autoSaveConversation();
+                }
+
+                if (!currentConversationId) {
+                    throw new Error('Conversation could not be saved for sharing');
+                }
+
+                // Reuse known share token if available, otherwise fetch conversation details
+                if (!currentShareToken) {
+                    const response = await fetch(`/api/conversations/${currentConversationId}`);
+                    if (!response.ok) {
+                        throw new Error('Failed to load conversation share token');
+                    }
+                    const conversation = await response.json();
+                    currentShareToken = conversation.share_token;
+                }
+
+                if (!currentShareToken) {
+                    throw new Error('Share token is missing for this conversation');
+                }
+
+                const shareUrl = `${window.location.origin}/share/${currentShareToken}`;
+                await navigator.clipboard.writeText(shareUrl);
+
+                button.textContent = '✅ Link Copied!';
+                button.style.background = 'rgba(56, 178, 142, 0.3)';
+            } catch (error) {
+                console.error('Error sharing conversation:', error);
+                alert('Failed to share conversation: ' + error.message);
+                button.textContent = '❌ Share Failed';
+                button.style.background = 'rgba(239, 68, 68, 0.35)';
+            } finally {
+                setTimeout(() => {
+                    button.disabled = false;
+                    button.textContent = originalText;
+                    button.style.background = originalBackground;
+                }, 2000);
+            }
+        }
+
+        async function saveConversation(event) {
+            // Check if there's a conversation to save
+            if (conversationHistory.length === 0) {
+                alert('No conversation to save!');
+                return;
+            }
+
+            // Prompt for conversation name
+            const name = prompt('Enter a name for this conversation:', `Conversation ${new Date().toLocaleDateString()}`);
+            if (!name) return; // User cancelled
+
+            try {
+                const response = await fetch('/api/conversations/save', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        account_id: currentAccountId,
+                        model: currentModel,
+                        messages: conversationHistory,
+                        tool_calls: [],  // Tool calls now stored with each message
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to save conversation');
+                }
+
+                const data = await response.json();
+
+                // Show success with share link
+                const shareUrl = `${window.location.origin}/share/${data.share_token}`;
+                const message = `✅ Conversation saved!\n\nShare link (copied to clipboard):\n${shareUrl}`;
+
+                // Copy share link to clipboard
+                navigator.clipboard.writeText(shareUrl).then(() => {
+                    alert(message);
+
+                    // Visual feedback on button
+                    const btn = event.target;
+                    const originalText = btn.textContent;
+                    btn.textContent = '✅ Saved!';
+                    btn.style.background = 'rgba(56, 178, 142, 0.3)'; // Green highlight
+
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = '';
+                    }, 2000);
+                }).catch(() => {
+                    alert(message + '\n\n(Failed to copy to clipboard)');
+                });
+
+            } catch (error) {
+                console.error('Error saving conversation:', error);
+                alert('Failed to save conversation: ' + error.message);
+            }
+        }
+
+        // Account management
+        let currentAccountId = null;
+        let allAccounts = [];
+        let hideDropdownTimeout = null;
+
+        // Model management
+        let currentModel = 'claude-sonnet-4-5-20250929'; // Default to Sonnet 4.5
+
+        function updateSelectedModel() {
+            const selector = document.getElementById('modelSelector');
+            currentModel = selector.value;
+        }
+
+        function getModelAvatar(model) {
+            if (model.includes('haiku')) {
+                return '⚡'; // Fast and efficient
+            } else if (model.includes('opus')) {
+                return '👑'; // Most capable
+            } else {
+                return '🤖'; // Sonnet (default)
+            }
+        }
+
+        function getModelName(model) {
+            if (model.includes('haiku')) {
+                return 'Haiku 4.5';
+            } else if (model.includes('opus')) {
+                return 'Opus 4.6';
+            } else {
+                return 'Sonnet 4.5';
+            }
+        }
+
+        async function autoStartMCP(accountId, accountName) {
+            // Start MCP server with the account
+            try {
+                const response = await fetch('/api/switch-account', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        account_id: accountId
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.text();
+                    console.error('Failed to auto-start MCP for account:', accountName, error);
+                    throw new Error(`Failed to initialize session: ${error}`);
+                }
+            } catch (error) {
+                console.error('Error auto-starting MCP:', error);
+                throw error; // Re-throw so caller knows it failed
+            }
+        }
+
+        async function loadAccounts() {
+            try {
+                const response = await fetch('/api/accounts');
+                const data = await response.json();
+
+                const input = document.getElementById('accountSelectorInput');
+
+                if (data.accounts && data.accounts.length > 0) {
+                    allAccounts = data.accounts;
+                    currentAccountId = data.current_account_id;
+
+                    // Find and display current account name
+                    const currentAccount = allAccounts.find(a => a.accountId === currentAccountId);
+                    if (currentAccount) {
+                        // Support both 'name' and 'accountName' properties
+                        const accountName = currentAccount.accountName || currentAccount.name || currentAccount.accountId;
+                        input.value = accountName;
+                        input.placeholder = 'Select account';
+
+                        // Auto-start MCP with last selected account
+                        try {
+                            await autoStartMCP(currentAccountId, accountName);
+                        } catch (error) {
+                            input.placeholder = 'Session failed - select account';
+                            console.error('Session initialization failed:', error);
+                        }
+                    } else {
+                        // No current account found, show first account or placeholder
+                        if (allAccounts.length > 0) {
+                            const firstAccount = allAccounts[0];
+                            const accountName = firstAccount.accountName || firstAccount.name || firstAccount.accountId;
+                            input.value = accountName;
+                            input.placeholder = 'Select account';
+                            currentAccountId = firstAccount.accountId;
+
+                            // Auto-start MCP with first account
+                            try {
+                                await autoStartMCP(currentAccountId, accountName);
+                            } catch (error) {
+                                input.placeholder = 'Session failed - select account';
+                                console.error('Session initialization failed:', error);
+                            }
+                        } else {
+                            input.placeholder = 'Select account';
+                        }
+                    }
+
+                    // Make input writable for search
+                    input.removeAttribute('readonly');
+                } else {
+                    input.placeholder = 'No accounts found';
+                    input.removeAttribute('readonly');
+                }
+            } catch (error) {
+                console.error('Error loading accounts:', error);
+                const input = document.getElementById('accountSelectorInput');
+                input.placeholder = 'Error loading accounts';
+                input.removeAttribute('readonly');
+            }
+        }
+
+        function showAccountDropdown() {
+            const input = document.getElementById('accountSelectorInput');
+            const dropdown = document.getElementById('accountDropdown');
+
+            // Select all text when focused for easy search
+            input.select();
+
+            // Position dropdown relative to input (fixed positioning)
+            const rect = input.getBoundingClientRect();
+            const dropdownHeight = 400; // max-height from CSS
+            const spaceBelow = window.innerHeight - rect.bottom;
+            const spaceAbove = rect.top;
+
+            // Open upward if not enough space below
+            if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
+                dropdown.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+                dropdown.style.top = 'auto';
+            } else {
+                dropdown.style.top = (rect.bottom + 4) + 'px';
+                dropdown.style.bottom = 'auto';
+            }
+
+            dropdown.style.left = rect.left + 'px';
+
+            // Render all accounts initially
+            renderAccountDropdown('');
+
+            dropdown.classList.add('show');
+        }
+
+        function hideAccountDropdownDelayed() {
+            // Delay to allow click events on dropdown items
+            hideDropdownTimeout = setTimeout(() => {
+                const dropdown = document.getElementById('accountDropdown');
+                dropdown.classList.remove('show');
+
+                // Restore current account name
+                const currentAccount = allAccounts.find(a => a.accountId === currentAccountId);
+                if (currentAccount) {
+                    const input = document.getElementById('accountSelectorInput');
+                    input.value = currentAccount.name;
+                }
+            }, 200);
+        }
+
+        function renderAccountDropdown(searchTerm) {
+            const dropdown = document.getElementById('accountDropdown');
+            const filteredAccounts = allAccounts.filter(account =>
+                account.name.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+
+            dropdown.innerHTML = '';
+
+            if (filteredAccounts.length === 0) {
+                dropdown.innerHTML = '<div class="account-dropdown-empty">No accounts found</div>';
+                return;
+            }
+
+            filteredAccounts.forEach(account => {
+                const item = document.createElement('div');
+                item.className = 'account-dropdown-item';
+                if (account.accountId === currentAccountId) {
+                    item.classList.add('selected');
+                }
+                item.textContent = account.name;
+                item.onclick = () => selectAccount(account);
+                dropdown.appendChild(item);
+            });
+        }
+
+        // Update search on input
+        document.addEventListener('DOMContentLoaded', () => {
+            const input = document.getElementById('accountSelectorInput');
+            input.addEventListener('input', (e) => {
+                renderAccountDropdown(e.target.value);
+            });
+        });
+
+        async function selectAccount(account) {
+            if (account.accountId === currentAccountId) {
+                // Same account, just close dropdown
+                const dropdown = document.getElementById('accountDropdown');
+                dropdown.classList.remove('show');
+                return;
+            }
+
+            await switchAccount(account.accountId, account.name);
+        }
+
+        async function switchAccount(newAccountId, accountName) {
+            const input = document.getElementById('accountSelectorInput');
+            const dropdown = document.getElementById('accountDropdown');
+
+            // Close dropdown
+            dropdown.classList.remove('show');
+
+            try {
+                // Notify backend (instant, no MCP restart!)
+                const response = await fetch('/api/switch-account', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        account_id: newAccountId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to switch account');
+                }
+
+                // Update current account (instant!)
+                currentAccountId = newAccountId;
+                input.value = accountName;
+
+                // Clear conversation history
+                conversationHistory = [];
+                currentConversationId = null;
+                currentShareToken = null;
+
+                // Load conversations for new account
+                await loadConversations();
+
+                // Clear chat
+                const chatContainer = document.getElementById('chatContainer');
+                chatContainer.innerHTML = `
+                    <div class="welcome-message">
+                        <h2>👋 Welcome to VECTIQOR!</h2>
+                        <p>Ask me anything about your cloud costs and I'll help you understand them better.</p>
+                        <div class="example-questions">
+                            <div class="example-question" onclick="askExample('What were my AWS costs last month?')">
+                                💰 What were my AWS costs last month?
+                            </div>
+                            <div class="example-question" onclick="askExample('Compare this week to last week')">
+                                📊 Compare this week to last week
+                            </div>
+                            <div class="example-question" onclick="askExample('Show me my top 5 services by cost')">
+                                🔝 Show me my top 5 services
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+            } catch (error) {
+                console.error('Error switching account:', error);
+                alert('Failed to switch account: ' + error.message);
+
+                // Restore current account name
+                const currentAccount = allAccounts.find(a => a.accountId === currentAccountId);
+                if (currentAccount) {
+                    input.value = currentAccount.name;
+                }
+            }
+        }
+
+        // Auto-resize textarea as user types
+        function autoResizeTextarea() {
+            const textarea = document.getElementById('messageInput');
+            textarea.style.height = '44px'; // Reset to min height
+            const scrollHeight = textarea.scrollHeight;
+            const maxHeight = 200; // Match CSS max-height
+            textarea.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+
+            // Show scrollbar if content exceeds max height
+            if (scrollHeight > maxHeight) {
+                textarea.style.overflowY = 'auto';
+            } else {
+                textarea.style.overflowY = 'hidden';
+            }
+        }
+
+        // Voice input functionality
+        let recognition = null;
+        let isRecording = false;
+
+        function initVoiceRecognition() {
+            // Check browser support
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (!SpeechRecognition) {
+                console.warn('Speech recognition not supported in this browser');
+                return null;
+            }
+
+            const recognition = new SpeechRecognition();
+            recognition.continuous = true;  // Keep recording until manually stopped
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+            recognition.maxAlternatives = 1;
+
+            let finalTranscript = '';
+
+            recognition.onstart = () => {
+                console.log('✅ Voice recognition started - speak now!');
+                isRecording = true;
+                finalTranscript = '';
+                const micButton = document.getElementById('micButton');
+                micButton.classList.add('recording');
+                micButton.title = 'Recording... Click to stop';
+            };
+
+            recognition.onspeechstart = () => {
+                console.log('🎤 Speech detected!');
+            };
+
+            recognition.onspeechend = () => {
+                console.log('🔇 Speech ended');
+            };
+
+            recognition.onsoundstart = () => {
+                console.log('🔊 Sound detected!');
+            };
+
+            recognition.onsoundend = () => {
+                console.log('🔇 Sound ended');
+            };
+
+            recognition.onaudiostart = () => {
+                console.log('🎙️ Audio capture started');
+            };
+
+            recognition.onaudioend = () => {
+                console.log('🎙️ Audio capture ended');
+            };
+
+            recognition.onend = () => {
+                console.log('Voice recognition ended');
+                isRecording = false;
+                const micButton = document.getElementById('micButton');
+                micButton.classList.remove('recording');
+                micButton.title = 'Voice input';
+            };
+
+            recognition.onresult = (event) => {
+                console.log('onresult fired! Event:', event);
+                console.log('Results length:', event.results.length);
+
+                let interimTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    console.log(`Result ${i}:`, transcript, 'isFinal:', event.results[i].isFinal);
+
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript + ' ';
+                        console.log('Added to final transcript:', transcript);
+                    } else {
+                        interimTranscript += transcript;
+                        console.log('Added to interim transcript:', transcript);
+                    }
+                }
+
+                // Update input field with both final and interim results
+                const input = document.getElementById('messageInput');
+                const newValue = (finalTranscript + interimTranscript).trim();
+                console.log('Setting input value to:', newValue);
+                input.value = newValue;
+                autoResizeTextarea();
+
+                // Force focus to make sure it's visible
+                input.focus();
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                isRecording = false;
+                const micButton = document.getElementById('micButton');
+                micButton.classList.remove('recording');
+
+                if (event.error === 'not-allowed') {
+                    alert('Microphone access denied. Please enable microphone permissions in your browser settings.');
+                } else if (event.error === 'no-speech') {
+                    console.log('No speech detected');
+                } else if (event.error === 'network') {
+                    alert('Voice input requires internet connection. The speech recognition service is unavailable.\n\nTry:\n- Check your internet connection\n- Reload the page\n- Use Chrome/Edge browser');
+                } else if (event.error === 'aborted') {
+                    console.log('Speech recognition aborted');
+                } else {
+                    alert(`Voice input error: ${event.error}\n\nThis feature requires:\n- Chrome, Edge, or Safari browser\n- Internet connection\n- Microphone permissions`);
+                }
+            };
+
+            return recognition;
+        }
+
+        function toggleVoiceInput() {
+            if (!recognition) {
+                recognition = initVoiceRecognition();
+                if (!recognition) {
+                    alert('Voice input is not supported in your browser. Try Chrome, Edge, or Safari.');
+                    return;
+                }
+            }
+
+            if (isRecording) {
+                recognition.stop();
+            } else {
+                recognition.start();
+            }
+        }
+
+        // Conversation management
+        let allConversations = [];
+        let currentConversationId = null;
+
+        async function loadConversations() {
+            try {
+                const response = await fetch(`/api/conversations/list?account_id=${currentAccountId}`);
+                const data = await response.json();
+                allConversations = data.conversations || [];
+                renderConversations();
+            } catch (error) {
+                console.error('Error loading conversations:', error);
+            }
+        }
+
+        function renderConversations() {
+            const container = document.getElementById('conversationsList');
+            const searchTerm = document.getElementById('conversationSearch').value.toLowerCase();
+
+            const filtered = allConversations.filter(conv =>
+                conv.name.toLowerCase().includes(searchTerm)
+            );
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="conversations-empty">No conversations found</div>';
+                return;
+            }
+
+            container.innerHTML = filtered.map(conv => `
+                <div class="conversation-item ${conv.id === currentConversationId ? 'active' : ''}"
+                     onclick="loadConversation('${conv.id}')">
+                    <div class="conversation-title">${conv.name}</div>
+                    <div class="conversation-meta">
+                        ${new Date(conv.created_at).toLocaleDateString()} • ${conv.message_count} messages
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function filterConversations() {
+            renderConversations();
+        }
+
+        async function loadConversation(conversationId) {
+            try {
+                const response = await fetch(`/api/conversations/${conversationId}`);
+                const conversation = await response.json();
+
+                // CRITICAL: Validate account mismatch
+                if (conversation.account_id !== currentAccountId) {
+                    const switchAccount = confirm(
+                        `This conversation is for account "${conversation.account_id}" but you have "${currentAccountId}" selected.\n\n` +
+                        `Do you want to switch to "${conversation.account_id}"?`
+                    );
+
+                    if (switchAccount) {
+                        // Find the account in the list
+                        const account = availableAccounts.find(a => a.accountId === conversation.account_id);
+                        if (account) {
+                            await switchAccount(conversation.account_id, account.name);
+                            // Recursively load conversation after switching
+                            await loadConversation(conversationId);
+                            return;
+                        } else {
+                            alert('Cannot switch to that account - account not found');
+                            return;
+                        }
+                    } else {
+                        return; // User declined to switch
+                    }
+                }
+
+                // Clear current chat
+                const chatContainer = document.getElementById('chatContainer');
+                chatContainer.innerHTML = '';
+
+                // Load messages with tool calls
+                conversation.messages.forEach(msg => {
+                    if (msg.role === 'user' && typeof msg.content === 'string') {
+                        addMessage('user', msg.content);
+                    } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
+                        // Display assistant message with tool calls if present
+                        addMessage('assistant', msg.content, msg.tool_calls || [], null, null, msg.usage || null, msg.model || currentModel);
+                    }
+                });
+
+                // Update conversation history
+                conversationHistory = conversation.messages;
+                currentConversationId = conversationId;
+                currentShareToken = conversation.share_token || null;
+                renderConversations();
+
+            } catch (error) {
+                console.error('Error loading conversation:', error);
+                alert('Failed to load conversation');
+            }
+        }
+
+        function startNewChat() {
+            // Clear current conversation
+            const chatContainer = document.getElementById('chatContainer');
+            chatContainer.innerHTML = `
+                <div class="welcome-message">
+                    <h2>👋 Welcome to VECTIQOR!</h2>
+                    <p>Ask me anything about your cloud costs and I'll help you understand them better.</p>
+                    <div class="example-questions">
+                        <div class="example-question" onclick="askExample('What were my AWS costs last month?')">
+                            💰 What were my AWS costs last month?
+                        </div>
+                        <div class="example-question" onclick="askExample('Compare this week to last week')">
+                            📊 Compare this week to last week
+                        </div>
+                        <div class="example-question" onclick="askExample('Show me my top 5 services by cost')">
+                            🔝 Show me my top 5 services
+                        </div>
+                        <div class="example-question" onclick="askExample('Compare the last 7 days of the last 4 months')">
+                            📈 Last 7 days of last 4 months
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Reset conversation state
+            conversationHistory = [];
+            currentConversationId = null;
+            currentShareToken = null;
+
+            // Clear message input
+            const messageInput = document.getElementById('messageInput');
+            messageInput.value = '';
+
+            // Refresh conversations list (to deselect current)
+            renderConversations();
+        }
+
+        async function autoSaveConversation() {
+            // Only save if we have messages, an account selected, and haven't saved yet
+            if (conversationHistory.length === 0 || !currentAccountId) return;
+
+            // Don't create duplicate conversations - only save once
+            if (currentConversationId) return;
+
+            // Generate title from first user message
+            const firstUserMessage = conversationHistory.find(m => m.role === 'user' && typeof m.content === 'string');
+            const title = firstUserMessage ?
+                (firstUserMessage.content.substring(0, 60) + (firstUserMessage.content.length > 60 ? '...' : '')) :
+                'Conversation';
+
+            try {
+                const response = await fetch('/api/conversations/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: title,
+                        account_id: currentAccountId,
+                        model: currentModel,
+                        messages: conversationHistory,
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentConversationId = data.conversation_id;
+                    currentShareToken = data.share_token || null;
+                    await loadConversations(); // Refresh list
+                }
+            } catch (error) {
+                console.error('Error auto-saving conversation:', error);
+            }
+        }
+
+        // Focus input on load and load accounts
+        window.onload = async () => {
+            const input = document.getElementById('messageInput');
+            const sendButton = document.getElementById('sendButton');
+
+            // Disable input until session ready
+            input.disabled = true;
+            input.placeholder = 'Initializing...';
+            if (sendButton) sendButton.disabled = true;
+
+            // Add auto-resize listener
+            input.addEventListener('input', autoResizeTextarea);
+
+            // Check if loading a shared conversation
+            const hash = window.location.hash;
+            if (hash.startsWith('#share=')) {
+                const shareToken = hash.substring(7);
+                await loadSharedConversation(shareToken);
+                // Re-enable after loading
+                input.disabled = false;
+                input.placeholder = 'Type your message...';
+                if (sendButton) sendButton.disabled = false;
+                input.focus();
+            } else {
+                await loadAccounts();
+                // Load conversations after account is selected
+                if (currentAccountId) {
+                    await loadConversations();
+                }
+                // Re-enable after session ready
+                input.disabled = false;
+                input.placeholder = 'Type your message...';
+                if (sendButton) sendButton.disabled = false;
+                input.focus();
+            }
+        };
+
+        async function loadSharedConversation(shareToken) {
+            try {
+                const response = await fetch(`/api/share/${shareToken}`);
+                if (!response.ok) {
+                    throw new Error('Shared conversation not found');
+                }
+
+                const conversation = await response.json();
+
+                // Clear current chat
+                const chatContainer = document.getElementById('chatContainer');
+                chatContainer.innerHTML = '';
+
+                // Add header showing this is a shared conversation
+                const header = document.createElement('div');
+                header.style.cssText = 'background: #FFD632; padding: 15px; margin-bottom: 20px; border-radius: 8px; text-align: center;';
+                header.innerHTML = `
+                    <strong>📤 Shared Conversation</strong><br>
+                    <span style="font-size: 14px;">${conversation.name}</span><br>
+                    <span style="font-size: 12px; color: #666;">
+                        Shared on ${new Date(conversation.created_at).toLocaleString()}
+                    </span>
+                `;
+                chatContainer.appendChild(header);
+
+                // Render conversation messages
+                conversation.messages.forEach(msg => {
+                    if (msg.role === 'user' && typeof msg.content === 'string') {
+                        addMessage('user', msg.content);
+                    } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
+                        addMessage('assistant', msg.content, msg.tool_calls || [], null, null, msg.usage || null, msg.model || currentModel);
+                    }
+                });
+
+                // Disable input for shared view
+                document.getElementById('messageInput').disabled = true;
+                document.getElementById('sendButton').disabled = true;
+                document.getElementById('micButton').disabled = true;
+                document.getElementById('messageInput').placeholder = 'Viewing shared conversation (read-only)';
+
+            } catch (error) {
+                console.error('Error loading shared conversation:', error);
+                alert('Failed to load shared conversation');
+                loadAccounts(); // Fallback to normal mode
+            }
+        }
+    </script>
+</body>
+</html>

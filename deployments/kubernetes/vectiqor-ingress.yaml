@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vectiqor
+  namespace: vectiqor
+  labels:
+    app: vectiqor
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-path: /api/health
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    # Optional: set a dedicated ALB security group to keep SG policy explicit.
+    # alb.ingress.kubernetes.io/security-groups: sg-0123456789abcdef0
+    alb.ingress.kubernetes.io/security-groups: sg-077ef8fad15f64447
+    external-dns.alpha.kubernetes.io/hostname: vectiqor.internal.finout.io
+    external-dns.alpha.kubernetes.io/zone-type: private
+    external-dns.alpha.kubernetes.io/hosted-zone-id: Z067649217K758I13UCY2
+    # Set ACM certificate ARN before applying:
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:277411487094:certificate/2bbd2a25-b995-4420-ab94-8ed88f94d57f
+spec:
+  ingressClassName: alb
+  rules:
+  - host: vectiqor.internal.finout.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vectiqor
+            port:
+              number: 80

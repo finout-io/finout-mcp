@@ -33,7 +33,7 @@ uv pip install -e .
 }
 ```
 
-### For Developers (Testing with ASAF)
+### For Developers (Testing with VECTIQOR)
 
 ```bash
 # Install workspace
@@ -43,8 +43,8 @@ uv sync
 cp .env.example .env
 # Edit .env with your credentials
 
-# Run ASAF
-uv run --directory packages/asaf asaf
+# Run VECTIQOR
+uv run --directory packages/vectiqor vectiqor
 
 # Open http://localhost:8000
 ```
@@ -63,19 +63,19 @@ uv sync
 # Install MCP server only
 cd packages/mcp-server && uv sync
 
-# Install ASAF only
-cd packages/asaf && uv sync
+# Install VECTIQOR only
+cd packages/vectiqor && uv sync
 ```
 
 ### Running
 
 ```bash
-# Run ASAF (from root)
-uv run --directory packages/asaf asaf
+# Run VECTIQOR (from root)
+uv run --directory packages/vectiqor vectiqor
 
-# Run ASAF with auto-reload (development)
-cd packages/asaf
-uv run uvicorn asaf.server:app --reload --host 0.0.0.0 --port 8000
+# Run VECTIQOR with auto-reload (development)
+cd packages/vectiqor
+uv run uvicorn vectiqor.server:app --reload --host 0.0.0.0 --port 8000
 
 # Run MCP server (stdio mode for testing)
 cd packages/mcp-server
@@ -97,14 +97,14 @@ uv run pytest tests/ -v
 cd packages/mcp-server
 uv build
 
-# Build ASAF Docker image
-docker build -f Dockerfile.asaf -t asaf:latest .
+# Build VECTIQOR Docker image
+docker build -f Dockerfile.vectiqor -t vectiqor:latest .
 ```
 
 ### Docker
 
 ```bash
-# Run ASAF with Docker Compose
+# Run VECTIQOR with Docker Compose
 docker-compose up -d
 
 # View logs
@@ -117,11 +117,11 @@ docker-compose down
 ### Kubernetes
 
 ```bash
-# Deploy ASAF
+# Deploy VECTIQOR
 kubectl apply -k deployments/kubernetes/
 
 # View logs
-kubectl logs -n finout-tools -l app=asaf -f
+kubectl logs -n finout-tools -l app=vectiqor -f
 
 # Delete
 kubectl delete -k deployments/kubernetes/
@@ -139,14 +139,14 @@ finout-mcp/                      # uv workspace root
 │   │   ├── src/finout_mcp_server/
 │   │   ├── tests/
 │   │   └── pyproject.toml
-│   └── asaf/                    # 🔧 Internal tool
-│       ├── src/asaf/
+│   └── vectiqor/                    # 🔧 Internal tool
+│       ├── src/vectiqor/
 │       │   ├── server.py
 │       │   └── static/index.html
 │       └── pyproject.toml
 ├── deployments/kubernetes/      # K8s manifests
 ├── docker-compose.yml
-├── Dockerfile.asaf
+├── Dockerfile.vectiqor
 └── .env.example
 ```
 
@@ -184,7 +184,7 @@ FINOUT_SECRET_KEY=your_secret_key
 FINOUT_INTERNAL_API_URL=https://api.finout.io
 FINOUT_ACCOUNT_ID=your_default_account_id
 
-# Anthropic API (for ASAF only)
+# Anthropic API (for VECTIQOR only)
 ANTHROPIC_API_KEY=your_anthropic_api_key
 ```
 
@@ -193,7 +193,7 @@ ANTHROPIC_API_KEY=your_anthropic_api_key
 ## 📚 Documentation
 
 - **[MCP Server](packages/mcp-server/README.md)** - Customer docs
-- **[ASAF](packages/asaf/README.md)** - Internal tool
+- **[VECTIQOR](packages/vectiqor/README.md)** - Internal tool
 - **[Kubernetes](deployments/kubernetes/README.md)** - K8s deployment
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history
 
@@ -205,8 +205,8 @@ ANTHROPIC_API_KEY=your_anthropic_api_key
 # 1. Install
 uv sync
 
-# 2. Run ASAF
-uv run --directory packages/asaf asaf
+# 2. Run VECTIQOR
+uv run --directory packages/vectiqor vectiqor
 
 # 3. Make changes to MCP server
 # Edit packages/mcp-server/src/...
@@ -215,8 +215,8 @@ uv run --directory packages/asaf asaf
 cd packages/mcp-server
 uv run pytest tests/ -v
 
-# 5. Test in ASAF
-# ASAF automatically picks up local MCP changes
+# 5. Test in VECTIQOR
+# VECTIQOR automatically picks up local MCP changes
 ```
 
 ---
@@ -234,8 +234,8 @@ docker-compose up -d
 
 ```bash
 # Build and push
-docker build -f Dockerfile.asaf -t your-registry/asaf:v1.0.0 .
-docker push your-registry/asaf:v1.0.0
+docker build -f Dockerfile.vectiqor -t your-registry/vectiqor:v1.0.0 .
+docker push your-registry/vectiqor:v1.0.0
 
 # Deploy
 kubectl apply -k deployments/kubernetes/

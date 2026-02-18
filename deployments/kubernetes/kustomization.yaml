@@ -1,32 +1,32 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: asaf
+namespace: vectiqor
 
 resources:
 - namespace.yaml
-- asaf-configmap.yaml
-- asaf-deployment.yaml
-- asaf-service.yaml
-- asaf-ingress.yaml
-# - asaf-secret.yaml  # Uncomment after creating from .example
+- vectiqor-configmap.yaml
+- vectiqor-deployment.yaml
+- vectiqor-service.yaml
+- vectiqor-ingress.yaml
+# - vectiqor-secret.yaml  # Uncomment after creating from .example
 
 # Common labels for all resources
 commonLabels:
-  app.kubernetes.io/name: asaf
+  app.kubernetes.io/name: vectiqor
   app.kubernetes.io/component: diagnostic-tool
   app.kubernetes.io/part-of: finout-mcp
   app.kubernetes.io/managed-by: kustomize
 
 # Image configuration
 images:
-- name: 277411487094.dkr.ecr.us-east-1.amazonaws.com/asaf
-  newName: 277411487094.dkr.ecr.us-east-1.amazonaws.com/asaf
+- name: 277411487094.dkr.ecr.us-east-1.amazonaws.com/vectiqor
+  newName: 277411487094.dkr.ecr.us-east-1.amazonaws.com/vectiqor
   newTag: latest
 
 # ConfigMap generator (alternative to separate file)
 # configMapGenerator:
-# - name: asaf-config
+# - name: vectiqor-config
 #   literals:
 #   - finout-internal-api-url=http://finout-app.internal
 #   - finout-default-account-id=your-account-id

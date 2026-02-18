@@ -702,17 +702,45 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
     assert finout_client is not None  # Type checker hint
 
-    # Check if credentials are available
-    if not finout_client.client_id or not finout_client.secret_key:
+    # Validate runtime requirements per tool (internal API vs key/secret API)
+    internal_api_tools = {
+        "query_costs",
+        "compare_costs",
+        "list_available_filters",
+        "search_filters",
+        "get_filter_values",
+        "get_usage_unit_types",
+        "debug_filters",
+        "discover_context",
+        "get_account_context",
+    }
+    key_secret_tools = {
+        "get_waste_recommendations",
+        # Keep anomalies here for future external API support.
+        "get_anomalies",
+    }
+
+    if name in internal_api_tools and not finout_client.internal_api_url:
         return [
             TextContent(
                 type="text",
                 text=(
-                    "Error: Finout API credentials not configured.\n\n"
-                    "To use this tool, set the following environment variables:\n"
+                    "Error: Internal API URL not configured.\n\n"
+                    "To use this tool, set:\n"
+                    "  FINOUT_INTERNAL_API_URL=http://your-finout-internal-api"
+                ),
+            )
+        ]
+
+    if name in key_secret_tools and (not finout_client.client_id or not finout_client.secret_key):
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    "Error: Finout API credentials not configured for this tool.\n\n"
+                    "To use this tool, set:\n"
                     "  FINOUT_CLIENT_ID=your_client_id\n"
-                    "  FINOUT_SECRET_KEY=your_secret_key\n\n"
-                    "Or create a .env file with these values."
+                    "  FINOUT_SECRET_KEY=your_secret_key"
                 ),
             )
         ]
@@ -1592,15 +1620,6 @@ async def read_resource(uri: str) -> str:
         return json.dumps({"error": "Client not initialized"})
 
     assert finout_client is not None  # Type checker hint
-
-    # Check if credentials are available
-    if not finout_client.client_id or not finout_client.secret_key:
-        return json.dumps(
-            {
-                "error": "Finout API credentials not configured",
-                "message": "Set FINOUT_CLIENT_ID and FINOUT_SECRET_KEY environment variables",
-            }
-        )
 
     try:
         if uri == "finout://how-to-query":

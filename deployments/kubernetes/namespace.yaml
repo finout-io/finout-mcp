@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: asaf
+  name: vectiqor
   labels:
-    name: asaf
+    name: vectiqor
     purpose: internal-diagnostic-tools

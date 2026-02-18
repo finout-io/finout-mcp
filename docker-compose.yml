@@ -1,9 +1,9 @@
 services:
-  asaf:
+  vectiqor:
     build:
       context: .
-      dockerfile: packages/asaf/Dockerfile
-    container_name: asaf
+      dockerfile: packages/vectiqor/Dockerfile
+    container_name: vectiqor
     ports:
       - "8000:8000"
     environment:
@@ -13,7 +13,7 @@ services:
       - FINOUT_INTERNAL_API_URL=${FINOUT_INTERNAL_API_URL}
       - FINOUT_ACCOUNT_ID=${FINOUT_ACCOUNT_ID}
       # Override DATABASE_URL for Docker - point to host machine's PostgreSQL
-      - DATABASE_URL=postgresql://fobo:fobo@host.docker.internal:5432/asaf
+      - DATABASE_URL=postgresql://fobo:fobo@host.docker.internal:5432/vectiqor
     env_file:
       - .env
     extra_hosts:

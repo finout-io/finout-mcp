@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="120" viewBox="0 0 560 120" role="img" aria-label="Vertiqor">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#15181d"/>
+      <stop offset="50%" stop-color="#1e242d"/>
+      <stop offset="100%" stop-color="#14181e"/>
+    </linearGradient>
+    <linearGradient id="word" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6f7f96"/>
+      <stop offset="100%" stop-color="#4e5c70"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6fb6c6"/>
+      <stop offset="100%" stop-color="#2e5d77"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="560" height="120" fill="url(#bg)" rx="16"/>
+  <text
+    x="280"
+    y="78"
+    fill="url(#word)"
+    font-family="Orbitron, Rajdhani, Arial Black, sans-serif"
+    font-size="58"
+    font-weight="800"
+    text-anchor="middle"
+    letter-spacing="3"
+  >
+    VECTIQOR
+  </text>
+  <polygon points="358,78 394,106 336,106 312,78" fill="url(#accent)" opacity="0.95"/>
+</svg>

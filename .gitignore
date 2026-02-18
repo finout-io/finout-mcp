@@ -98,5 +98,9 @@ docker-compose.override.yml
 
 # Sensitive or local-only files
 finout-mcp-server/claude_desktop_config.json
-tools/asaf/.env
-packages/asaf/.last_account
+tools/vectiqor/.env
+packages/vectiqor/.last_account
+
+# Frontend dependencies/build artifacts
+**/frontend/node_modules/
+**/frontend/dist/

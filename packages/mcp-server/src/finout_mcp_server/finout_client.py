@@ -33,6 +33,13 @@ class Granularity(StrEnum):
     ACCUMULATED = "accumulated"
 
 
+class InternalAuthMode(StrEnum):
+    """Authentication mode for internal API calls."""
+
+    AUTHORIZED_HEADERS = "authorized_headers"
+    KEY_SECRET = "key_secret"
+
+
 class FinoutClient:
     """
     Client for interacting with the Finout API.
@@ -46,6 +53,7 @@ class FinoutClient:
         base_url: str = "https://app.finout.io/v1",
         internal_api_url: str | None = None,
         account_id: str | None = None,
+        internal_auth_mode: InternalAuthMode | str = InternalAuthMode.AUTHORIZED_HEADERS,
         allow_missing_credentials: bool = False,
     ):
         """
@@ -57,6 +65,9 @@ class FinoutClient:
             base_url: Base URL for Finout API
             internal_api_url: Internal cost-service API URL (or from FINOUT_INTERNAL_API_URL env var)
             account_id: Account ID for internal API (or from FINOUT_ACCOUNT_ID env var)
+            internal_auth_mode: Auth mode for internal API calls:
+                                - authorized_headers (default)
+                                - key_secret
             allow_missing_credentials: If True, allows initialization without credentials
                                        (for testing/inspection only - API calls will fail)
         """
@@ -65,6 +76,7 @@ class FinoutClient:
         self.base_url = base_url
         self.internal_api_url = internal_api_url or os.getenv("FINOUT_INTERNAL_API_URL")
         self.account_id = account_id or os.getenv("FINOUT_ACCOUNT_ID")
+        self.internal_auth_mode = InternalAuthMode(internal_auth_mode)
 
         # Log account initialization
         import sys
@@ -412,12 +424,7 @@ class FinoutClient:
         if not self.internal_client or not self.account_id:
             raise ValueError("Internal API client and account_id required")
 
-        # Headers for account-service call
-        # Use 'admin' role to scope to this account (NOT 'sysAdmin' which bypasses tenancy)
-        headers = {
-            "authorized-user-roles": "admin",
-            "authorized-account-id": self.account_id,
-        }
+        headers = self._get_internal_headers(for_account_service=True)
 
         response = await self.internal_client.get(
             f"/account-service/account/{self.account_id}",
@@ -437,16 +444,25 @@ class FinoutClient:
         response.raise_for_status()
         return response.json()
 
-    def _get_internal_headers(self) -> dict[str, str]:
+    def _get_internal_headers(self, for_account_service: bool = False) -> dict[str, str]:
         """
-        Get headers for internal API calls.
-        Internal API should only receive account-scoped authorization headers.
+        Get headers for internal API calls based on selected auth mode.
 
         Returns:
-            Dictionary of headers for account-scoped authorization
+            Dictionary of headers
         """
         if not self.internal_client:
             raise ValueError("Internal API client not configured")
+
+        if self.internal_auth_mode == InternalAuthMode.KEY_SECRET:
+            headers: dict[str, str] = {}
+            if self.client_id:
+                headers["x-finout-client-id"] = self.client_id
+            if self.secret_key:
+                headers["x-finout-secret-key"] = self.secret_key
+            if not headers:
+                raise ValueError("Key/secret mode requires FINOUT_CLIENT_ID and FINOUT_SECRET_KEY.")
+            return headers
 
         if not self.account_id:
             import sys
@@ -454,8 +470,12 @@ class FinoutClient:
             print("✗ WARNING: Making API call without account_id!", file=sys.stderr)
             return {"authorized-user-roles": "admin"}
 
-        # CRITICAL: Use 'admin' NOT 'sysAdmin' - sysAdmin bypasses account tenancy.
-        # Keep this minimal by design.
+        if for_account_service:
+            return {
+                "authorized-user-roles": "admin",
+                "authorized-account-id": self.account_id,
+            }
+
         return {
             "authorized-user-roles": "admin",
             "authorized-account-id": self.account_id,
@@ -1251,9 +1271,10 @@ class FinoutClient:
             except Exception as e:
                 print(f"✗ Failed to fetch account info: {e}", file=sys.stderr)
 
-        # Data explorer service requires sysAdmin role but scopes by accountId parameter
         headers = self._get_internal_headers()
-        headers["authorized-user-roles"] = "sysAdmin"
+        if self.internal_auth_mode == InternalAuthMode.AUTHORIZED_HEADERS:
+            # Data explorer service requires sysAdmin role but scopes by accountId parameter
+            headers["authorized-user-roles"] = "sysAdmin"
 
         response = await self.internal_client.get(
             "/data-explorer-service/data-explorer",

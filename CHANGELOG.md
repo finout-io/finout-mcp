@@ -20,30 +20,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Created comprehensive root `README.md` with project overview
 - Created `STRUCTURE.md` explaining repository organization
 - Created `.env.example` with all required environment variables
-- Updated ASAF documentation to reflect new structure
+- Updated VECTIQOR documentation to reflect new structure
 - Moved deployment documentation to `docs/internal/`
 
 **Scripts**
-- `scripts/start-asaf.sh` - Start ASAF diagnostic tool locally
+- `scripts/start-vectiqor.sh` - Start VECTIQOR diagnostic tool locally
 - `scripts/build-mcp.sh` - Build MCP server package for distribution
-- `scripts/build-asaf.sh` - Build ASAF Docker image for internal deployment
-- `scripts/deploy-asaf-docker.sh` - Deploy ASAF using Docker Compose
-- `scripts/deploy-asaf-k8s.sh` - Deploy ASAF to Kubernetes cluster
+- `scripts/build-vectiqor.sh` - Build VECTIQOR Docker image for internal deployment
+- `scripts/deploy-vectiqor-docker.sh` - Deploy VECTIQOR using Docker Compose
+- `scripts/deploy-vectiqor-k8s.sh` - Deploy VECTIQOR to Kubernetes cluster
 - `scripts/test-all.sh` - Run all tests across the repository
 
 **Infrastructure**
 - Created `.gitignore` with comprehensive exclusions
 - Updated Docker configurations for new structure
 - Updated `docker-compose.yml` with correct paths
-- Updated `Dockerfile.asaf` to reference new locations
+- Updated `Dockerfile.vectiqor` to reference new locations
 
 **Kubernetes Deployment (Internal)**
-- Created Kubernetes manifests for ASAF deployment
-  - `deployments/kubernetes/asaf-deployment.yaml` - Deployment with 2 replicas
-  - `deployments/kubernetes/asaf-service.yaml` - ClusterIP service
-  - `deployments/kubernetes/asaf-ingress.yaml` - Ingress with TLS support
-  - `deployments/kubernetes/asaf-configmap.yaml` - Configuration
-  - `deployments/kubernetes/asaf-secret.yaml.example` - Secret template
+- Created Kubernetes manifests for VECTIQOR deployment
+  - `deployments/kubernetes/vectiqor-deployment.yaml` - Deployment with 2 replicas
+  - `deployments/kubernetes/vectiqor-service.yaml` - ClusterIP service
+  - `deployments/kubernetes/vectiqor-ingress.yaml` - Ingress with TLS support
+  - `deployments/kubernetes/vectiqor-configmap.yaml` - Configuration
+  - `deployments/kubernetes/vectiqor-secret.yaml.example` - Secret template
   - `deployments/kubernetes/namespace.yaml` - Namespace definition
   - `deployments/kubernetes/kustomization.yaml` - Kustomize configuration
 - Created comprehensive Kubernetes deployment guide
@@ -54,17 +54,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Monitoring and troubleshooting guides
 
 **Code Changes**
-- Updated `asaf_server.py` to load `.env` from repository root
-- Updated `asaf_server.py` to reference MCP server at `../../finout-mcp-server`
-- Updated ASAF README with new paths and script usage
+- Updated `vectiqor_server.py` to load `.env` from repository root
+- Updated `vectiqor_server.py` to reference MCP server at `../../finout-mcp-server`
+- Updated VECTIQOR README with new paths and script usage
 
 ### Changed
 
 **Directory Structure**
-- Moved `asaf/` → `tools/asaf/` (internal tool)
-- Moved `asaf/Dockerfile` → `deployments/docker/Dockerfile.asaf`
-- Moved `asaf/docker-compose.yml` → `deployments/docker/docker-compose.yml`
-- Moved `asaf/DEPLOYMENT.md` → `docs/internal/asaf-deployment.md`
+- Moved `vectiqor/` → `tools/vectiqor/` (internal tool)
+- Moved `vectiqor/Dockerfile` → `deployments/docker/Dockerfile.vectiqor`
+- Moved `vectiqor/docker-compose.yml` → `deployments/docker/docker-compose.yml`
+- Moved `vectiqor/DEPLOYMENT.md` → `docs/internal/vectiqor-deployment.md`
 - Kept `finout-mcp-server/` at root (main product)
 
 **Configuration**
@@ -81,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `get_filter_values` to support all filter types
 - Added guidance for searching values with substrings
 
-**ASAF**
+**VECTIQOR**
 - Fixed export conversation button (added event parameter)
 - Moved account selector to sidebar bottom
 - Added model selector with Haiku 4.5, Sonnet 4.5, Opus 4.6
@@ -102,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Time-based cost comparisons
 - Filter search and discovery
 
-### ASAF Features
+### VECTIQOR Features
 - Web-based chat interface
 - MCP server integration via subprocess
 - Tool call tracking and display
@@ -131,7 +131,7 @@ To create a new release:
 - **Minor version** (0.X.0): New features, backwards compatible
 - **Patch version** (0.0.X): Bug fixes, no new features
 
-Internal tools (ASAF) are not versioned separately - they track the monorepo version.
+Internal tools (VECTIQOR) are not versioned separately - they track the monorepo version.
 
 ---
 

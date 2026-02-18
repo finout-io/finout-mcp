@@ -1,25 +1,25 @@
-# ASAF Kubernetes Deployment
+# VECTIQOR Kubernetes Deployment
 
-Deploy ASAF (Ask the Smart AI of Finout) to Kubernetes for internal use.
+Deploy VECTIQOR (Ask the Smart AI of Finout) to Kubernetes for internal use.
 
 ## Quick Start
 
 ```bash
 # 1. Build and push Docker image
-./scripts/build-asaf.sh v1.0.0
+./scripts/build-vectiqor.sh v1.0.0
 
 # 2. Configure secrets
-cp deployments/kubernetes/asaf-secret.yaml.example deployments/kubernetes/asaf-secret.yaml
-# Edit asaf-secret.yaml with your credentials (base64 encoded)
+cp deployments/kubernetes/vectiqor-secret.yaml.example deployments/kubernetes/vectiqor-secret.yaml
+# Edit vectiqor-secret.yaml with your credentials (base64 encoded)
 
 # 3. Update configuration
-nano deployments/kubernetes/asaf-configmap.yaml
+nano deployments/kubernetes/vectiqor-configmap.yaml
 
 # 4. Update ingress hostname
-nano deployments/kubernetes/asaf-ingress.yaml
+nano deployments/kubernetes/vectiqor-ingress.yaml
 
 # 5. Deploy
-./scripts/deploy-asaf-k8s.sh
+./scripts/deploy-vectiqor-k8s.sh
 ```
 
 ## Prerequisites
@@ -39,7 +39,7 @@ nano deployments/kubernetes/asaf-ingress.yaml
 export DOCKER_REGISTRY=your-registry.azurecr.io
 
 # Build and push
-./scripts/build-asaf.sh v1.0.0
+./scripts/build-vectiqor.sh v1.0.0
 ```
 
 Or manually:
@@ -47,18 +47,18 @@ Or manually:
 ```bash
 # Azure Container Registry
 az acr login --name your-registry
-docker build -f deployments/docker/Dockerfile.asaf -t your-registry.azurecr.io/asaf:v1.0.0 .
-docker push your-registry.azurecr.io/asaf:v1.0.0
+docker build -f deployments/docker/Dockerfile.vectiqor -t your-registry.azurecr.io/vectiqor:v1.0.0 .
+docker push your-registry.azurecr.io/vectiqor:v1.0.0
 
 # AWS ECR
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin your-account.dkr.ecr.us-east-1.amazonaws.com
-docker build -f deployments/docker/Dockerfile.asaf -t your-account.dkr.ecr.us-east-1.amazonaws.com/asaf:v1.0.0 .
-docker push your-account.dkr.ecr.us-east-1.amazonaws.com/asaf:v1.0.0
+docker build -f deployments/docker/Dockerfile.vectiqor -t your-account.dkr.ecr.us-east-1.amazonaws.com/vectiqor:v1.0.0 .
+docker push your-account.dkr.ecr.us-east-1.amazonaws.com/vectiqor:v1.0.0
 
 # Google Container Registry
 gcloud auth configure-docker
-docker build -f deployments/docker/Dockerfile.asaf -t gcr.io/your-project/asaf:v1.0.0 .
-docker push gcr.io/your-project/asaf:v1.0.0
+docker build -f deployments/docker/Dockerfile.vectiqor -t gcr.io/your-project/vectiqor:v1.0.0 .
+docker push gcr.io/your-project/vectiqor:v1.0.0
 ```
 
 ### 2. Configure Secrets
@@ -67,32 +67,32 @@ docker push gcr.io/your-project/asaf:v1.0.0
 
 ```bash
 # Create namespace
-kubectl create namespace asaf
+kubectl create namespace vectiqor
 
 # Create secret
-kubectl create secret generic asaf-secrets \
+kubectl create secret generic vectiqor-secrets \
   --from-literal=finout-client-id="your-client-id" \
   --from-literal=finout-secret-key="your-secret-key" \
   --from-literal=anthropic-api-key="your-anthropic-key" \
-  -n asaf
+  -n vectiqor
 ```
 
 **Option B: Using YAML file**
 
 ```bash
 # Copy template
-cp asaf-secret.yaml.example asaf-secret.yaml
+cp vectiqor-secret.yaml.example vectiqor-secret.yaml
 
 # Encode your credentials
 echo -n "your-finout-client-id" | base64
 echo -n "your-finout-secret-key" | base64
 echo -n "your-anthropic-api-key" | base64
 
-# Edit asaf-secret.yaml with encoded values
-nano asaf-secret.yaml
+# Edit vectiqor-secret.yaml with encoded values
+nano vectiqor-secret.yaml
 
 # Apply
-kubectl apply -f asaf-secret.yaml
+kubectl apply -f vectiqor-secret.yaml
 ```
 
 **Option C: Using External Secrets (Recommended for Production)**
@@ -103,8 +103,8 @@ Azure Key Vault example:
 apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
 metadata:
-  name: asaf-secrets-provider
-  namespace: asaf
+  name: vectiqor-secrets-provider
+  namespace: vectiqor
 spec:
   provider: azure
   parameters:
@@ -121,7 +121,7 @@ spec:
           objectName: anthropic-api-key
           objectType: secret
   secretObjects:
-  - secretName: asaf-secrets
+  - secretName: vectiqor-secrets
     type: Opaque
     data:
     - objectName: finout-client-id
@@ -134,7 +134,7 @@ spec:
 
 ### 3. Update Configuration
 
-Edit `asaf-configmap.yaml`:
+Edit `vectiqor-configmap.yaml`:
 
 ```yaml
 data:
@@ -145,7 +145,7 @@ data:
 
 ### 4. Update Deployment
 
-Edit `asaf-deployment.yaml`:
+Edit `vectiqor-deployment.yaml`:
 
 ```yaml
 spec:
@@ -153,8 +153,8 @@ spec:
   template:
     spec:
       containers:
-      - name: asaf
-        image: your-registry.azurecr.io/asaf:v1.0.0  # Update with your image
+      - name: vectiqor
+        image: your-registry.azurecr.io/vectiqor:v1.0.0  # Update with your image
         resources:
           requests:
             memory: "512Mi"
@@ -166,23 +166,23 @@ spec:
 
 ### 5. Configure Ingress
 
-Edit `asaf-ingress.yaml`:
+Edit `vectiqor-ingress.yaml`:
 
 ```yaml
 spec:
   tls:
   - hosts:
-    - asaf.your-company.internal  # Your hostname
-    secretName: asaf-tls-cert     # Your TLS certificate secret
+    - vectiqor.your-company.internal  # Your hostname
+    secretName: vectiqor-tls-cert     # Your TLS certificate secret
   rules:
-  - host: asaf.your-company.internal
+  - host: vectiqor.your-company.internal
     http:
       paths:
       - path: /
         pathType: Prefix
         backend:
           service:
-            name: asaf
+            name: vectiqor
             port:
               number: 80
 ```
@@ -191,15 +191,15 @@ spec:
 
 ```bash
 # Using deployment script
-./scripts/deploy-asaf-k8s.sh
+./scripts/deploy-vectiqor-k8s.sh
 
 # Or manually
 kubectl apply -f deployments/kubernetes/namespace.yaml
-kubectl apply -f deployments/kubernetes/asaf-configmap.yaml
-kubectl apply -f deployments/kubernetes/asaf-secret.yaml
-kubectl apply -f deployments/kubernetes/asaf-deployment.yaml
-kubectl apply -f deployments/kubernetes/asaf-service.yaml
-kubectl apply -f deployments/kubernetes/asaf-ingress.yaml
+kubectl apply -f deployments/kubernetes/vectiqor-configmap.yaml
+kubectl apply -f deployments/kubernetes/vectiqor-secret.yaml
+kubectl apply -f deployments/kubernetes/vectiqor-deployment.yaml
+kubectl apply -f deployments/kubernetes/vectiqor-service.yaml
+kubectl apply -f deployments/kubernetes/vectiqor-ingress.yaml
 
 # Or using kustomize
 kubectl apply -k deployments/kubernetes/
@@ -211,29 +211,29 @@ kubectl apply -k deployments/kubernetes/
 
 ```bash
 # Get all resources
-kubectl get all -n asaf -l app=asaf
+kubectl get all -n vectiqor -l app=vectiqor
 
 # Check pods
-kubectl get pods -n asaf
+kubectl get pods -n vectiqor
 
 # Check deployment
-kubectl describe deployment asaf -n asaf
+kubectl describe deployment vectiqor -n vectiqor
 
 # View logs
-kubectl logs -n asaf -l app=asaf -f
+kubectl logs -n vectiqor -l app=vectiqor -f
 
 # Check service
-kubectl get svc asaf -n asaf
+kubectl get svc vectiqor -n vectiqor
 
 # Check ingress
-kubectl get ingress asaf -n asaf
+kubectl get ingress vectiqor -n vectiqor
 ```
 
 ### Health Check
 
 ```bash
 # Port forward for local testing
-kubectl port-forward -n asaf svc/asaf 8000:80
+kubectl port-forward -n vectiqor svc/vectiqor 8000:80
 
 # Test health endpoint
 curl http://localhost:8000/api/health
@@ -243,10 +243,10 @@ curl http://localhost:8000/api/health
 
 ```bash
 # Get ingress URL
-kubectl get ingress asaf -n asaf
+kubectl get ingress vectiqor -n vectiqor
 
 # Access via browser
-https://asaf.your-company.internal
+https://vectiqor.your-company.internal
 ```
 
 ## Scaling
@@ -255,27 +255,27 @@ https://asaf.your-company.internal
 
 ```bash
 # Scale up
-kubectl scale deployment asaf -n asaf --replicas=5
+kubectl scale deployment vectiqor -n vectiqor --replicas=5
 
 # Scale down
-kubectl scale deployment asaf -n asaf --replicas=1
+kubectl scale deployment vectiqor -n vectiqor --replicas=1
 ```
 
 ### Auto-scaling (HPA)
 
-Create `asaf-hpa.yaml`:
+Create `vectiqor-hpa.yaml`:
 
 ```yaml
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: asaf
-  namespace: asaf
+  name: vectiqor
+  namespace: vectiqor
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: asaf
+    name: vectiqor
   minReplicas: 2
   maxReplicas: 10
   metrics:
@@ -295,7 +295,7 @@ spec:
 
 Apply:
 ```bash
-kubectl apply -f asaf-hpa.yaml
+kubectl apply -f vectiqor-hpa.yaml
 ```
 
 ## Updates
@@ -304,26 +304,26 @@ kubectl apply -f asaf-hpa.yaml
 
 ```bash
 # Build new version
-./scripts/build-asaf.sh v1.1.0
+./scripts/build-vectiqor.sh v1.1.0
 
 # Update deployment image
-kubectl set image deployment/asaf asaf=your-registry.azurecr.io/asaf:v1.1.0 -n asaf
+kubectl set image deployment/vectiqor vectiqor=your-registry.azurecr.io/vectiqor:v1.1.0 -n vectiqor
 
 # Watch rollout
-kubectl rollout status deployment/asaf -n asaf
+kubectl rollout status deployment/vectiqor -n vectiqor
 
 # Rollback if needed
-kubectl rollout undo deployment/asaf -n asaf
+kubectl rollout undo deployment/vectiqor -n vectiqor
 ```
 
 ### Update Configuration
 
 ```bash
 # Edit configmap
-kubectl edit configmap asaf-config -n asaf
+kubectl edit configmap vectiqor-config -n vectiqor
 
 # Restart pods to pick up changes
-kubectl rollout restart deployment/asaf -n asaf
+kubectl rollout restart deployment/vectiqor -n vectiqor
 ```
 
 ## Monitoring
@@ -332,30 +332,30 @@ kubectl rollout restart deployment/asaf -n asaf
 
 ```bash
 # Stream logs from all pods
-kubectl logs -n asaf -l app=asaf -f
+kubectl logs -n vectiqor -l app=vectiqor -f
 
 # Logs from specific pod
-kubectl logs -n asaf <pod-name> -f
+kubectl logs -n vectiqor <pod-name> -f
 
 # Previous logs (after crash)
-kubectl logs -n asaf <pod-name> --previous
+kubectl logs -n vectiqor <pod-name> --previous
 ```
 
 ### Metrics
 
 ```bash
 # Resource usage
-kubectl top pods -n asaf -l app=asaf
+kubectl top pods -n vectiqor -l app=vectiqor
 
 # Detailed pod info
-kubectl describe pod <pod-name> -n asaf
+kubectl describe pod <pod-name> -n vectiqor
 ```
 
 ### Events
 
 ```bash
 # Recent events
-kubectl get events -n asaf --sort-by='.lastTimestamp'
+kubectl get events -n vectiqor --sort-by='.lastTimestamp'
 ```
 
 ## Troubleshooting
@@ -364,13 +364,13 @@ kubectl get events -n asaf --sort-by='.lastTimestamp'
 
 ```bash
 # Check pod status
-kubectl get pods -n asaf
+kubectl get pods -n vectiqor
 
 # Describe pod
-kubectl describe pod <pod-name> -n asaf
+kubectl describe pod <pod-name> -n vectiqor
 
 # Check logs
-kubectl logs <pod-name> -n asaf
+kubectl logs <pod-name> -n vectiqor
 
 # Common issues:
 # - ImagePullBackOff: Check image name and registry credentials
@@ -382,29 +382,29 @@ kubectl logs <pod-name> -n asaf
 
 ```bash
 # Verify secret exists
-kubectl get secret asaf-secrets -n asaf
+kubectl get secret vectiqor-secrets -n vectiqor
 
 # Check secret contents (base64 encoded)
-kubectl get secret asaf-secrets -n asaf -o yaml
+kubectl get secret vectiqor-secrets -n vectiqor -o yaml
 
 # Recreate secret
-kubectl delete secret asaf-secrets -n asaf
-kubectl create secret generic asaf-secrets \
+kubectl delete secret vectiqor-secrets -n vectiqor
+kubectl create secret generic vectiqor-secrets \
   --from-literal=finout-client-id="..." \
-  -n asaf
+  -n vectiqor
 ```
 
 ### Service Not Accessible
 
 ```bash
 # Check service
-kubectl get svc asaf -n asaf
+kubectl get svc vectiqor -n vectiqor
 
 # Check endpoints
-kubectl get endpoints asaf -n asaf
+kubectl get endpoints vectiqor -n vectiqor
 
 # Port forward for testing
-kubectl port-forward svc/asaf 8000:80 -n asaf
+kubectl port-forward svc/vectiqor 8000:80 -n vectiqor
 curl http://localhost:8000/api/health
 ```
 
@@ -412,13 +412,13 @@ curl http://localhost:8000/api/health
 
 ```bash
 # Check ingress
-kubectl describe ingress asaf -n asaf
+kubectl describe ingress vectiqor -n vectiqor
 
 # Check ingress controller logs
 kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx -f
 
 # Test with port-forward first
-kubectl port-forward svc/asaf 8000:80 -n asaf
+kubectl port-forward svc/vectiqor 8000:80 -n vectiqor
 ```
 
 ## Security Best Practices
@@ -432,12 +432,12 @@ kubectl port-forward svc/asaf 8000:80 -n asaf
    apiVersion: networking.k8s.io/v1
    kind: NetworkPolicy
    metadata:
-     name: asaf-network-policy
-     namespace: asaf
+     name: vectiqor-network-policy
+     namespace: vectiqor
    spec:
      podSelector:
        matchLabels:
-         app: asaf
+         app: vectiqor
      policyTypes:
      - Ingress
      - Egress
@@ -458,7 +458,7 @@ kubectl port-forward svc/asaf 8000:80 -n asaf
    ```
 
 3. **Use RBAC**
-   - Limit who can deploy/update ASAF
+   - Limit who can deploy/update VECTIQOR
    - Use service accounts with minimal permissions
 
 4. **Enable Pod Security Standards**
@@ -466,7 +466,7 @@ kubectl port-forward svc/asaf 8000:80 -n asaf
    apiVersion: policy/v1beta1
    kind: PodSecurityPolicy
    metadata:
-     name: asaf-psp
+     name: vectiqor-psp
    spec:
      privileged: false
      allowPrivilegeEscalation: false
@@ -489,16 +489,16 @@ kubectl port-forward svc/asaf 8000:80 -n asaf
 ## Cleanup
 
 ```bash
-# Delete all ASAF resources
+# Delete all VECTIQOR resources
 kubectl delete -k deployments/kubernetes/
 
 # Or manually
-kubectl delete namespace asaf
+kubectl delete namespace vectiqor
 
 # Delete specific resources
-kubectl delete deployment asaf -n asaf
-kubectl delete service asaf -n asaf
-kubectl delete ingress asaf -n asaf
+kubectl delete deployment vectiqor -n vectiqor
+kubectl delete service vectiqor -n vectiqor
+kubectl delete ingress vectiqor -n vectiqor
 ```
 
 ## CI/CD Integration
@@ -506,13 +506,13 @@ kubectl delete ingress asaf -n asaf
 ### GitHub Actions Example
 
 ```yaml
-name: Deploy ASAF to K8s
+name: Deploy VECTIQOR to K8s
 
 on:
   push:
     branches: [main]
     paths:
-      - 'tools/asaf/**'
+      - 'tools/vectiqor/**'
       - 'deployments/kubernetes/**'
 
 jobs:
@@ -523,17 +523,17 @@ jobs:
 
     - name: Build and push Docker image
       run: |
-        docker build -f deployments/docker/Dockerfile.asaf -t ${{ secrets.REGISTRY }}/asaf:${{ github.sha }} .
-        docker push ${{ secrets.REGISTRY }}/asaf:${{ github.sha }}
+        docker build -f deployments/docker/Dockerfile.vectiqor -t ${{ secrets.REGISTRY }}/vectiqor:${{ github.sha }} .
+        docker push ${{ secrets.REGISTRY }}/vectiqor:${{ github.sha }}
 
     - name: Deploy to Kubernetes
       run: |
-        kubectl set image deployment/asaf asaf=${{ secrets.REGISTRY }}/asaf:${{ github.sha }} -n asaf
+        kubectl set image deployment/vectiqor vectiqor=${{ secrets.REGISTRY }}/vectiqor:${{ github.sha }} -n vectiqor
 ```
 
 ## Support
 
-- Check logs: `kubectl logs -n asaf -l app=asaf -f`
-- Check health: `kubectl get pods -n asaf`
-- Port forward for testing: `kubectl port-forward -n asaf svc/asaf 8000:80`
-- Describe resources: `kubectl describe deployment asaf -n asaf`
+- Check logs: `kubectl logs -n vectiqor -l app=vectiqor -f`
+- Check health: `kubectl get pods -n vectiqor`
+- Port forward for testing: `kubectl port-forward -n vectiqor svc/vectiqor 8000:80`
+- Describe resources: `kubectl describe deployment vectiqor -n vectiqor`

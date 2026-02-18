@@ -44,10 +44,10 @@ Removed documentation about bugs that have been fixed:
 - `TEST_INSPECTOR.md` - Testing notes
 - `TESTING.md` - Old testing docs
 
-### Outdated Files (tools/asaf/)
+### Outdated Files (tools/vectiqor/)
 
 - `UPDATES.md` - Outdated change notes (superseded by root CHANGELOG.md)
-- `start.sh` - Local startup script (superseded by `scripts/start-asaf.sh`)
+- `start.sh` - Local startup script (superseded by `scripts/start-vectiqor.sh`)
 
 ## Files Kept
 
@@ -70,10 +70,10 @@ Removed documentation about bugs that have been fixed:
 **Setup:**
 - `setup_claude_desktop.sh` - Claude Desktop configuration script
 
-### ASAF (tools/asaf/)
+### VECTIQOR (tools/vectiqor/)
 
 **Essential:**
-- `asaf_server.py` - Backend server
+- `vectiqor_server.py` - Backend server
 - `index.html` - Web UI
 - `requirements.txt` - Dependencies
 - `.env.example` - Environment template
@@ -97,7 +97,7 @@ Removed documentation about bugs that have been fixed:
 ### Deployments
 
 **Docker:**
-- `deployments/docker/Dockerfile.asaf`
+- `deployments/docker/Dockerfile.vectiqor`
 - `deployments/docker/docker-compose.yml`
 - `deployments/docker/.dockerignore`
 
@@ -109,17 +109,17 @@ Removed documentation about bugs that have been fixed:
 
 **Build & Deploy:**
 - `scripts/build-mcp.sh` - Build MCP package
-- `scripts/build-asaf.sh` - Build ASAF image
-- `scripts/start-asaf.sh` - Start ASAF locally
-- `scripts/deploy-asaf-docker.sh` - Deploy with Docker
-- `scripts/deploy-asaf-k8s.sh` - Deploy to Kubernetes
+- `scripts/build-vectiqor.sh` - Build VECTIQOR image
+- `scripts/start-vectiqor.sh` - Start VECTIQOR locally
+- `scripts/deploy-vectiqor-docker.sh` - Deploy with Docker
+- `scripts/deploy-vectiqor-k8s.sh` - Deploy to Kubernetes
 - `scripts/test-all.sh` - Run tests
 - `scripts/cleanup-repo.sh` - This cleanup script
 
 ### Documentation
 
 **Internal:**
-- `docs/internal/asaf-deployment.md` - ASAF deployment guide
+- `docs/internal/vectiqor-deployment.md` - VECTIQOR deployment guide
 
 ## Result
 
@@ -142,7 +142,7 @@ Removed documentation about bugs that have been fixed:
 3. **Maintainability**: Less clutter, easier to navigate
 4. **Git Ready**: Clean history without development artifacts
 5. **Customer Ready**: MCP server ready for publication
-6. **Production Ready**: ASAF ready for internal deployment
+6. **Production Ready**: VECTIQOR ready for internal deployment
 
 ## Running Cleanup Again
 

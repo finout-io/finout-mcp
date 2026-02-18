@@ -6,7 +6,7 @@ This document explains the organization of the Finout MCP monorepo.
 
 This is a monorepo containing:
 1. **Finout MCP Server** (main product for customers)
-2. **ASAF** (internal diagnostic tool, not distributed)
+2. **VECTIQOR** (internal diagnostic tool, not distributed)
 3. **Deployment configurations**
 4. **Utility scripts**
 5. **Documentation**
@@ -34,30 +34,30 @@ finout-mcp/                         # Repository root
 │   └── .env                        # Environment variables (gitignored)
 │
 ├── tools/                          # 🔧 INTERNAL TOOLS (not distributed)
-│   └── asaf/                       # Web-based diagnostic tool
-│       ├── asaf_server.py          # FastAPI backend
+│   └── vectiqor/                       # Web-based diagnostic tool
+│       ├── vectiqor_server.py          # FastAPI backend
 │       ├── index.html              # Web UI
 │       ├── requirements.txt        # Python dependencies
-│       ├── README.md               # ASAF documentation
+│       ├── README.md               # VECTIQOR documentation
 │       ├── QUICKSTART.md
 │       ├── MULTI_ACCOUNT.md
-│       └── .env                    # ASAF config (gitignored)
+│       └── .env                    # VECTIQOR config (gitignored)
 │
 ├── deployments/                    # 🚀 DEPLOYMENT CONFIGURATIONS
 │   └── docker/
-│       ├── Dockerfile.asaf         # ASAF container definition
-│       ├── docker-compose.yml      # Orchestration for ASAF
+│       ├── Dockerfile.vectiqor         # VECTIQOR container definition
+│       ├── docker-compose.yml      # Orchestration for VECTIQOR
 │       └── .dockerignore           # Docker build exclusions
 │
 ├── scripts/                        # 🛠️ UTILITY SCRIPTS
-│   ├── start-asaf.sh              # Start ASAF locally
+│   ├── start-vectiqor.sh              # Start VECTIQOR locally
 │   ├── build-mcp.sh               # Build MCP package
 │   ├── test-all.sh                # Run all tests
-│   └── deploy-asaf-docker.sh      # Deploy ASAF with Docker
+│   └── deploy-vectiqor-docker.sh      # Deploy VECTIQOR with Docker
 │
 ├── docs/                           # 📚 DOCUMENTATION
 │   └── internal/
-│       └── asaf-deployment.md      # ASAF deployment guide
+│       └── vectiqor-deployment.md      # VECTIQOR deployment guide
 │
 ├── .env.example                    # Environment template
 ├── .gitignore                      # Git exclusions
@@ -79,10 +79,10 @@ finout-mcp/                         # Repository root
 
 ### 🏢 Deployed Internally (Within Organization)
 
-- `tools/asaf/` - Web diagnostic tool (Docker/Kubernetes)
+- `tools/vectiqor/` - Web diagnostic tool (Docker/Kubernetes)
 - `deployments/` - Docker and Kubernetes configurations
-- `scripts/build-asaf.sh` - Build ASAF container
-- `scripts/deploy-asaf-k8s.sh` - Deploy to Kubernetes
+- `scripts/build-vectiqor.sh` - Build VECTIQOR container
+- `scripts/deploy-vectiqor-k8s.sh` - Deploy to Kubernetes
 
 ### ❌ Never Distributed
 
@@ -113,15 +113,15 @@ finout-mcp/                         # Repository root
 | `.env` | Environment variables (gitignored) |
 | `src/finout_mcp_server/server.py` | Main MCP server implementation |
 
-### ASAF (tools/asaf/)
+### VECTIQOR (tools/vectiqor/)
 
 | File | Purpose |
 |------|---------|
-| `asaf_server.py` | FastAPI backend server |
+| `vectiqor_server.py` | FastAPI backend server |
 | `index.html` | Web UI (single-page app) |
 | `requirements.txt` | Python dependencies |
-| `README.md` | ASAF-specific documentation |
-| `.env` | ASAF configuration (gitignored) |
+| `README.md` | VECTIQOR-specific documentation |
+| `.env` | VECTIQOR configuration (gitignored) |
 
 ---
 
@@ -138,11 +138,11 @@ FINOUT_SECRET_KEY=...
 FINOUT_INTERNAL_API_URL=...
 FINOUT_ACCOUNT_ID=...
 
-# Required for ASAF only
+# Required for VECTIQOR only
 ANTHROPIC_API_KEY=...
 ```
 
-Both the MCP server and ASAF read from this file.
+Both the MCP server and VECTIQOR read from this file.
 
 ---
 
@@ -166,8 +166,8 @@ cp .env.example .env
 # Option A: Test with Claude Desktop
 # Configure claude_desktop_config.json and restart Claude
 
-# Option B: Test with ASAF
-./scripts/start-asaf.sh
+# Option B: Test with VECTIQOR
+./scripts/start-vectiqor.sh
 # Open http://localhost:8000
 ```
 
@@ -176,8 +176,8 @@ cp .env.example .env
 ```bash
 # Edit MCP server code in finout-mcp-server/src/
 
-# Test immediately with ASAF (auto-reloads)
-./scripts/start-asaf.sh
+# Test immediately with VECTIQOR (auto-reloads)
+./scripts/start-vectiqor.sh
 
 # Run tests
 ./scripts/test-all.sh
@@ -186,14 +186,14 @@ cp .env.example .env
 ./scripts/build-mcp.sh
 ```
 
-### 4. Deploying ASAF
+### 4. Deploying VECTIQOR
 
 ```bash
 # Local deployment
-./scripts/start-asaf.sh
+./scripts/start-vectiqor.sh
 
 # Docker deployment
-./scripts/deploy-asaf-docker.sh
+./scripts/deploy-vectiqor-docker.sh
 ```
 
 ---
@@ -261,10 +261,10 @@ pip install finout-mcp-server
 
 ## Common Tasks
 
-### Start ASAF for Testing
+### Start VECTIQOR for Testing
 
 ```bash
-./scripts/start-asaf.sh
+./scripts/start-vectiqor.sh
 ```
 
 ### Build MCP Package
@@ -279,18 +279,18 @@ pip install finout-mcp-server
 ./scripts/test-all.sh
 ```
 
-### Deploy ASAF Internally
+### Deploy VECTIQOR Internally
 
 ```bash
 # Local (development)
-./scripts/start-asaf.sh
+./scripts/start-vectiqor.sh
 
 # Docker Compose (single server)
-./scripts/deploy-asaf-docker.sh
+./scripts/deploy-vectiqor-docker.sh
 
 # Kubernetes (production)
-./scripts/build-asaf.sh v1.0.0      # Build and push image
-./scripts/deploy-asaf-k8s.sh         # Deploy to cluster
+./scripts/build-vectiqor.sh v1.0.0      # Build and push image
+./scripts/deploy-vectiqor-k8s.sh         # Deploy to cluster
 
 # See full guide
 cat deployments/kubernetes/README.md
@@ -307,10 +307,10 @@ cat deployments/kubernetes/README.md
 
 ## FAQs
 
-**Q: Why is ASAF in tools/ and not in a top-level directory?**
-A: ASAF is an internal diagnostic tool, not part of the product. Placing it in `tools/` makes it clear it's not distributed to customers.
+**Q: Why is VECTIQOR in tools/ and not in a top-level directory?**
+A: VECTIQOR is an internal diagnostic tool, not part of the product. Placing it in `tools/` makes it clear it's not distributed to customers.
 
-**Q: Can I delete tools/asaf/ before publishing?**
+**Q: Can I delete tools/vectiqor/ before publishing?**
 A: No need! The MCP server package (`finout-mcp-server/`) is published independently. `tools/` is never included in the package.
 
 **Q: Where should I add new internal tools?**
@@ -342,7 +342,7 @@ A: **NEVER!** They contain secrets. Use `.env.example` as a template.
 1. ✅ Repository is structured and ready for git
 2. 📝 Review `.gitignore` to ensure no secrets are committed
 3. 🔍 Test the setup:
-   - `./scripts/start-asaf.sh`
+   - `./scripts/start-vectiqor.sh`
    - `./scripts/build-mcp.sh`
    - `./scripts/test-all.sh`
 4. 🚀 Commit and push:
