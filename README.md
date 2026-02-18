@@ -245,6 +245,27 @@ See [deployments/kubernetes/README.md](deployments/kubernetes/README.md)
 
 ---
 
+## ⚙️ CI/CD
+
+Pipeline: `.github/workflows/cicd.yml`
+
+On every PR and push, CI:
+- validates MCP (`ruff`, `mypy`, `pytest`)
+- builds VECTIQOR frontend and Python compile checks
+- builds Python package artifacts for:
+  - `finout-mcp-server`
+  - `vectiqor`
+- builds VECTIQOR Docker image
+
+Optional publish steps:
+- GHCR image push: on `main` and internal PRs
+- ECR image push: enabled when these repository secrets are set:
+  - `AWS_ROLE_TO_ASSUME`
+  - `ECR_REGISTRY` (for example `277411487094.dkr.ecr.us-east-1.amazonaws.com`)
+- PyPI package publish (main only): enabled with `PYPI_API_TOKEN`
+
+---
+
 ## 📦 Publishing MCP Server
 
 ```bash
