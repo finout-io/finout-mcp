@@ -817,9 +817,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
-        # Attach debug curl commands if any HTTP requests were made
+        # Attach debug curl commands only for internal VECTIQOR mode.
         curls = finout_client.collect_curls()
-        if curls and isinstance(result, dict):
+        if runtime_mode == MCPMode.VECTIQOR_INTERNAL.value and curls and isinstance(result, dict):
             result["_debug_curl"] = curls
 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
