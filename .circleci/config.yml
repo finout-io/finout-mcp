@@ -1,12 +1,12 @@
 version: 2.1
 
+orbs:
+  node: circleci/node@5.3.0
+
 executors:
   python:
     docker:
       - image: cimg/python:3.11
-  node:
-    docker:
-      - image: cimg/node:20.11
   docker:
     docker:
       - image: cimg/base:stable
@@ -41,7 +41,7 @@ jobs:
             pytest -q
 
   vectiqor_quality:
-    executor: node
+    executor: node/default
     steps:
       - checkout
       - run:
@@ -52,11 +52,15 @@ jobs:
               packages/vectiqor/src/vectiqor/db.py \
               packages/vectiqor/src/vectiqor/dev.py
       - run:
+          name: Install pnpm
+          command: corepack prepare pnpm@latest --activate
+      - node/install-packages:
+          pkg-manager: pnpm
+          app-dir: packages/vectiqor/frontend
+      - run:
           name: Build frontend
           command: |
             cd packages/vectiqor/frontend
-            corepack enable
-            pnpm install --frozen-lockfile
             pnpm build
 
   build_python_packages:
