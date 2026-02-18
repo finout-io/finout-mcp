@@ -47,27 +47,17 @@ def _init_client_for_mode(mode: MCPMode) -> FinoutClient:
     """Initialize Finout client for a fixed runtime mode."""
     import os
 
-    internal_api_url = os.getenv("FINOUT_INTERNAL_API_URL")
-    if not internal_api_url and mode == MCPMode.PUBLIC:
-        internal_api_url = "https://app.finout.io"
-
-    account_id = os.getenv("FINOUT_ACCOUNT_ID")
-    if not account_id:
-        raise ValueError("FINOUT_ACCOUNT_ID is required to enforce account-scoped queries.")
+    internal_api_url = os.getenv("FINOUT_API_URL") or "https://app.finout.io"
 
     if mode == MCPMode.PUBLIC:
         return FinoutClient(
             internal_api_url=internal_api_url,
-            account_id=account_id,
             internal_auth_mode=InternalAuthMode.KEY_SECRET,
             allow_missing_credentials=False,
         )
 
-    if not internal_api_url:
-        raise ValueError("FINOUT_INTERNAL_API_URL is required in vectiqor-internal mode.")
     return FinoutClient(
         internal_api_url=internal_api_url,
-        account_id=account_id,
         internal_auth_mode=InternalAuthMode.AUTHORIZED_HEADERS,
         allow_missing_credentials=True,
     )
@@ -778,7 +768,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 text=(
                     "Error: Internal API URL not configured.\n\n"
                     "To use this tool, set:\n"
-                    "  FINOUT_INTERNAL_API_URL=http://your-finout-internal-api"
+                    "  FINOUT_API_URL=https://app.finout.io"
                 ),
             )
         ]
@@ -844,7 +834,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     text=(
                         "❌ Internal API not configured\n\n"
                         "To use this tool, set the following environment variable:\n"
-                        "  FINOUT_INTERNAL_API_URL=http://your-finout-internal-api\n\n"
+                        "  FINOUT_API_URL=https://app.finout.io\n\n"
                         f"Original error: {error_msg}"
                     ),
                 )
@@ -893,7 +883,7 @@ async def query_costs_impl(args: dict) -> dict:
             "error": "Internal API not configured",
             "message": (
                 "This tool requires the internal cost-service API. "
-                "Set FINOUT_INTERNAL_API_URL environment variable. "
+                "Set FINOUT_API_URL environment variable. "
                 "For legacy view-based queries, use the public API instead."
             ),
         }
@@ -978,7 +968,7 @@ async def compare_costs_impl(args: dict) -> dict:
             "error": "Internal API not configured",
             "message": (
                 "This tool requires the internal cost-service API. "
-                "Set FINOUT_INTERNAL_API_URL environment variable."
+                "Set FINOUT_API_URL environment variable."
             ),
         }
 
@@ -1180,7 +1170,7 @@ async def list_available_filters_impl(args: dict) -> dict:
             "error": "Internal API not configured",
             "message": (
                 "This tool requires the internal cost-service API. "
-                "Set FINOUT_INTERNAL_API_URL environment variable."
+                "Set FINOUT_API_URL environment variable."
             ),
         }
 
@@ -1231,7 +1221,7 @@ async def search_filters_impl(args: dict) -> dict:
             "error": "Internal API not configured",
             "message": (
                 "This tool requires the internal cost-service API. "
-                "Set FINOUT_INTERNAL_API_URL environment variable."
+                "Set FINOUT_API_URL environment variable."
             ),
         }
 
@@ -1264,7 +1254,7 @@ async def debug_filters_impl(args: dict) -> dict:
     if not finout_client.internal_api_url:
         return {
             "error": "Internal API not configured",
-            "message": "Set FINOUT_INTERNAL_API_URL environment variable.",
+            "message": "Set FINOUT_API_URL environment variable.",
         }
 
     # Get raw metadata
@@ -1316,7 +1306,7 @@ async def get_filter_values_impl(args: dict) -> dict:
             "error": "Internal API not configured",
             "message": (
                 "This tool requires the internal cost-service API. "
-                "Set FINOUT_INTERNAL_API_URL environment variable."
+                "Set FINOUT_API_URL environment variable."
             ),
         }
 
@@ -1357,7 +1347,7 @@ async def get_usage_unit_types_impl(args: dict) -> dict:
             "error": "Internal API not configured",
             "message": (
                 "This tool requires the internal cost-service API. "
-                "Set FINOUT_INTERNAL_API_URL environment variable."
+                "Set FINOUT_API_URL environment variable."
             ),
         }
 
@@ -1998,6 +1988,19 @@ def _main_with_mode(mode: MCPMode) -> None:
 
 def main() -> None:
     """Public MCP entry point (customer-facing)."""
+    import sys
+
+    if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+        print(
+            "finout-mcp - Finout public MCP server\n\n"
+            "Required env vars at runtime:\n"
+            "  FINOUT_CLIENT_ID\n"
+            "  FINOUT_SECRET_KEY\n\n"
+            "Optional env vars:\n"
+            "  FINOUT_API_URL (default: https://app.finout.io)\n"
+        )
+        return
+
     _main_with_mode(MCPMode.PUBLIC)
 
 

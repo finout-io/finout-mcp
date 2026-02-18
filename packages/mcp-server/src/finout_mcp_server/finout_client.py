@@ -63,8 +63,8 @@ class FinoutClient:
             client_id: Finout API client ID (or from FINOUT_CLIENT_ID env var)
             secret_key: Finout API secret key (or from FINOUT_SECRET_KEY env var)
             base_url: Base URL for Finout API
-            internal_api_url: Internal cost-service API URL (or from FINOUT_INTERNAL_API_URL env var)
-            account_id: Account ID for internal API (or from FINOUT_ACCOUNT_ID env var)
+            internal_api_url: API URL (or from FINOUT_API_URL env var)
+            account_id: Optional account ID for internal API scope (auto-discovered when possible)
             internal_auth_mode: Auth mode for internal API calls:
                                 - authorized_headers (default)
                                 - key_secret
@@ -74,8 +74,10 @@ class FinoutClient:
         self.client_id = client_id or os.getenv("FINOUT_CLIENT_ID")
         self.secret_key = secret_key or os.getenv("FINOUT_SECRET_KEY")
         self.base_url = base_url
-        self.internal_api_url = internal_api_url or os.getenv("FINOUT_INTERNAL_API_URL")
-        self.account_id = account_id or os.getenv("FINOUT_ACCOUNT_ID")
+        self.internal_api_url = (
+            internal_api_url or os.getenv("FINOUT_API_URL") or "https://app.finout.io"
+        )
+        self.account_id = account_id
         self.internal_auth_mode = InternalAuthMode(internal_auth_mode)
 
         # Log account initialization
@@ -85,7 +87,7 @@ class FinoutClient:
             print(f"✓ MCP initialized with account: {self.account_id}", file=sys.stderr)
         else:
             print(
-                "✗ WARNING: MCP started without account_id! Cross-account data leak possible!",
+                "→ MCP started without fixed account_id (will auto-discover when needed)",
                 file=sys.stderr,
             )
 
@@ -391,7 +393,7 @@ class FinoutClient:
         """
         if not self.internal_api_url:
             raise ValueError(
-                "Internal API URL not configured. Set FINOUT_INTERNAL_API_URL "
+                "Internal API URL not configured. Set FINOUT_API_URL "
                 "environment variable to your cost-service endpoint."
             )
 
@@ -421,8 +423,13 @@ class FinoutClient:
         Returns:
             Account object with payerId, generalConfig, featureFlags, etc.
         """
-        if not self.internal_client or not self.account_id:
-            raise ValueError("Internal API client and account_id required")
+        if not self.internal_client:
+            raise ValueError("Internal API client required")
+
+        if not self.account_id:
+            await self._ensure_account_id()
+        if not self.account_id:
+            raise ValueError("Unable to resolve account ID for account-service lookup")
 
         headers = self._get_internal_headers(for_account_service=True)
 
@@ -443,6 +450,40 @@ class FinoutClient:
         )
         response.raise_for_status()
         return response.json()
+
+    async def _fetch_active_accounts(self) -> list[dict[str, Any]]:
+        """Fetch active accounts visible to current credentials."""
+        if not self.internal_client:
+            raise ValueError("Internal API client required")
+
+        headers = self._get_internal_headers(for_account_service=True)
+        response = await self.internal_client.get(
+            "/account-service/account",
+            headers=headers,
+            params={"isActive": "true"},
+        )
+        response.raise_for_status()
+
+        payload = response.json()
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        return []
+
+    async def _ensure_account_id(self) -> str | None:
+        """Ensure account_id is set when an endpoint requires explicit account scoping."""
+        if self.account_id:
+            return self.account_id
+
+        if self.internal_auth_mode != InternalAuthMode.KEY_SECRET:
+            return None
+
+        accounts = await self._fetch_active_accounts()
+        if not accounts:
+            return None
+
+        chosen = accounts[0]
+        self.account_id = chosen.get("accountId")
+        return self.account_id
 
     def _get_internal_headers(self, for_account_service: bool = False) -> dict[str, str]:
         """
@@ -465,9 +506,6 @@ class FinoutClient:
             return headers
 
         if not self.account_id:
-            import sys
-
-            print("✗ WARNING: Making API call without account_id!", file=sys.stderr)
             return {"authorized-user-roles": "admin"}
 
         if for_account_service:
@@ -495,7 +533,7 @@ class FinoutClient:
             ValueError: If internal API not configured or request fails
         """
         if not self.internal_client:
-            raise ValueError("Internal API client not configured. Set FINOUT_INTERNAL_API_URL.")
+            raise ValueError("Internal API client not configured. Set FINOUT_API_URL.")
 
         # Fetch account info on first API call (if needed for headers)
         if self.account_id and not self._account_info:
@@ -649,7 +687,7 @@ class FinoutClient:
             List of filter values
         """
         if not self.internal_client:
-            raise ValueError("Internal API client not configured. Set FINOUT_INTERNAL_API_URL.")
+            raise ValueError("Internal API client not configured. Set FINOUT_API_URL.")
 
         if date is None:
             date = self._current_date_range()
@@ -981,7 +1019,7 @@ class FinoutClient:
         """
         if not self.internal_client:
             raise ValueError(
-                "Internal API client not configured. Set FINOUT_INTERNAL_API_URL "
+                "Internal API client not configured. Set FINOUT_API_URL "
                 "environment variable to your cost-service endpoint."
             )
 
@@ -1063,7 +1101,7 @@ class FinoutClient:
                 ) from e
             elif e.response.status_code == 404:
                 raise ValueError(
-                    "Cost-service API endpoint not found. Verify FINOUT_INTERNAL_API_URL is correct."
+                    "Cost-service API endpoint not found. Verify FINOUT_API_URL is correct."
                 ) from e
             else:
                 raise
@@ -1095,7 +1133,7 @@ class FinoutClient:
         """
         if not self.internal_client:
             raise ValueError(
-                "Internal API client not configured. Set FINOUT_INTERNAL_API_URL "
+                "Internal API client not configured. Set FINOUT_API_URL "
                 "environment variable to your cost-service endpoint."
             )
 
@@ -1258,8 +1296,16 @@ class FinoutClient:
         Returns:
             List of data explorer objects with columns, filters, aggregations
         """
-        if not self.internal_client or not self.account_id:
-            raise ValueError("Internal API client and account_id required")
+        if not self.internal_client:
+            raise ValueError("Internal API client required")
+
+        if not self.account_id:
+            await self._ensure_account_id()
+        if not self.account_id:
+            raise ValueError(
+                "Unable to resolve account ID for data-explorer query. "
+                "Verify the credentials can access account-service."
+            )
 
         # Fetch account info if needed
         if not self._account_info:

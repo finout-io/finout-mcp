@@ -16,8 +16,7 @@ cat > ~/.config/claude/claude_desktop_config.json <<EOF
       "command": "finout-mcp",
       "args": [],
       "env": {
-        "FINOUT_INTERNAL_API_URL": "https://your-finout-instance.com",
-        "FINOUT_ACCOUNT_ID": "your-account-id",
+        "FINOUT_API_URL": "https://app.finout.io",
         "FINOUT_CLIENT_ID": "your-client-id",
         "FINOUT_SECRET_KEY": "your-secret-key"
       }
@@ -33,8 +32,7 @@ EOF
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `FINOUT_INTERNAL_API_URL` | Yes | API endpoint (`https://app.finout.io` for public mode) |
-| `FINOUT_ACCOUNT_ID` | Yes | Account scope used by MCP |
+| `FINOUT_API_URL` | No | API endpoint (`https://app.finout.io` for public mode) |
 | `FINOUT_CLIENT_ID` | Yes in `public` mode | API client ID |
 | `FINOUT_SECRET_KEY` | Yes in `public` mode | API secret key |
 
@@ -124,7 +122,7 @@ uv run python -m finout_mcp_server
 ## Troubleshooting
 
 **"Internal API URL not configured"**
-- Set `FINOUT_INTERNAL_API_URL` in your environment
+- Set `FINOUT_API_URL` in your environment (optional; defaults to `https://app.finout.io`)
 
 **"No matches found" when searching filters**
 - Use broader search terms (e.g., "service" instead of "ec2")
