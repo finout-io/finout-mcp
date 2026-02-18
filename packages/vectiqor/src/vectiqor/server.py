@@ -65,16 +65,14 @@ class MCPBridge:
         env = os.environ.copy()
         if self.current_account_id:
             env["FINOUT_ACCOUNT_ID"] = self.current_account_id
-        # Security boundary: VECTIQOR always runs MCP in internal account-scoped mode.
-        env["MCP_MODE"] = "vectiqor-internal"
 
         # Start MCP server - use repo_root to find packages/mcp-server
         mcp_server_path = repo_root / "packages" / "mcp-server"
 
         mcp_cmd = (
-            ["uv", "run", "finout-mcp"]
+            ["uv", "run", "finout-mcp-internal"]
             if shutil.which("uv")
-            else ["finout-mcp"]
+            else ["finout-mcp-internal"]
         )
         print(f"Starting MCP command: {' '.join(mcp_cmd)}")
 

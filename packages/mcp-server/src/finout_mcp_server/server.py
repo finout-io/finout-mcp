@@ -10,7 +10,6 @@ load_dotenv()
 
 # ruff: noqa: E402
 import json
-import os
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
@@ -44,15 +43,34 @@ class MCPMode(StrEnum):
     VECTIQOR_INTERNAL = "vectiqor-internal"
 
 
-def _load_runtime_mode() -> MCPMode:
-    raw_mode = os.getenv("MCP_MODE", MCPMode.PUBLIC).strip().lower()
-    try:
-        return MCPMode(raw_mode)
-    except ValueError as e:
-        raise ValueError(
-            f"Invalid MCP_MODE={raw_mode!r}. Supported values: "
-            f"{MCPMode.PUBLIC.value}, {MCPMode.VECTIQOR_INTERNAL.value}"
-        ) from e
+def _init_client_for_mode(mode: MCPMode) -> FinoutClient:
+    """Initialize Finout client for a fixed runtime mode."""
+    import os
+
+    internal_api_url = os.getenv("FINOUT_INTERNAL_API_URL")
+    if not internal_api_url and mode == MCPMode.PUBLIC:
+        internal_api_url = "https://app.finout.io"
+
+    account_id = os.getenv("FINOUT_ACCOUNT_ID")
+    if not account_id:
+        raise ValueError("FINOUT_ACCOUNT_ID is required to enforce account-scoped queries.")
+
+    if mode == MCPMode.PUBLIC:
+        return FinoutClient(
+            internal_api_url=internal_api_url,
+            account_id=account_id,
+            internal_auth_mode=InternalAuthMode.KEY_SECRET,
+            allow_missing_credentials=False,
+        )
+
+    if not internal_api_url:
+        raise ValueError("FINOUT_INTERNAL_API_URL is required in vectiqor-internal mode.")
+    return FinoutClient(
+        internal_api_url=internal_api_url,
+        account_id=account_id,
+        internal_auth_mode=InternalAuthMode.AUTHORIZED_HEADERS,
+        allow_missing_credentials=True,
+    )
 
 
 def format_currency(amount: float) -> str:
@@ -1950,47 +1968,17 @@ async def get_prompt(name: str, arguments: dict | None = None) -> dict:
         raise ValueError(f"Unknown prompt: {name}")
 
 
-def main():
-    """Main entry point for the MCP server"""
+def _main_with_mode(mode: MCPMode) -> None:
+    """Main entry point for the MCP server with fixed mode."""
     global finout_client, runtime_mode
 
-    # Initialize Finout client
     try:
-        mode = _load_runtime_mode()
         runtime_mode = mode.value
-
-        internal_api_url = os.getenv("FINOUT_INTERNAL_API_URL")
-        if not internal_api_url and mode == MCPMode.PUBLIC:
-            internal_api_url = "https://app.finout.io"
-
-        account_id = os.getenv("FINOUT_ACCOUNT_ID")
-        if not account_id:
-            raise ValueError(
-                "FINOUT_ACCOUNT_ID is required in all modes to enforce account-scoped queries."
-            )
-
-        if mode == MCPMode.PUBLIC:
-            finout_client = FinoutClient(
-                internal_api_url=internal_api_url,
-                account_id=account_id,
-                internal_auth_mode=InternalAuthMode.KEY_SECRET,
-                allow_missing_credentials=False,
-            )
-        else:
-            if not internal_api_url:
-                raise ValueError("FINOUT_INTERNAL_API_URL is required in vectiqor-internal mode.")
-            finout_client = FinoutClient(
-                internal_api_url=internal_api_url,
-                account_id=account_id,
-                internal_auth_mode=InternalAuthMode.AUTHORIZED_HEADERS,
-                allow_missing_credentials=True,
-            )
+        finout_client = _init_client_for_mode(mode)
 
         import sys
 
         print(f"✓ Finout MCP Server started in mode: {mode.value}", file=sys.stderr)
-        print(f"✓ Internal API URL: {internal_api_url}", file=sys.stderr)
-        print(f"✓ Account ID: {account_id}", file=sys.stderr)
     except Exception as e:
         import sys
 
@@ -2006,6 +1994,16 @@ def main():
             await server.run(read_stream, write_stream, server.create_initialization_options())
 
     asyncio.run(run_server())
+
+
+def main() -> None:
+    """Public MCP entry point (customer-facing)."""
+    _main_with_mode(MCPMode.PUBLIC)
+
+
+def main_vectiqor_internal() -> None:
+    """Internal MCP entry point used by VECTIQOR only."""
+    _main_with_mode(MCPMode.VECTIQOR_INTERNAL)
 
 
 if __name__ == "__main__":

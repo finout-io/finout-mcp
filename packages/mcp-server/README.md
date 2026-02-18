@@ -16,7 +16,6 @@ cat > ~/.config/claude/claude_desktop_config.json <<EOF
       "command": "python",
       "args": ["-m", "finout_mcp_server"],
       "env": {
-        "MCP_MODE": "public",
         "FINOUT_INTERNAL_API_URL": "https://your-finout-instance.com",
         "FINOUT_ACCOUNT_ID": "your-account-id",
         "FINOUT_CLIENT_ID": "your-client-id",
@@ -34,24 +33,12 @@ EOF
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `MCP_MODE` | Yes | Runtime mode: `public` or `vectiqor-internal` |
 | `FINOUT_INTERNAL_API_URL` | Yes | API endpoint (`https://app.finout.io` for public mode) |
 | `FINOUT_ACCOUNT_ID` | Yes | Account scope used by MCP |
 | `FINOUT_CLIENT_ID` | Yes in `public` mode | API client ID |
 | `FINOUT_SECRET_KEY` | Yes in `public` mode | API secret key |
 
 Get credentials from your Finout account settings.
-
-## Runtime Modes
-
-- `public`:
-  - Uses key/secret auth for all internal API calls
-  - Intended for downloadable/hosted MCP
-- `vectiqor-internal`:
-  - Uses `authorized-*` headers only
-  - Intended only for VECTIQOR-managed MCP subprocesses
-
-Mode is fixed at process startup and cannot be switched at runtime.
 
 ## Tools
 

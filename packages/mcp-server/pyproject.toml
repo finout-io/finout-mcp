@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 finout-mcp = "finout_mcp_server.server:main"
+finout-mcp-internal = "finout_mcp_server.server:main_vectiqor_internal"
 
 [build-system]
 requires = ["hatchling"]
