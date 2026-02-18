@@ -10,3 +10,4 @@ members = ["packages/*"]
 [tool.uv.sources]
 finout-mcp-server = { workspace = true }
 vectiqor = { workspace = true }
+vectiqor-mcp-internal = { workspace = true }

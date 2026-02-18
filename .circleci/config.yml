@@ -71,9 +71,10 @@ jobs:
           name: Build package distributions
           command: |
             python -m pip install --upgrade pip build
-            mkdir -p dist/mcp-server dist/vectiqor
+            mkdir -p dist/mcp-server dist/vectiqor dist/vectiqor-mcp-internal
             python -m build packages/mcp-server --outdir dist/mcp-server
             python -m build packages/vectiqor --outdir dist/vectiqor
+            python -m build packages/vectiqor-mcp-internal --outdir dist/vectiqor-mcp-internal
       - persist_to_workspace:
           root: .
           paths:
@@ -158,7 +159,6 @@ jobs:
             export TWINE_USERNAME="__token__"
             export TWINE_PASSWORD="${PYPI_API_TOKEN}"
             python -m twine upload --skip-existing dist/mcp-server/*
-            python -m twine upload --skip-existing dist/vectiqor/*
 
 workflows:
   ci_cd:

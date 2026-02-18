@@ -1,0 +1,19 @@
+[project]
+name = "vectiqor-mcp-internal"
+version = "0.1.0"
+description = "Internal MCP launcher used by VECTIQOR only"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "finout-mcp-server>=0.1.0",
+]
+
+[project.scripts]
+vectiqor-mcp-internal = "vectiqor_mcp_internal.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vectiqor_mcp_internal"]

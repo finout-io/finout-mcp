@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import secrets
+import shutil
 import sys
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
@@ -66,22 +67,24 @@ class MCPBridge:
         if self.current_account_id:
             env["FINOUT_ACCOUNT_ID"] = self.current_account_id
 
-        # Start MCP server - use repo_root to find packages/mcp-server
-        mcp_server_path = repo_root / "packages" / "mcp-server"
-
-        mcp_src_path = mcp_server_path / "src"
-        existing_pythonpath = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = (
-            f"{mcp_src_path}{os.pathsep}{existing_pythonpath}"
-            if existing_pythonpath
-            else str(mcp_src_path)
-        )
-
-        mcp_cmd = [
-            sys.executable,
-            "-c",
-            "from finout_mcp_server.server import main_vectiqor_internal; main_vectiqor_internal()",
-        ]
+        # Start internal MCP runtime using the dedicated launcher when available.
+        # Fallback to direct module startup (no uv requirement) for local/dev environments.
+        mcp_server_path = repo_root
+        if shutil.which("vectiqor-mcp-internal"):
+            mcp_cmd = ["vectiqor-mcp-internal"]
+        else:
+            mcp_src_path = repo_root / "packages" / "mcp-server" / "src"
+            existing_pythonpath = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = (
+                f"{mcp_src_path}{os.pathsep}{existing_pythonpath}"
+                if existing_pythonpath
+                else str(mcp_src_path)
+            )
+            mcp_cmd = [
+                sys.executable,
+                "-c",
+                "from finout_mcp_server.server import main_vectiqor_internal; main_vectiqor_internal()",
+            ]
         print(f"Starting MCP command: {' '.join(mcp_cmd)}")
 
         self.process = subprocess.Popen(

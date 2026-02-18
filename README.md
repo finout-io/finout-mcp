@@ -255,6 +255,7 @@ On every PR and push, CI:
 - builds Python package artifacts for:
   - `finout-mcp-server`
   - `vectiqor`
+  - `vectiqor-mcp-internal` (internal-only, bundled with VECTIQOR workflows)
 - builds VECTIQOR Docker image
 
 Optional publish steps:
@@ -268,6 +269,7 @@ Optional publish steps:
   - `AWS_SECRET_ACCESS_KEY`
   - `AWS_REGION` (for example `us-east-1`)
 - PyPI package publish (main only): enabled with `PYPI_API_TOKEN`
+  - Only `finout-mcp-server` is published. Internal packages are never published.
 
 ---
 

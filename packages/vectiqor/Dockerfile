@@ -25,12 +25,16 @@ WORKDIR /app
 # Copy workspace files
 COPY packages/vectiqor /app/packages/vectiqor
 COPY packages/mcp-server /app/packages/mcp-server
+COPY packages/vectiqor-mcp-internal /app/packages/vectiqor-mcp-internal
 
 # Install dependencies for both packages
 WORKDIR /app/packages/vectiqor
 RUN pip install --no-cache-dir -e .
 
 WORKDIR /app/packages/mcp-server
+RUN pip install --no-cache-dir -e .
+
+WORKDIR /app/packages/vectiqor-mcp-internal
 RUN pip install --no-cache-dir -e .
 
 # Final stage

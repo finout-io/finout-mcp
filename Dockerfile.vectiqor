@@ -17,10 +17,12 @@ WORKDIR /app
 # Copy both packages
 COPY packages/mcp-server /app/packages/mcp-server
 COPY packages/vectiqor /app/packages/vectiqor
+COPY packages/vectiqor-mcp-internal /app/packages/vectiqor-mcp-internal
 
 # Install VECTIQOR (which will also make MCP server available)
 RUN cd /app/packages/vectiqor && uv sync --frozen
 RUN cd /app/packages/mcp-server && uv sync --frozen
+RUN cd /app/packages/vectiqor-mcp-internal && uv sync --frozen
 
 # Expose port
 EXPOSE 8000
