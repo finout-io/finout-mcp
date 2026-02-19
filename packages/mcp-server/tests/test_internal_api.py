@@ -93,6 +93,8 @@ class TestFinoutClientInternalAPI:
             client = FinoutClient(
                 client_id="test", secret_key="test", allow_missing_credentials=False
             )
+            client.internal_api_url = None
+            client.internal_client = None
 
             with pytest.raises(ValueError, match="Internal API URL not configured"):
                 _ = client.filter_cache
@@ -346,6 +348,8 @@ class TestFinoutClientInternalAPI:
             client = FinoutClient(
                 client_id="test", secret_key="test", allow_missing_credentials=False
             )
+            client.internal_api_url = None
+            client.internal_client = None
 
             with pytest.raises(ValueError, match="Internal API client not configured"):
                 await client.query_costs_with_filters(time_period="last_30_days")
