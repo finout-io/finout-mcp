@@ -99,24 +99,6 @@ jobs:
               -t local/vectiqor:${TAG} \
               --load .
       - run:
-          name: Optional push to GHCR
-          command: |
-            set -e
-            TAG="${CIRCLE_SHA1:0:12}"
-            if [ -z "${GHCR_USERNAME:-}" ] || [ -z "${GHCR_TOKEN:-}" ] || [ -z "${GHCR_ORG:-}" ]; then
-              echo "Skipping GHCR push (GHCR_USERNAME/GHCR_TOKEN/GHCR_ORG not set)."
-              exit 0
-            fi
-
-            IMAGE="ghcr.io/${GHCR_ORG}/vectiqor"
-            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
-            docker tag local/vectiqor:${TAG} ${IMAGE}:${TAG}
-            docker push ${IMAGE}:${TAG}
-            if [ "${CIRCLE_BRANCH}" = "main" ]; then
-              docker tag local/vectiqor:${TAG} ${IMAGE}:latest
-              docker push ${IMAGE}:latest
-            fi
-      - run:
           name: Optional push to ECR
           command: |
             set -e
