@@ -797,9 +797,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         ]
 
     # Recover from stale/closed HTTP clients in long-lived hosted processes.
-    if finout_client.client.is_closed or (
-        finout_client.internal_client is not None and finout_client.internal_client.is_closed
-    ):
+    # Keep this attribute-safe for test doubles that are not full FinoutClient instances.
+    public_client = getattr(finout_client, "client", None)
+    internal_client = getattr(finout_client, "internal_client", None)
+    public_closed = bool(public_client is not None and getattr(public_client, "is_closed", False))
+    internal_closed = bool(
+        internal_client is not None and getattr(internal_client, "is_closed", False)
+    )
+    if public_closed or internal_closed:
         finout_client = FinoutClient(
             client_id=finout_client.client_id,
             secret_key=finout_client.secret_key,
