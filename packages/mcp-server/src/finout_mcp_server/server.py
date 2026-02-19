@@ -777,7 +777,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         return [
             TextContent(
                 type="text",
-                text="Authentication failed.",
+                text="Unauthorized.",
             )
         ]
 
@@ -811,12 +811,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         return [
             TextContent(
                 type="text",
-                text=(
-                    "Error: Finout API credentials not configured for this tool.\n\n"
-                    "To use this tool, set:\n"
-                    "  FINOUT_CLIENT_ID=your_client_id\n"
-                    "  FINOUT_SECRET_KEY=your_secret_key"
-                ),
+                text="Unauthorized.",
             )
         ]
 
@@ -861,6 +856,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     except ValueError as e:
         # User-friendly error for validation issues
         error_msg = str(e)
+        if "authentication failed" in error_msg.lower() or "credentials" in error_msg.lower():
+            return [TextContent(type="text", text="Unauthorized.")]
         if "Internal API URL not configured" in error_msg:
             return [
                 TextContent(

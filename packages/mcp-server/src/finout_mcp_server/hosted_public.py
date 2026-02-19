@@ -76,9 +76,7 @@ def _extract_public_auth_from_scope(scope: Any) -> tuple[str, str, str]:
     api_url = headers.get("x-finout-api-url", "").strip() or "https://app.finout.io"
 
     if not client_id or not secret_key:
-        raise ValueError(
-            "Missing credentials. Provide x-finout-client-id and x-finout-secret-key headers."
-        )
+        raise ValueError("Unauthorized")
     return client_id, secret_key, api_url
 
 
@@ -87,8 +85,8 @@ async def mcp_asgi(scope, receive, send) -> None:
     if scope.get("method") == "POST":
         try:
             client_id, secret_key, api_url = _extract_public_auth_from_scope(scope)
-        except ValueError as exc:
-            response = JSONResponse({"error": str(exc)}, status_code=401)
+        except ValueError:
+            response = JSONResponse({"error": "Unauthorized"}, status_code=401)
             await response(scope, receive, send)
             return
 

@@ -52,7 +52,7 @@ def test_extract_public_auth_from_scope_defaults_api_url():
 def test_extract_public_auth_from_scope_requires_credentials():
     module = importlib.import_module("src.finout_mcp_server.hosted_public")
     scope = {"headers": []}
-    with pytest.raises(ValueError, match="Missing credentials"):
+    with pytest.raises(ValueError, match="Unauthorized"):
         module._extract_public_auth_from_scope(scope)
 
 
