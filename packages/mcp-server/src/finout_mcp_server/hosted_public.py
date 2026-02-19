@@ -8,6 +8,7 @@ separate from VECTIQOR.
 from __future__ import annotations
 
 import os
+import sys
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -66,6 +67,21 @@ async def health(_: Request) -> JSONResponse:
     )
 
 
+def _sync_server_state_across_imports(client: FinoutClient | None, mode: str) -> None:
+    """Keep runtime globals aligned even if server.py is imported under multiple module refs."""
+    for module in list(sys.modules.values()):
+        if module is None:
+            continue
+        module_any: Any = module
+        module_file = getattr(module, "__file__", "") or ""
+        if module_file.endswith("/finout_mcp_server/server.py"):
+            try:
+                module_any.finout_client = client
+                module_any.runtime_mode = mode
+            except Exception:
+                pass
+
+
 def _extract_public_auth_from_scope(scope: Any) -> tuple[str, str, str]:
     """Extract required auth headers from ASGI scope."""
     headers = {
@@ -103,7 +119,16 @@ async def mcp_asgi(scope, receive, send) -> None:
                     internal_auth_mode=InternalAuthMode.KEY_SECRET,
                     allow_missing_credentials=False,
                 )
+                _sync_server_state_across_imports(
+                    server_module.finout_client,
+                    MCPMode.PUBLIC.value,
+                )
                 scope["app"].state.client_fingerprint = fingerprint
+            else:
+                _sync_server_state_across_imports(
+                    server_module.finout_client,
+                    MCPMode.PUBLIC.value,
+                )
             await scope["app"].state.transport.handle_request(scope, receive, send)
         return
 

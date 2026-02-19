@@ -772,6 +772,21 @@ async def list_tools() -> list[Tool]:
 @server.call_tool()
 async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     """Handle tool execution"""
+    global finout_client, runtime_mode
+
+    # Hosted transport can load multiple module references in some runtimes.
+    # Recover shared state from the canonical module before failing auth.
+    if finout_client is None:
+        try:
+            import finout_mcp_server.server as canonical_server
+
+            if canonical_server.finout_client is not None:
+                finout_client = canonical_server.finout_client
+            if runtime_mode is None and canonical_server.runtime_mode is not None:
+                runtime_mode = canonical_server.runtime_mode
+        except Exception:
+            # Keep normal unauthorized flow below.
+            pass
 
     if not finout_client:
         return [
@@ -780,6 +795,19 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 text="Unauthorized.",
             )
         ]
+
+    # Recover from stale/closed HTTP clients in long-lived hosted processes.
+    if finout_client.client.is_closed or (
+        finout_client.internal_client is not None and finout_client.internal_client.is_closed
+    ):
+        finout_client = FinoutClient(
+            client_id=finout_client.client_id,
+            secret_key=finout_client.secret_key,
+            internal_api_url=finout_client.internal_api_url,
+            account_id=finout_client.account_id,
+            internal_auth_mode=finout_client.internal_auth_mode,
+            allow_missing_credentials=(runtime_mode == MCPMode.VECTIQOR_INTERNAL.value),
+        )
 
     assert finout_client is not None  # Type checker hint
 
