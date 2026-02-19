@@ -67,7 +67,7 @@ EXPOSE 8000
 ENV ANTHROPIC_API_KEY=""
 ENV FINOUT_CLIENT_ID=""
 ENV FINOUT_SECRET_KEY=""
-ENV FINOUT_INTERNAL_API_URL=""
+ENV FINOUT_API_URL=""
 # DATABASE_URL will be set by docker-compose or runtime environment
 
 # Health check

@@ -10,7 +10,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - FINOUT_CLIENT_ID=${FINOUT_CLIENT_ID}
       - FINOUT_SECRET_KEY=${FINOUT_SECRET_KEY}
-      - FINOUT_INTERNAL_API_URL=${FINOUT_INTERNAL_API_URL}
+      - FINOUT_API_URL=${FINOUT_API_URL}
       - FINOUT_ACCOUNT_ID=${FINOUT_ACCOUNT_ID}
       # Override DATABASE_URL for Docker - point to host machine's PostgreSQL
       - DATABASE_URL=postgresql://fobo:fobo@host.docker.internal:5432/vectiqor

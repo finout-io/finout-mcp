@@ -54,7 +54,7 @@ spec:
               name: vectiqor-secrets
               key: finout-secret-key
               optional: true
-        - name: FINOUT_INTERNAL_API_URL
+        - name: FINOUT_API_URL
           valueFrom:
             configMapKeyRef:
               name: vectiqor-config

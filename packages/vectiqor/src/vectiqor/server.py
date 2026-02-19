@@ -656,13 +656,13 @@ async def get_accounts(http_request: Request, response: Response):
 
         import httpx
 
-        # Get internal API URL from environment
-        internal_api_url = os.getenv("FINOUT_INTERNAL_API_URL")
+        # Get Finout API URL from environment
+        internal_api_url = os.getenv("FINOUT_API_URL")
 
         if not internal_api_url:
             raise HTTPException(
                 status_code=500,
-                detail="FINOUT_INTERNAL_API_URL not configured"
+                detail="FINOUT_API_URL not configured"
             )
 
         print(f"Fetching accounts from: {internal_api_url}/account-service/account?isActive=true")

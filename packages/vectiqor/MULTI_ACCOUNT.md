@@ -240,7 +240,7 @@ VECTIQOR: "Account switched! Now querying Production."
 ### "Error switching account"
 - Check MCP server logs
 - Verify account ID is valid
-- Ensure `FINOUT_INTERNAL_API_URL` is correct
+- Ensure `FINOUT_API_URL` is correct
 
 ### Account dropdown shows "Loading..."
 - Check `/api/accounts` endpoint

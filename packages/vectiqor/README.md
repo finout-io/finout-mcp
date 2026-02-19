@@ -92,7 +92,7 @@ FINOUT_CLIENT_ID=your_finout_client_id
 FINOUT_SECRET_KEY=your_finout_secret_key
 
 # Finout Internal API URL
-FINOUT_INTERNAL_API_URL=http://finout-app.prod-mirror.internal.finout.io
+FINOUT_API_URL=http://finout-app.prod-mirror.internal.finout.io
 
 # Default Account ID (can be switched in UI)
 FINOUT_ACCOUNT_ID=your_default_account_id
@@ -379,7 +379,7 @@ curl https://api.anthropic.com/v1/messages \
 ```bash
 # Test internal API access
 curl -H "authorized-user-roles: sysAdmin" \
-  "$FINOUT_INTERNAL_API_URL/account-service/account?isActive=true"
+  "$FINOUT_API_URL/account-service/account?isActive=true"
 
 # Check network access to internal API
 ping finout-app.prod-mirror.internal.finout.io
