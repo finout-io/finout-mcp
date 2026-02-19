@@ -27,7 +27,7 @@ finout-mcp --help
 ### Hosted public endpoint
 
 ```bash
-finout-mcp-hosted-public
+finout-mcp
 ```
 
 Service endpoints:
@@ -45,10 +45,10 @@ Hosted auth headers:
 
 ```bash
 # Build image
-docker build -f Dockerfile.mcp-hosted-public -t finout-mcp-hosted-public:local .
+docker build -f Dockerfile.mcp-hosted-public -t finout-mcp:local .
 
 # Run hosted service
-docker run --rm -p 8080:8080 finout-mcp-hosted-public:local
+docker run --rm -p 8080:8080 finout-mcp:local
 ```
 
 In a second terminal:
@@ -74,7 +74,7 @@ curl -i -X POST http://localhost:8080/mcp \
 export AWS_REGION=us-east-1
 export AWS_ACCOUNT_ID=277411487094
 export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-export ECR_REPO="finout-mcp-hosted-public"
+export ECR_REPO="finout-mcp"
 export TAG="$(git rev-parse --short HEAD)"
 
 aws ecr describe-repositories --repository-names "${ECR_REPO}" >/dev/null 2>&1 || \

@@ -11,6 +11,6 @@ resources:
   - ingress.yaml
 
 images:
-  - name: 277411487094.dkr.ecr.us-east-1.amazonaws.com/finout-mcp-hosted-public
-    newName: 277411487094.dkr.ecr.us-east-1.amazonaws.com/finout-mcp-hosted-public
+  - name: 277411487094.dkr.ecr.us-east-1.amazonaws.com/finout-mcp
+    newName: 277411487094.dkr.ecr.us-east-1.amazonaws.com/finout-mcp
     newTag: latest

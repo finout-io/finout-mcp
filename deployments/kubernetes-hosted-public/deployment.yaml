@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: finout-mcp-hosted-public
+  name: finout-mcp
   namespace: mcp-public
   labels:
-    app: finout-mcp-hosted-public
+    app: finout-mcp
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: finout-mcp-hosted-public
+      app: finout-mcp
   template:
     metadata:
       labels:
-        app: finout-mcp-hosted-public
+        app: finout-mcp
     spec:
       containers:
-      - name: finout-mcp-hosted-public
-        image: 277411487094.dkr.ecr.us-east-1.amazonaws.com/finout-mcp-hosted-public:latest
+      - name: finout-mcp
+        image: 277411487094.dkr.ecr.us-east-1.amazonaws.com/finout-mcp:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -27,17 +27,17 @@ spec:
         - name: MCP_HOST
           valueFrom:
             configMapKeyRef:
-              name: finout-mcp-hosted-public-config
+              name: finout-mcp-config
               key: mcp-host
         - name: MCP_PORT
           valueFrom:
             configMapKeyRef:
-              name: finout-mcp-hosted-public-config
+              name: finout-mcp-config
               key: mcp-port
         - name: FINOUT_API_URL
           valueFrom:
             configMapKeyRef:
-              name: finout-mcp-hosted-public-config
+              name: finout-mcp-config
               key: finout-api-url
         resources:
           requests:
