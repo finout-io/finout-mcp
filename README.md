@@ -95,6 +95,9 @@ uv run pytest tests/ -v
 cd packages/mcp-server
 uv build
 
+# Build all redistributables (public + internal)
+./scripts/build_mcp_distributions.sh
+
 # Build VECTIQOR Docker image
 docker build -f Dockerfile.vectiqor -t vectiqor:latest .
 ```
@@ -202,6 +205,7 @@ ANTHROPIC_API_KEY=your_anthropic_api_key
 
 - **[MCP Server](packages/mcp-server/README.md)** - Customer docs
 - **[VECTIQOR](packages/vectiqor/README.md)** - Internal tool
+- **[Distributions](docs/DISTRIBUTIONS.md)** - Public vs internal packaging and install flows
 - **[Kubernetes](deployments/kubernetes/README.md)** - K8s deployment
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history
 
