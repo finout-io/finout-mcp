@@ -64,6 +64,55 @@ async def test_internal_mode_includes_debug_curl(monkeypatch):
     assert "_debug_curl" in payload
 
 
+@pytest.mark.asyncio
+async def test_list_tools_public_hides_internal_only_tools(monkeypatch):
+    monkeypatch.setattr(server_module, "runtime_mode", server_module.MCPMode.PUBLIC.value)
+    tools = await server_module.list_tools()
+    names = {tool.name for tool in tools}
+
+    assert "discover_context" not in names
+    assert "get_account_context" not in names
+    assert "debug_filters" not in names
+    assert "query_costs" in names
+    assert "get_waste_recommendations" in names
+
+
+@pytest.mark.asyncio
+async def test_list_tools_internal_hides_public_key_secret_tools(monkeypatch):
+    monkeypatch.setattr(
+        server_module, "runtime_mode", server_module.MCPMode.VECTIQOR_INTERNAL.value
+    )
+    tools = await server_module.list_tools()
+    names = {tool.name for tool in tools}
+
+    assert "get_waste_recommendations" not in names
+    assert "get_anomalies" not in names
+    assert "discover_context" in names
+    assert "get_account_context" in names
+
+
+@pytest.mark.asyncio
+async def test_call_tool_blocks_internal_only_tool_in_public_mode(monkeypatch):
+    client = _DummyClient()
+    monkeypatch.setattr(server_module, "finout_client", client)
+    monkeypatch.setattr(server_module, "runtime_mode", server_module.MCPMode.PUBLIC.value)
+
+    response = await server_module.call_tool("discover_context", {"query": "foo"})
+    assert "Tool not available in this deployment mode" in response[0].text
+
+
+@pytest.mark.asyncio
+async def test_call_tool_blocks_key_secret_tool_in_internal_mode(monkeypatch):
+    client = _DummyClient()
+    monkeypatch.setattr(server_module, "finout_client", client)
+    monkeypatch.setattr(
+        server_module, "runtime_mode", server_module.MCPMode.VECTIQOR_INTERNAL.value
+    )
+
+    response = await server_module.call_tool("get_waste_recommendations", {})
+    assert "Tool not available in this deployment mode" in response[0].text
+
+
 def test_public_entrypoint_is_fixed_public_mode(monkeypatch):
     called: list[server_module.MCPMode] = []
     monkeypatch.setattr(server_module, "_main_with_mode", lambda mode: called.append(mode))

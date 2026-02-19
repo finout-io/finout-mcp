@@ -43,6 +43,55 @@ class MCPMode(StrEnum):
     VECTIQOR_INTERNAL = "vectiqor-internal"
 
 
+PUBLIC_TOOLS: set[str] = {
+    "query_costs",
+    "compare_costs",
+    "list_available_filters",
+    "search_filters",
+    "get_filter_values",
+    "get_usage_unit_types",
+    "get_anomalies",
+    "get_waste_recommendations",
+    "submit_feedback",
+}
+
+VECTIQOR_INTERNAL_TOOLS: set[str] = {
+    "query_costs",
+    "compare_costs",
+    "list_available_filters",
+    "search_filters",
+    "get_filter_values",
+    "get_usage_unit_types",
+    "debug_filters",
+    "discover_context",
+    "get_account_context",
+    "submit_feedback",
+}
+
+INTERNAL_API_TOOLS: set[str] = {
+    "query_costs",
+    "compare_costs",
+    "list_available_filters",
+    "search_filters",
+    "get_filter_values",
+    "get_usage_unit_types",
+    "debug_filters",
+    "discover_context",
+    "get_account_context",
+}
+
+KEY_SECRET_TOOLS: set[str] = {
+    "get_waste_recommendations",
+    "get_anomalies",
+}
+
+
+def _allowed_tools_for_runtime() -> set[str]:
+    if runtime_mode == MCPMode.VECTIQOR_INTERNAL.value:
+        return VECTIQOR_INTERNAL_TOOLS
+    return PUBLIC_TOOLS
+
+
 def _init_client_for_mode(mode: MCPMode) -> FinoutClient:
     """Initialize Finout client for a fixed runtime mode."""
     import os
@@ -113,7 +162,7 @@ def summarize_cost_data(data: dict, max_items: int = 50) -> dict:
 @server.list_tools()
 async def list_tools() -> list[Tool]:
     """List all available Finout MCP tools"""
-    return [
+    all_tools = [
         Tool(
             name="query_costs",
             description=(
@@ -716,6 +765,8 @@ async def list_tools() -> list[Tool]:
             },
         ),
     ]
+    allowed = _allowed_tools_for_runtime()
+    return [tool for tool in all_tools if tool.name in allowed]
 
 
 @server.call_tool()
@@ -731,37 +782,19 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
     assert finout_client is not None  # Type checker hint
 
-    # Validate runtime requirements per tool (internal API vs key/secret API)
-    internal_api_tools = {
-        "query_costs",
-        "compare_costs",
-        "list_available_filters",
-        "search_filters",
-        "get_filter_values",
-        "get_usage_unit_types",
-        "debug_filters",
-        "discover_context",
-        "get_account_context",
-    }
-    key_secret_tools = {
-        "get_waste_recommendations",
-        # Keep anomalies here for future external API support.
-        "get_anomalies",
-    }
-
-    if runtime_mode == MCPMode.VECTIQOR_INTERNAL.value and name in key_secret_tools:
+    allowed_tools = _allowed_tools_for_runtime()
+    if name not in allowed_tools:
         return [
             TextContent(
                 type="text",
                 text=(
-                    "Error: Tool not available in vectiqor-internal mode.\n\n"
-                    "This deployment uses internal account-scoped headers and does not allow "
-                    "public key/secret tool execution."
+                    "Error: Tool not available in this deployment mode.\n\n"
+                    "This MCP deployment intentionally limits tools by runtime mode."
                 ),
             )
         ]
 
-    if name in internal_api_tools and not finout_client.internal_api_url:
+    if name in INTERNAL_API_TOOLS and not finout_client.internal_api_url:
         return [
             TextContent(
                 type="text",
@@ -773,7 +806,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             )
         ]
 
-    if name in key_secret_tools and (not finout_client.client_id or not finout_client.secret_key):
+    if name in KEY_SECRET_TOOLS and (not finout_client.client_id or not finout_client.secret_key):
         return [
             TextContent(
                 type="text",

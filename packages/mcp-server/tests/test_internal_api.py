@@ -624,10 +624,13 @@ class TestToolDescriptions:
     @pytest.mark.asyncio
     async def test_descriptions_contain_coaching(self):
         """Verify tool descriptions include when-to-use coaching"""
-        from src.finout_mcp_server.server import list_tools
+        import importlib
 
-        tools = await list_tools()
-        tool_map = {t.name: t.description for t in tools}
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        server_module.runtime_mode = server_module.MCPMode.PUBLIC.value
+        public_tools = await server_module.list_tools()
+        tool_map = {t.name: t.description for t in public_tools}
 
         # query_costs should coach on workflow
         assert "WHEN TO USE" in tool_map["query_costs"]
@@ -657,20 +660,33 @@ class TestToolDescriptions:
         # get_usage_unit_types should mention chaining
         assert "CHAIN" in tool_map["get_usage_unit_types"]
 
+        server_module.runtime_mode = server_module.MCPMode.VECTIQOR_INTERNAL.value
+        internal_tools = await server_module.list_tools()
+        internal_tool_map = {t.name: t.description for t in internal_tools}
+
         # discover_context should mention named concepts
-        assert "named concept" in tool_map["discover_context"].lower()
+        assert "named concept" in internal_tool_map["discover_context"].lower()
 
         # debug_filters should discourage normal use
-        assert "DO NOT" in tool_map["debug_filters"]
+        assert "DO NOT" in internal_tool_map["debug_filters"]
 
     @pytest.mark.asyncio
     async def test_new_tools_registered(self):
-        """Verify get_account_context and submit_feedback are listed"""
-        from src.finout_mcp_server.server import list_tools
+        """Verify mode-specific tool registration"""
+        import importlib
 
-        tools = await list_tools()
-        tool_names = {t.name for t in tools}
+        server_module = importlib.import_module("src.finout_mcp_server.server")
 
-        assert "get_account_context" in tool_names
-        assert "submit_feedback" in tool_names
-        assert len(tools) == 12  # 10 original + 2 new
+        server_module.runtime_mode = server_module.MCPMode.PUBLIC.value
+        public_tools = await server_module.list_tools()
+        public_tool_names = {t.name for t in public_tools}
+        assert "get_account_context" not in public_tool_names
+        assert "submit_feedback" in public_tool_names
+        assert len(public_tools) == 9
+
+        server_module.runtime_mode = server_module.MCPMode.VECTIQOR_INTERNAL.value
+        internal_tools = await server_module.list_tools()
+        internal_tool_names = {t.name for t in internal_tools}
+        assert "get_account_context" in internal_tool_names
+        assert "submit_feedback" in internal_tool_names
+        assert len(internal_tools) == 10
