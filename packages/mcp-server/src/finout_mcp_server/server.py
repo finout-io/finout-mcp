@@ -776,7 +776,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     if not finout_client:
         return [
             TextContent(
-                type="text", text="Error: Finout client not initialized. Check credentials."
+                type="text",
+                text="Authentication failed.",
             )
         ]
 
