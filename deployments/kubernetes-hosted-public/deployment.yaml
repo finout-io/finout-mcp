@@ -27,17 +27,17 @@ spec:
         - name: MCP_HOST
           valueFrom:
             configMapKeyRef:
-              name: finout-mcp-config
+              name: finout-mcp-hosted-public-config
               key: mcp-host
         - name: MCP_PORT
           valueFrom:
             configMapKeyRef:
-              name: finout-mcp-config
+              name: finout-mcp-hosted-public-config
               key: mcp-port
         - name: FINOUT_API_URL
           valueFrom:
             configMapKeyRef:
-              name: finout-mcp-config
+              name: finout-mcp-hosted-public-config
               key: finout-api-url
         resources:
           requests:

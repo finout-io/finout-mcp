@@ -4,10 +4,10 @@ metadata:
   name: finout-mcp-hosted-public
   namespace: mcp-public
   labels:
-    app: finout-mcp-hosted-public
+    app: finout-mcp
 spec:
   selector:
-    app: finout-mcp-hosted-public
+    app: finout-mcp
   ports:
   - name: http
     port: 80

@@ -12,7 +12,7 @@ kubectl apply -k deployments/kubernetes-hosted-public
 
 ```bash
 kubectl -n mcp-public get deploy,svc,ingress,pods
-kubectl -n mcp-public logs deploy/finout-mcp-hosted-public --tail=200
+kubectl -n mcp-public logs deploy/finout-mcp --tail=200
 ```
 
 ## Health check

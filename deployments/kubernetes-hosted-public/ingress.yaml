@@ -9,6 +9,11 @@ metadata:
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
     alb.ingress.kubernetes.io/scheme: internal
     alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/security-groups: sg-077ef8fad15f64447
+    external-dns.alpha.kubernetes.io/zone-type: private
+    external-dns.alpha.kubernetes.io/hosted-zone-id: Z067649217K758I13UCY2
+    # Set ACM certificate ARN before applying:
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:277411487094:certificate/2bbd2a25-b995-4420-ab94-8ed88f94d57f
 spec:
   ingressClassName: alb
   rules:
