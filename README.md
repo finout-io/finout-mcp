@@ -24,9 +24,7 @@ uv pip install -e .
       "args": ["--directory", "/path/to/finout-mcp/packages/mcp-server", "run", "finout-mcp"],
       "env": {
         "FINOUT_CLIENT_ID": "your_client_id",
-        "FINOUT_SECRET_KEY": "your_secret_key",
-        "FINOUT_INTERNAL_API_URL": "https://api.finout.io",
-        "FINOUT_ACCOUNT_ID": "your_account_id"
+        "FINOUT_SECRET_KEY": "your_secret_key"
       }
     }
   }
@@ -150,6 +148,15 @@ finout-mcp/                      # uv workspace root
 └── .env.example
 ```
 
+## 🧩 Redistributables
+
+- Public MCP package: `packages/mcp-server` (CLI: `finout-mcp`)
+  - Auth mode: API key/secret
+  - Intended for external/customer usage
+- Internal MCP package: `packages/vectiqor-mcp-internal` (CLI: `vectiqor-mcp-internal`)
+  - Auth mode: internal authorized headers
+  - Intended only for VECTIQOR-hosted/internal usage
+
 ---
 
 ## 🎯 Use Cases
@@ -181,8 +188,9 @@ Create `.env` in root:
 # Finout API (required)
 FINOUT_CLIENT_ID=your_client_id
 FINOUT_SECRET_KEY=your_secret_key
-FINOUT_INTERNAL_API_URL=https://api.finout.io
-FINOUT_ACCOUNT_ID=your_default_account_id
+
+# Finout API URL (optional, defaults to https://app.finout.io)
+FINOUT_API_URL=https://app.finout.io
 
 # Anthropic API (for VECTIQOR only)
 ANTHROPIC_API_KEY=your_anthropic_api_key

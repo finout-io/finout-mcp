@@ -82,6 +82,26 @@ jobs:
       - store_artifacts:
           path: dist
 
+  smoke_test_python_packages:
+    executor: python
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: Smoke test public package
+          command: |
+            python -m venv /tmp/public-mcp
+            /tmp/public-mcp/bin/pip install --upgrade pip
+            /tmp/public-mcp/bin/pip install dist/mcp-server/*.whl
+            /tmp/public-mcp/bin/finout-mcp --help
+      - run:
+          name: Smoke test internal package
+          command: |
+            python -m venv /tmp/internal-mcp
+            /tmp/internal-mcp/bin/pip install --upgrade pip
+            /tmp/internal-mcp/bin/pip install dist/mcp-server/*.whl dist/vectiqor-mcp-internal/*.whl
+            /tmp/internal-mcp/bin/vectiqor-mcp-internal --help
+
   docker_build_and_optional_push:
     executor: docker
     steps:
@@ -151,10 +171,13 @@ workflows:
           requires:
             - mcp_quality
             - vectiqor_quality
+      - smoke_test_python_packages:
+          requires:
+            - build_python_packages
       - docker_build_and_optional_push:
           requires:
             - mcp_quality
             - vectiqor_quality
       - publish_python_packages:
           requires:
-            - build_python_packages
+            - smoke_test_python_packages
