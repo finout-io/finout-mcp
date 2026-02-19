@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: mcp-public
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+
+images:
+  - name: 277411487094.dkr.ecr.us-east-1.amazonaws.com/finout-mcp-hosted-public
+    newName: 277411487094.dkr.ecr.us-east-1.amazonaws.com/finout-mcp-hosted-public
+    newTag: latest

@@ -41,6 +41,56 @@ Hosted auth headers:
 - `x-finout-secret-key`
 - Optional: `x-finout-api-url` (default `https://app.finout.io`)
 
+### Local Docker end-to-end test (hosted mode)
+
+```bash
+# Build image
+docker build -f Dockerfile.mcp-hosted-public -t finout-mcp-hosted-public:local .
+
+# Run hosted service
+docker run --rm -p 8080:8080 finout-mcp-hosted-public:local
+```
+
+In a second terminal:
+
+```bash
+# Health
+curl -sS http://localhost:8080/health
+
+# MCP auth gate check (expected: 401)
+curl -i -X POST http://localhost:8080/mcp -H 'content-type: application/json' -d '{}'
+
+# MCP call with credentials (auth passes; response shape depends on message payload)
+curl -i -X POST http://localhost:8080/mcp \
+  -H 'content-type: application/json' \
+  -H 'x-finout-client-id: YOUR_CLIENT_ID' \
+  -H 'x-finout-secret-key: YOUR_SECRET_KEY' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"local-test","version":"1.0.0"}}}'
+```
+
+### Manual ECR push for hosted image
+
+```bash
+export AWS_REGION=us-east-1
+export AWS_ACCOUNT_ID=277411487094
+export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+export ECR_REPO="finout-mcp-hosted-public"
+export TAG="$(git rev-parse --short HEAD)"
+
+aws ecr describe-repositories --repository-names "${ECR_REPO}" >/dev/null 2>&1 || \
+  aws ecr create-repository --repository-name "${ECR_REPO}" >/dev/null
+
+aws ecr get-login-password --region "${AWS_REGION}" | \
+  docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+
+docker build -f Dockerfile.mcp-hosted-public \
+  -t "${ECR_REGISTRY}/${ECR_REPO}:${TAG}" \
+  -t "${ECR_REGISTRY}/${ECR_REPO}:latest" .
+
+docker push "${ECR_REGISTRY}/${ECR_REPO}:${TAG}"
+docker push "${ECR_REGISTRY}/${ECR_REPO}:latest"
+```
+
 ### Required runtime environment
 
 ```bash

@@ -1,6 +1,7 @@
 import importlib
 
 import pytest
+from starlette.testclient import TestClient
 
 
 def test_hosted_public_app_routes_exposed():
@@ -53,3 +54,27 @@ def test_extract_public_auth_from_scope_requires_credentials():
     scope = {"headers": []}
     with pytest.raises(ValueError, match="Missing credentials"):
         module._extract_public_auth_from_scope(scope)
+
+
+def test_mcp_post_requires_auth_headers():
+    module = importlib.import_module("src.finout_mcp_server.hosted_public")
+    with TestClient(module.app) as client:
+        response = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}},
+        )
+        assert response.status_code == 401
+
+
+def test_mcp_post_with_auth_headers_passes_auth_gate():
+    module = importlib.import_module("src.finout_mcp_server.hosted_public")
+    with TestClient(module.app) as client:
+        response = client.post(
+            "/mcp",
+            headers={
+                "x-finout-client-id": "cid",
+                "x-finout-secret-key": "sk",
+            },
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}},
+        )
+        assert response.status_code != 401

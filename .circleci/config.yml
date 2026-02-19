@@ -119,6 +119,24 @@ jobs:
             - aws-cli/setup:
                 region: ${AWS_DEFAULT_REGION}
 
+  build_and_push_hosted_public_image:
+    machine:
+      image: ubuntu-2004:2024.05.1
+    steps:
+      - checkout
+      - aws-ecr/build_and_push_image:
+          account_id: ${AWS_ACCOUNT_ID}
+          checkout: false
+          create_repo: true
+          dockerfile: Dockerfile.mcp-hosted-public
+          repo: finout-mcp-hosted-public
+          skip_when_tags_exist: false
+          tag: '${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}'
+          extra_build_args: "--platform=linux/amd64"
+          auth:
+            - aws-cli/setup:
+                region: ${AWS_DEFAULT_REGION}
+
   tag_vectiqor_latest:
     docker:
       - image: cimg/aws:2022.06.1
@@ -128,6 +146,18 @@ jobs:
       - aws-ecr/ecr_login
       - aws-ecr/tag_image:
           repo: vectiqor
+          source_tag: "${CIRCLE_SHA1:0:7}"
+          target_tag: "latest"
+
+  tag_hosted_public_latest:
+    docker:
+      - image: cimg/aws:2022.06.1
+    steps:
+      - aws-cli/setup:
+          region: ${AWS_DEFAULT_REGION}
+      - aws-ecr/ecr_login
+      - aws-ecr/tag_image:
+          repo: finout-mcp-hosted-public
           source_tag: "${CIRCLE_SHA1:0:7}"
           target_tag: "latest"
 
@@ -169,10 +199,21 @@ workflows:
           context: finout
           requires:
             - smoke_test_python_packages
+      - build_and_push_hosted_public_image:
+          context: finout
+          requires:
+            - smoke_test_python_packages
       - tag_vectiqor_latest:
           context: finout
           requires:
             - build_and_push_vectiqor_image
+          filters:
+            branches:
+              only: main
+      - tag_hosted_public_latest:
+          context: finout
+          requires:
+            - build_and_push_hosted_public_image
           filters:
             branches:
               only: main

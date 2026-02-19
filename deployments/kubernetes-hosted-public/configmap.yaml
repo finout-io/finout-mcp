@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: finout-mcp-hosted-public-config
+  namespace: mcp-public
+data:
+  mcp-host: "0.0.0.0"
+  mcp-port: "8080"
+  finout-api-url: "https://app.finout.io"
