@@ -24,6 +24,21 @@ pip install dist/mcp-server/*.whl
 finout-mcp --help
 ```
 
+### Hosted public endpoint
+
+```bash
+export FINOUT_CLIENT_ID="YOUR_CLIENT_ID"
+export FINOUT_SECRET_KEY="YOUR_SECRET_KEY"
+# Optional (defaults to https://app.finout.io)
+export FINOUT_API_URL="https://app.finout.io"
+finout-mcp-hosted-public
+```
+
+Service endpoints:
+
+- `GET /health`
+- `POST/GET /mcp` (Streamable HTTP MCP transport)
+
 ### Required runtime environment
 
 ```bash

@@ -28,6 +28,26 @@ EOF
 # Restart Claude Desktop
 ```
 
+## Hosted Public Service
+
+Run MCP over Streamable HTTP (separate from VECTIQOR):
+
+```bash
+export FINOUT_CLIENT_ID="your-client-id"
+export FINOUT_SECRET_KEY="your-secret-key"
+# Optional (defaults to https://app.finout.io)
+export FINOUT_API_URL="https://app.finout.io"
+
+finout-mcp-hosted-public
+```
+
+Defaults:
+
+- `MCP_HOST=0.0.0.0`
+- `MCP_PORT=8080`
+- MCP endpoint: `POST/GET /mcp`
+- Health endpoint: `GET /health`
+
 ## Environment Variables
 
 | Variable | Required | Description |
