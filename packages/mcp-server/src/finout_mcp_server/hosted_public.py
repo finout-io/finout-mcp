@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
 import anyio
 from mcp.server.streamable_http import StreamableHTTPServerTransport
@@ -19,20 +20,24 @@ from starlette.routing import Mount, Route
 
 import finout_mcp_server.server as server_module
 
-from .server import MCPMode, _init_client_for_mode, server
+from .finout_client import FinoutClient, InternalAuthMode
+from .server import MCPMode, server
 
 
 @asynccontextmanager
 async def lifespan(app: Starlette):
     """Initialize MCP core in fixed public mode and expose it over HTTP transport."""
     server_module.runtime_mode = MCPMode.PUBLIC.value
-    server_module.finout_client = _init_client_for_mode(MCPMode.PUBLIC)
+    # Hosted public mode receives Finout credentials per HTTP call.
+    server_module.finout_client = None
 
     transport = StreamableHTTPServerTransport(
         mcp_session_id=None,
         is_json_response_enabled=True,
     )
     app.state.transport = transport
+    app.state.client_lock = anyio.Lock()
+    app.state.client_fingerprint = None
 
     try:
         async with transport.connect() as (read_stream, write_stream):
@@ -61,8 +66,49 @@ async def health(_: Request) -> JSONResponse:
     )
 
 
+def _extract_public_auth_from_scope(scope: Any) -> tuple[str, str, str]:
+    """Extract required auth headers from ASGI scope."""
+    headers = {
+        k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])
+    }
+    client_id = headers.get("x-finout-client-id", "").strip()
+    secret_key = headers.get("x-finout-secret-key", "").strip()
+    api_url = headers.get("x-finout-api-url", "").strip() or "https://app.finout.io"
+
+    if not client_id or not secret_key:
+        raise ValueError(
+            "Missing credentials. Provide x-finout-client-id and x-finout-secret-key headers."
+        )
+    return client_id, secret_key, api_url
+
+
 async def mcp_transport(scope, receive, send) -> None:
     """ASGI mount for Streamable HTTP MCP transport."""
+    if scope.get("method") == "POST":
+        try:
+            client_id, secret_key, api_url = _extract_public_auth_from_scope(scope)
+        except ValueError as exc:
+            response = JSONResponse({"error": str(exc)}, status_code=401)
+            await response(scope, receive, send)
+            return
+
+        fingerprint = (client_id, secret_key, api_url)
+        async with scope["app"].state.client_lock:
+            if scope["app"].state.client_fingerprint != fingerprint:
+                if server_module.finout_client:
+                    await server_module.finout_client.close()
+                server_module.runtime_mode = MCPMode.PUBLIC.value
+                server_module.finout_client = FinoutClient(
+                    client_id=client_id,
+                    secret_key=secret_key,
+                    internal_api_url=api_url,
+                    internal_auth_mode=InternalAuthMode.KEY_SECRET,
+                    allow_missing_credentials=False,
+                )
+                scope["app"].state.client_fingerprint = fingerprint
+            await scope["app"].state.transport.handle_request(scope, receive, send)
+        return
+
     await scope["app"].state.transport.handle_request(scope, receive, send)
 
 

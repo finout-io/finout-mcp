@@ -33,13 +33,13 @@ EOF
 Run MCP over Streamable HTTP (separate from VECTIQOR):
 
 ```bash
-export FINOUT_CLIENT_ID="your-client-id"
-export FINOUT_SECRET_KEY="your-secret-key"
-# Optional (defaults to https://app.finout.io)
-export FINOUT_API_URL="https://app.finout.io"
-
 finout-mcp-hosted-public
 ```
+
+Authentication for hosted requests:
+
+- Send `x-finout-client-id` and `x-finout-secret-key` headers on MCP `POST` calls.
+- Optional override: `x-finout-api-url` (defaults to `https://app.finout.io`).
 
 Defaults:
 
