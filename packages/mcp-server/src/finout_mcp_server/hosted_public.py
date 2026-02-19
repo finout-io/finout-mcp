@@ -15,8 +15,8 @@ import anyio
 from mcp.server.streamable_http import StreamableHTTPServerTransport
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.responses import JSONResponse, Response
+from starlette.routing import Route
 
 import finout_mcp_server.server as server_module
 
@@ -82,7 +82,7 @@ def _extract_public_auth_from_scope(scope: Any) -> tuple[str, str, str]:
     return client_id, secret_key, api_url
 
 
-async def mcp_transport(scope, receive, send) -> None:
+async def mcp_asgi(scope, receive, send) -> None:
     """ASGI mount for Streamable HTTP MCP transport."""
     if scope.get("method") == "POST":
         try:
@@ -112,13 +112,40 @@ async def mcp_transport(scope, receive, send) -> None:
     await scope["app"].state.transport.handle_request(scope, receive, send)
 
 
+async def _invoke_asgi_as_response(request: Request) -> Response:
+    """Invoke ASGI MCP transport and adapt output to a Starlette Response."""
+    events: list[dict[str, Any]] = []
+
+    async def send(message: dict[str, Any]) -> None:
+        events.append(message)
+
+    await mcp_asgi(request.scope, request.receive, send)
+
+    start = next((event for event in events if event.get("type") == "http.response.start"), None)
+    body_events = [event for event in events if event.get("type") == "http.response.body"]
+    status_code = int(start.get("status", 500)) if start else 500
+    raw_headers = start.get("headers", []) if start else []
+    headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in raw_headers}
+    body = b"".join(event.get("body", b"") for event in body_events)
+
+    return Response(content=body, status_code=status_code, headers=headers)
+
+
+async def mcp_route(request: Request) -> Response:
+    """Request-style route wrapper for the MCP ASGI transport."""
+    return await _invoke_asgi_as_response(request)
+
+
 app = Starlette(
     routes=[
         Route("/health", endpoint=health, methods=["GET"]),
-        Mount("/mcp", app=mcp_transport),
+        # Register both variants explicitly to avoid framework-level slash redirects.
+        Route("/mcp", endpoint=mcp_route, methods=["GET", "POST", "DELETE"]),
+        Route("/mcp/", endpoint=mcp_route, methods=["GET", "POST", "DELETE"]),
     ],
     lifespan=lifespan,
 )
+app.router.redirect_slashes = False
 
 
 def main() -> None:

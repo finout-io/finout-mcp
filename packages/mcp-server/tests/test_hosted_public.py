@@ -78,3 +78,18 @@ def test_mcp_post_with_auth_headers_passes_auth_gate():
             json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}},
         )
         assert response.status_code != 401
+
+
+def test_mcp_post_no_trailing_slash_no_redirect():
+    module = importlib.import_module("src.finout_mcp_server.hosted_public")
+    with TestClient(module.app) as client:
+        response = client.post(
+            "/mcp",
+            headers={
+                "x-finout-client-id": "cid",
+                "x-finout-secret-key": "sk",
+            },
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}},
+            follow_redirects=False,
+        )
+        assert response.status_code != 307
