@@ -11,6 +11,8 @@ metadata:
     alb.ingress.kubernetes.io/backend-protocol: HTTP
     alb.ingress.kubernetes.io/healthcheck-path: /api/health
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    # Prevent ALB 504s on longer tool/LLM round-trips.
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=180
     # Keep a browser session pinned to the same pod target (required for in-memory session state).
     alb.ingress.kubernetes.io/target-group-attributes: stickiness.enabled=true,stickiness.lb_cookie.duration_seconds=3600
     # Optional: set a dedicated ALB security group to keep SG policy explicit.

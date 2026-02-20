@@ -220,6 +220,7 @@ class SessionData:
 sessions: Dict[str, SessionData] = {}
 MAX_CONCURRENT_SESSIONS = 10
 SESSION_TIMEOUT = timedelta(minutes=30)
+CHAT_REQUEST_TIMEOUT_SECONDS = float(os.getenv("VECTIQOR_CHAT_TIMEOUT_SECONDS", "110"))
 SESSION_COOKIE_NAME = "vectiqor_session_id"
 ACCOUNT_COOKIE_NAME = "vectiqor_account_id"
 
@@ -229,13 +230,14 @@ def get_or_create_session_id(request: Request, response: Response) -> str:
 
     if not session_id:
         session_id = secrets.token_urlsafe(32)
-        response.set_cookie(
-            key=SESSION_COOKIE_NAME,
-            value=session_id,
-            max_age=SESSION_TIMEOUT.total_seconds(),
-            httponly=True,
-            samesite="lax"
-        )
+    # Refresh cookie TTL on each request (sliding session).
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session_id,
+        max_age=SESSION_TIMEOUT.total_seconds(),
+        httponly=True,
+        samesite="lax"
+    )
 
     return session_id
 
@@ -536,136 +538,145 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
         )
 
     try:
-        # Get available tools from MCP
-        mcp_tools = await session_mcp.list_tools()
-        claude_tools = convert_mcp_tools_to_claude_format(mcp_tools)
+        async with asyncio.timeout(CHAT_REQUEST_TIMEOUT_SECONDS):
+            # Get available tools from MCP
+            mcp_tools = await session_mcp.list_tools()
+            claude_tools = convert_mcp_tools_to_claude_format(mcp_tools)
 
-        # Build messages for Claude
-        messages = [
-            {"role": msg.role, "content": msg.content}
-            for msg in request.conversation_history
-        ]
-        messages.append({"role": "user", "content": request.message})
+            # Build messages for Claude
+            messages = [
+                {"role": msg.role, "content": msg.content}
+                for msg in request.conversation_history
+            ]
+            messages.append({"role": "user", "content": request.message})
 
-        # Call Claude with tools (use model from request)
-        response = await asyncio.to_thread(
-            anthropic_client.messages.create,
-            model=request.model,
-            max_tokens=4096,
-            system=(
-                "You are a cloud cost analysis assistant for Finout. "
-                "You have access to tools to query costs, detect anomalies, find waste, and explore filters.\n\n"
-                "After every interaction where you used tools to answer the user's question, "
-                "you MUST call submit_feedback before finishing your response. "
-                "Rate your ability to answer (1=couldn't answer, 5=excellent), "
-                "pick the query_type that best matches what was asked, "
-                "and note any friction points you encountered."
-            ),
-            tools=claude_tools,
-            messages=messages,
-        )
-        usage_totals = _empty_usage_totals()
-        if getattr(response, "usage", None):
-            _accumulate_usage(usage_totals, response.usage)
-
-        # Track tool calls for display
-        all_tool_calls = []
-        total_tool_time = 0.0
-
-        # Handle tool calls
-        while response.stop_reason == "tool_use":
-            # Extract tool calls
-            tool_results = []
-
-            for content_block in response.content:
-                if content_block.type == "tool_use":
-                    tool_name = content_block.name
-                    tool_input = content_block.input
-                    tool_id = content_block.id
-
-                    print(f"Calling tool: {tool_name} with {tool_input}")
-
-                    try:
-                        # Time tool execution
-                        tool_start = datetime.now()
-                        # Call MCP tool (session-isolated MCP instance)
-                        result = await session_mcp.call_tool(tool_name, tool_input)
-                        tool_duration = (datetime.now() - tool_start).total_seconds()
-                        total_tool_time += tool_duration
-
-                        # Track for display
-                        all_tool_calls.append({
-                            "name": tool_name,
-                            "input": tool_input,
-                            "output": result
-                        })
-
-                        # Save feedback to database if this is a feedback submission
-                        if tool_name == "submit_feedback":
-                            try:
-                                await db.save_feedback(
-                                    account_id=session_mcp.current_account_id,
-                                    rating=tool_input.get("rating"),
-                                    query_type=tool_input.get("query_type"),
-                                    tools_used=tool_input.get("tools_used"),
-                                    friction_points=tool_input.get("friction_points"),
-                                    suggestion=tool_input.get("suggestion"),
-                                    session_id=session_id,
-                                )
-                            except Exception as e:
-                                print(f"Failed to save feedback to database: {e}")
-
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": tool_id,
-                            "content": result
-                        })
-                    except Exception as e:
-                        error_msg = f"Error calling tool: {str(e)}"
-
-                        # Track error for display
-                        all_tool_calls.append({
-                            "name": tool_name,
-                            "input": tool_input,
-                            "output": error_msg,
-                            "error": True
-                        })
-
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": tool_id,
-                            "content": error_msg,
-                            "is_error": True
-                        })
-
-            # Continue conversation with tool results
-            messages.append({"role": "assistant", "content": response.content})
-            messages.append({"role": "user", "content": tool_results})
-
-            response = await asyncio.to_thread(
+            # Call Claude with tools (use model from request)
+            llm_response = await asyncio.to_thread(
                 anthropic_client.messages.create,
                 model=request.model,
                 max_tokens=4096,
+                system=(
+                    "You are a cloud cost analysis assistant for Finout. "
+                    "You have access to tools to query costs, detect anomalies, find waste, and explore filters.\n\n"
+                    "After every interaction where you used tools to answer the user's question, "
+                    "you MUST call submit_feedback before finishing your response. "
+                    "Rate your ability to answer (1=couldn't answer, 5=excellent), "
+                    "pick the query_type that best matches what was asked, "
+                    "and note any friction points you encountered."
+                ),
                 tools=claude_tools,
                 messages=messages,
             )
-            if getattr(response, "usage", None):
-                _accumulate_usage(usage_totals, response.usage)
+            usage_totals = _empty_usage_totals()
+            if getattr(llm_response, "usage", None):
+                _accumulate_usage(usage_totals, llm_response.usage)
 
-        # Extract final text response
-        response_text = ""
-        for content_block in response.content:
-            if hasattr(content_block, "text"):
-                response_text += content_block.text
+            # Track tool calls for display
+            all_tool_calls = []
+            total_tool_time = 0.0
 
-        return {
-            "response": response_text,
-            "tool_calls": all_tool_calls,  # Include tool call details
-            "tool_time": round(total_tool_time, 2),  # Time spent in tool execution
-            "usage": _build_usage_summary(request.model, usage_totals),
-            "conversation_history": messages + [{"role": "assistant", "content": response_text}]
-        }
+            # Handle tool calls
+            while llm_response.stop_reason == "tool_use":
+                # Extract tool calls
+                tool_results = []
 
+                for content_block in llm_response.content:
+                    if content_block.type == "tool_use":
+                        tool_name = content_block.name
+                        tool_input = content_block.input
+                        tool_id = content_block.id
+
+                        print(f"Calling tool: {tool_name} with {tool_input}")
+
+                        try:
+                            # Time tool execution
+                            tool_start = datetime.now()
+                            # Call MCP tool (session-isolated MCP instance)
+                            result = await session_mcp.call_tool(tool_name, tool_input)
+                            tool_duration = (datetime.now() - tool_start).total_seconds()
+                            total_tool_time += tool_duration
+
+                            # Track for display
+                            all_tool_calls.append({
+                                "name": tool_name,
+                                "input": tool_input,
+                                "output": result
+                            })
+
+                            # Save feedback to database if this is a feedback submission
+                            if tool_name == "submit_feedback":
+                                try:
+                                    await db.save_feedback(
+                                        account_id=session_mcp.current_account_id,
+                                        rating=tool_input.get("rating"),
+                                        query_type=tool_input.get("query_type"),
+                                        tools_used=tool_input.get("tools_used"),
+                                        friction_points=tool_input.get("friction_points"),
+                                        suggestion=tool_input.get("suggestion"),
+                                        session_id=session_id,
+                                    )
+                                except Exception as e:
+                                    print(f"Failed to save feedback to database: {e}")
+
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": tool_id,
+                                "content": result
+                            })
+                        except Exception as e:
+                            error_msg = f"Error calling tool: {str(e)}"
+
+                            # Track error for display
+                            all_tool_calls.append({
+                                "name": tool_name,
+                                "input": tool_input,
+                                "output": error_msg,
+                                "error": True
+                            })
+
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": tool_id,
+                                "content": error_msg,
+                                "is_error": True
+                            })
+
+                # Continue conversation with tool results
+                messages.append({"role": "assistant", "content": llm_response.content})
+                messages.append({"role": "user", "content": tool_results})
+
+                llm_response = await asyncio.to_thread(
+                    anthropic_client.messages.create,
+                    model=request.model,
+                    max_tokens=4096,
+                    tools=claude_tools,
+                    messages=messages,
+                )
+                if getattr(llm_response, "usage", None):
+                    _accumulate_usage(usage_totals, llm_response.usage)
+
+            # Extract final text response
+            response_text = ""
+            for content_block in llm_response.content:
+                if hasattr(content_block, "text"):
+                    response_text += content_block.text
+
+            return {
+                "response": response_text,
+                "tool_calls": all_tool_calls,  # Include tool call details
+                "tool_time": round(total_tool_time, 2),  # Time spent in tool execution
+                "usage": _build_usage_summary(request.model, usage_totals),
+                "conversation_history": messages + [{"role": "assistant", "content": response_text}]
+            }
+
+    except TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"Chat request timed out after {int(CHAT_REQUEST_TIMEOUT_SECONDS)}s. "
+                "Please retry with a narrower query."
+            ),
+        )
     except Exception as e:
         print(f"Error in chat: {e}")
         import traceback
