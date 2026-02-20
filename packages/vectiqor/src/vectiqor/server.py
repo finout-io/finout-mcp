@@ -10,6 +10,7 @@ import subprocess
 import secrets
 import shutil
 import sys
+from uuid import UUID
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -222,6 +223,7 @@ sessions: Dict[str, SessionData] = {}
 MAX_CONCURRENT_SESSIONS = 10
 SESSION_TIMEOUT = timedelta(minutes=30)
 SESSION_COOKIE_NAME = "vectiqor_session_id"
+ACCOUNT_COOKIE_NAME = "vectiqor_account_id"
 
 def get_or_create_session_id(request: Request, response: Response) -> str:
     """Get session ID from cookie or create new one"""
@@ -271,8 +273,9 @@ async def ensure_session_mcp(session_id: str, account_id_hint: Optional[str] = N
         session.last_activity = datetime.now()
         return session.mcp_bridge
 
-    # Session not found on this pod: try account hint, then last account fallback.
-    account_id = account_id_hint or load_last_account()
+    # Session not found on this pod: only use explicit account hint.
+    # Do NOT use global account fallbacks because they can leak/flip accounts across users/pods.
+    account_id = account_id_hint
     if not account_id:
         return None
 
@@ -290,6 +293,25 @@ async def ensure_session_mcp(session_id: str, account_id_hint: Optional[str] = N
     except Exception as e:
         print(f"Session {session_id[:8]}: Failed to rehydrate MCP session: {e}")
         return None
+
+
+def _is_valid_account_id(value: Optional[str]) -> bool:
+    """Validate account id format (UUID string)."""
+    if not value:
+        return False
+    try:
+        UUID(str(value))
+        return True
+    except Exception:
+        return False
+
+
+def get_account_hint(request: Request) -> Optional[str]:
+    """Get account hint from per-browser cookie."""
+    account_id = request.cookies.get(ACCOUNT_COOKIE_NAME)
+    if _is_valid_account_id(account_id):
+        return account_id
+    return None
 
 async def cleanup_idle_sessions():
     """Background task to cleanup idle sessions"""
@@ -503,7 +525,9 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
     session_id = get_or_create_session_id(http_request, response)
 
     # Get/recover session MCP
-    session_mcp = await ensure_session_mcp(session_id, request.account_id)
+    requested_account = request.account_id if _is_valid_account_id(request.account_id) else None
+    account_hint = requested_account or get_account_hint(http_request)
+    session_mcp = await ensure_session_mcp(session_id, account_hint)
 
     if not session_mcp:
         raise HTTPException(
@@ -691,8 +715,8 @@ async def get_accounts(http_request: Request, response: Response):
             _account_cache_time is not None and
             now - _account_cache_time < _account_cache_ttl):
             print(f"Using cached accounts ({len(_account_cache)} accounts, age: {(now - _account_cache_time).seconds}s)")
-            # Return session account if exists, otherwise last selected account
-            current_id = session.account_id if session else load_last_account()
+            # Return session account if exists, otherwise cookie-scoped account hint
+            current_id = session.account_id if session else get_account_hint(http_request)
             return {
                 "accounts": _account_cache,
                 "current_account_id": current_id,
@@ -761,8 +785,8 @@ async def get_accounts(http_request: Request, response: Response):
             _account_cache = account_list
             _account_cache_time = now
 
-            # Return session account if exists, otherwise last selected account
-            current_id = session.account_id if session else load_last_account()
+            # Return session account if exists, otherwise cookie-scoped account hint
+            current_id = session.account_id if session else get_account_hint(http_request)
 
             return {
                 "accounts": account_list,
@@ -787,6 +811,8 @@ async def switch_account(request: dict, http_request: Request, response: Respons
     account_id = request.get("account_id")
     if not account_id:
         raise HTTPException(status_code=400, detail="account_id is required")
+    if not _is_valid_account_id(account_id):
+        raise HTTPException(status_code=400, detail="account_id must be a UUID")
 
     # Get or create session ID
     session_id = get_or_create_session_id(http_request, response)
@@ -804,6 +830,9 @@ async def switch_account(request: dict, http_request: Request, response: Respons
             print(f"Session {session_id[:8]}: Switching from {session.account_id} to {account_id}")
             await session.mcp_bridge.restart_with_account(account_id)
             session.account_id = account_id
+        elif not session.mcp_bridge.process or session.mcp_bridge.process.poll() is not None:
+            print(f"Session {session_id[:8]}: MCP was down, restarting for account {account_id}")
+            await session.mcp_bridge.restart_with_account(account_id)
         session.last_activity = datetime.now()
     else:
         # New session - create MCP bridge
@@ -820,8 +849,14 @@ async def switch_account(request: dict, http_request: Request, response: Respons
 
     print(f"Active sessions: {len(sessions)}/{MAX_CONCURRENT_SESSIONS}")
 
-    # Save as last selected account
-    save_last_account(account_id)
+    # Persist selected account per browser/client
+    response.set_cookie(
+        key=ACCOUNT_COOKIE_NAME,
+        value=account_id,
+        max_age=SESSION_TIMEOUT.total_seconds(),
+        httponly=True,
+        samesite="lax",
+    )
 
     return {
         "success": True,
