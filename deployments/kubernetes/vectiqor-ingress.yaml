@@ -11,6 +11,8 @@ metadata:
     alb.ingress.kubernetes.io/backend-protocol: HTTP
     alb.ingress.kubernetes.io/healthcheck-path: /api/health
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    # Keep a browser session pinned to the same pod target (required for in-memory session state).
+    alb.ingress.kubernetes.io/target-group-attributes: stickiness.enabled=true,stickiness.lb_cookie.duration_seconds=3600
     # Optional: set a dedicated ALB security group to keep SG policy explicit.
     # alb.ingress.kubernetes.io/security-groups: sg-0123456789abcdef0
     alb.ingress.kubernetes.io/security-groups: sg-077ef8fad15f64447

@@ -40,6 +40,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     conversation_history: List[ChatMessage] = []
+    account_id: Optional[str] = None
     model: Optional[str] = "claude-sonnet-4-5-20250929"  # Model to use for this request
 
 
@@ -245,6 +246,50 @@ async def get_session_mcp(session_id: str) -> Optional[MCPBridge]:
         session.last_activity = datetime.now()
         return session.mcp_bridge
     return None
+
+
+async def ensure_session_mcp(session_id: str, account_id_hint: Optional[str] = None) -> Optional[MCPBridge]:
+    """
+    Ensure a session-scoped MCP bridge exists and is running.
+
+    This auto-recovers from:
+    - per-pod in-memory session misses (multi-replica routing)
+    - MCP subprocess exits during a live session
+    """
+    session = sessions.get(session_id)
+    if session:
+        # Recover dead MCP process in-place.
+        if not session.mcp_bridge.process or session.mcp_bridge.process.poll() is not None:
+            try:
+                print(
+                    f"Session {session_id[:8]}: MCP not running, restarting for account {session.account_id}"
+                )
+                await session.mcp_bridge.restart_with_account(session.account_id)
+            except Exception as e:
+                print(f"Session {session_id[:8]}: Failed to restart MCP: {e}")
+                return None
+        session.last_activity = datetime.now()
+        return session.mcp_bridge
+
+    # Session not found on this pod: try account hint, then last account fallback.
+    account_id = account_id_hint or load_last_account()
+    if not account_id:
+        return None
+
+    try:
+        print(f"Session {session_id[:8]}: Rehydrating MCP session for account {account_id}")
+        mcp = MCPBridge()
+        await mcp.start(account_id)
+        sessions[session_id] = SessionData(
+            session_id=session_id,
+            mcp_bridge=mcp,
+            account_id=account_id,
+            last_activity=datetime.now(),
+        )
+        return mcp
+    except Exception as e:
+        print(f"Session {session_id[:8]}: Failed to rehydrate MCP session: {e}")
+        return None
 
 async def cleanup_idle_sessions():
     """Background task to cleanup idle sessions"""
@@ -457,8 +502,8 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
     # Get session ID
     session_id = get_or_create_session_id(http_request, response)
 
-    # Get session MCP
-    session_mcp = await get_session_mcp(session_id)
+    # Get/recover session MCP
+    session_mcp = await ensure_session_mcp(session_id, request.account_id)
 
     if not session_mcp:
         raise HTTPException(
