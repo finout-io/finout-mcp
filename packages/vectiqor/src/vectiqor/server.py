@@ -477,18 +477,27 @@ def convert_mcp_tools_to_claude_format(mcp_tools: List[Dict]) -> List[Dict]:
 
     return claude_tools
 
-def _frontend_index_path() -> Path:
-    """Return React frontend index path from built dist output."""
-    return Path(__file__).resolve().parents[2] / "frontend" / "dist" / "index.html"
+def _frontend_dir() -> Optional[Path]:
+    """Resolve frontend assets directory, supporting both legacy and new image layouts."""
+    package_root = Path(__file__).resolve().parents[2]
+    candidates = [
+        package_root / "frontend" / "dist",          # New layout
+        Path(__file__).resolve().parent / "static",  # Legacy/bundled layout
+    ]
+    for candidate in candidates:
+        if (candidate / "index.html").exists():
+            return candidate
+    return None
 
 
 @app.get("/share/{share_token}")
 @app.get("/manage")
 async def spa_routes(share_token: str = ""):
     """Serve the SPA for client-side routes (React Router handles rendering)."""
-    index_path = _frontend_index_path()
-    if not index_path.exists():
+    frontend_dir = _frontend_dir()
+    if frontend_dir is None:
         raise HTTPException(status_code=503, detail="Frontend not built")
+    index_path = frontend_dir / "index.html"
     return HTMLResponse(content=index_path.read_text())
 
 @app.get("/api/health")
@@ -976,9 +985,9 @@ async def get_feedback_stats(account_id: Optional[str] = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Serve frontend SPA assets (must be last — API routes above take priority)
-_frontend_dist_dir = _frontend_index_path().parent
-if (_frontend_dist_dir / "index.html").exists():
-    app.mount("/", StaticFiles(directory=str(_frontend_dist_dir), html=True), name="frontend")
+_frontend_assets_dir = _frontend_dir()
+if _frontend_assets_dir is not None:
+    app.mount("/", StaticFiles(directory=str(_frontend_assets_dir), html=True), name="frontend")
 
 
 def main():
