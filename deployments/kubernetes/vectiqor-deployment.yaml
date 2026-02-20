@@ -59,11 +59,6 @@ spec:
             configMapKeyRef:
               name: vectiqor-config
               key: finout-internal-api-url
-        - name: FINOUT_ACCOUNT_ID
-          valueFrom:
-            configMapKeyRef:
-              name: vectiqor-config
-              key: finout-default-account-id
         # Anthropic API Configuration
         - name: ANTHROPIC_API_KEY
           valueFrom:

@@ -9,8 +9,5 @@ data:
   # Finout Internal API URL
   finout-internal-api-url: "http://finout-app.prod-mirror.internal.finout.io"
 
-  # Default Account ID (can be overridden in UI)
-  finout-default-account-id: "e12498cc-594a-4740-94a5-8324e7399bb2"
-
   # Optional: Log level
   log-level: "INFO"

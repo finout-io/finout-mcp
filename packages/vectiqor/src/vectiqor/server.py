@@ -54,20 +54,15 @@ class MCPBridge:
         self._lock = asyncio.Lock()
         self.current_account_id: Optional[str] = None
 
-    async def start(self, account_id: Optional[str] = None):
+    async def start(self, account_id: str):
         """Start the MCP server as subprocess with specific account ID"""
-        # Use provided account_id or fall back to environment variable
-        if account_id:
-            self.current_account_id = account_id
-        else:
-            self.current_account_id = os.getenv("FINOUT_ACCOUNT_ID")
+        self.current_account_id = account_id
 
         print(f"Starting MCP server for account: {self.current_account_id}...")
 
         # Prepare environment with account ID
         env = os.environ.copy()
-        if self.current_account_id:
-            env["FINOUT_ACCOUNT_ID"] = self.current_account_id
+        env["FINOUT_ACCOUNT_ID"] = self.current_account_id
 
         # Start internal MCP runtime using the dedicated launcher when available.
         # Fallback to direct module startup (no uv requirement) for local/dev environments.
