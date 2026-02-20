@@ -679,7 +679,7 @@ class TestToolDescriptions:
         assert "get_account_context" not in public_tool_names
         assert "submit_feedback" not in public_tool_names
         assert "get_anomalies" in public_tool_names
-        assert len(public_tools) == 9
+        assert len(public_tools) == 10
 
         server_module.runtime_mode = server_module.MCPMode.VECTIQOR_INTERNAL.value
         internal_tools = await server_module.list_tools()
@@ -687,4 +687,4 @@ class TestToolDescriptions:
         assert "get_account_context" in internal_tool_names
         assert "submit_feedback" in internal_tool_names
         assert "get_waste_recommendations" in internal_tool_names
-        assert len(internal_tools) == 13
+        assert len(internal_tools) == 14

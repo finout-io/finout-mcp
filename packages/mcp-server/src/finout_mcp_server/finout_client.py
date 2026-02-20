@@ -1433,6 +1433,50 @@ class FinoutClient:
         response.raise_for_status()
         return response.json()
 
+    async def create_view(
+        self,
+        name: str,
+        filters: list[dict[str, Any]] | None = None,
+        group_by: list[dict[str, Any]] | None = None,
+        time_period: str = "last_30_days",
+        cost_type: CostType = CostType.NET_AMORTIZED,
+    ) -> dict[str, Any]:
+        """
+        Create a saved view (cost query) in Finout.
+
+        Args:
+            name: View name
+            filters: Optional filters (same format as query_costs)
+            group_by: Optional group-by dimensions
+            time_period: Time period string
+            cost_type: Cost metric type
+
+        Returns:
+            Created view object with id and name
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured.")
+        headers = self._get_internal_headers()
+        if self.internal_auth_mode == InternalAuthMode.AUTHORIZED_HEADERS:
+            headers["authorized-user-permissions"] = "fin.megabill.write.views"
+        payload = {
+            "name": name,
+            "type": "cost",
+            "data": {
+                "query": {
+                    "filters": self._build_filter_payload(filters) if filters else {},
+                    "groupBys": group_by or [],
+                },
+                "date": self._build_date_payload(time_period),
+                "costType": cost_type.value,
+            },
+        }
+        response = await self.internal_client.post(
+            "/view-service/view", json=payload, headers=headers
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def get_data_explorers(self) -> list[dict[str, Any]]:
         """
         Fetch all data explorers for the account.

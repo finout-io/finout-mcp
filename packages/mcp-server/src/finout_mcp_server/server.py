@@ -23,7 +23,7 @@ from mcp.types import (
     Tool,
 )
 
-from .finout_client import FinoutClient, InternalAuthMode
+from .finout_client import CostType, FinoutClient, InternalAuthMode
 
 # Initialize MCP server
 server = Server("finout-mcp-server")
@@ -53,6 +53,7 @@ PUBLIC_TOOLS: set[str] = {
     "get_waste_recommendations",
     "get_anomalies",
     "get_financial_plans",
+    "create_view",
 }
 
 VECTIQOR_INTERNAL_EXTRA_TOOLS: set[str] = {
@@ -76,6 +77,7 @@ INTERNAL_API_TOOLS: set[str] = {
     "get_account_context",
     "get_anomalies",
     "get_financial_plans",
+    "create_view",
 }
 
 KEY_SECRET_TOOLS: set[str] = {
@@ -496,6 +498,76 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="create_view",
+            description=(
+                "Save the current query as a reusable view in Finout.\n\n"
+                "WHEN TO USE: After answering a query_costs question, proactively offer to save it. "
+                "'Would you like me to save this as a view?'\n\n"
+                "Inputs: name (required), filters, group_by, time_period, cost_type"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Name for the saved view (e.g., 'EC2 by region — last 30 days')",
+                    },
+                    "filters": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "costCenter": {"type": "string"},
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                                "type": {"type": "string"},
+                                "operator": {"type": "string", "default": "is"},
+                                "value": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ]
+                                },
+                            },
+                            "required": ["costCenter", "key", "path", "type", "value"],
+                        },
+                        "description": "Optional: Filters from query_costs (same format)",
+                    },
+                    "group_by": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "costCenter": {"type": "string"},
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                                "type": {"type": "string"},
+                            },
+                            "required": ["costCenter", "key", "path", "type"],
+                        },
+                        "description": "Optional: Group-by dimensions from query_costs (same format)",
+                    },
+                    "time_period": {
+                        "type": "string",
+                        "description": "Time period (same values as query_costs)",
+                        "default": "last_30_days",
+                    },
+                    "cost_type": {
+                        "type": "string",
+                        "enum": [
+                            "netAmortizedCost",
+                            "blendedCost",
+                            "unblendedCost",
+                            "amortizedCost",
+                        ],
+                        "description": "Cost metric type",
+                        "default": "netAmortizedCost",
+                    },
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
             name="get_waste_recommendations",
             description=(
                 "Get CostGuard waste detection and optimization recommendations.\n\n"
@@ -910,6 +982,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await get_account_context_impl()
         elif name == "submit_feedback":
             result = await submit_feedback_impl(arguments)
+        elif name == "create_view":
+            result = await create_view_impl(arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1258,6 +1332,32 @@ async def get_financial_plans_impl(args: dict) -> dict:
             "Show plan name, period, total budget and top line items. "
             "If forecast is present, compare budget vs forecast."
         ),
+    }
+
+
+async def create_view_impl(args: dict) -> dict:
+    """Implementation of create_view tool"""
+    assert finout_client is not None
+
+    name = args["name"]
+    filters = args.get("filters")
+    group_by = args.get("group_by")
+    time_period = args.get("time_period", "last_30_days")
+    cost_type_str = args.get("cost_type", CostType.NET_AMORTIZED.value)
+    cost_type = CostType(cost_type_str)
+
+    view = await finout_client.create_view(
+        name=name,
+        filters=filters,
+        group_by=group_by,
+        time_period=time_period,
+        cost_type=cost_type,
+    )
+    return {
+        "id": view.get("id"),
+        "name": view.get("name"),
+        "url": f"https://app.finout.io/views/{view.get('id')}",
+        "_presentation_hint": "Tell the user the view was saved and share the name.",
     }
 
 

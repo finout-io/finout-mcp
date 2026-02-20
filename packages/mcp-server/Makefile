@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format check install hooks clean
+.PHONY: test lint typecheck format check install hooks clean build build-wheel
 
 # Run all checks
 check: lint typecheck test
@@ -28,6 +28,10 @@ install:
 hooks:
 	uv run pre-commit install
 	uv run pre-commit install --hook-type pre-push
+
+# Build wheel + sdist into package-local dist directory
+build build-wheel:
+	UV_CACHE_DIR=../../.uv-cache uv build --package finout-mcp-server --out-dir dist --clear
 
 # Clean build artifacts
 clean:

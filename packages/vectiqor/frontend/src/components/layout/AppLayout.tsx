@@ -21,8 +21,9 @@ import { MODEL_OPTIONS } from '../../types'
 
 export function AppLayout() {
   const session = useSession()
-  const chat = useChat()
   const { colorScheme, toggleColorScheme } = useMantineColorScheme()
+  const accountId = session.selectedAccount?.accountId ?? null
+  const chat = useChat(accountId)
 
   const [model, setModel] = useState<ModelId>(MODEL_OPTIONS[1]!.value)
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>()
@@ -31,7 +32,6 @@ export function AppLayout() {
   const activeConversationIdRef = useRef<string | undefined>(undefined)
   const lastAccountIdRef = useRef<string | null>(null)
 
-  const accountId = session.selectedAccount?.accountId ?? null
   const { save, isSaving, loadConversation } = useConversations(accountId)
 
   // Keep ref in sync with state
@@ -39,6 +39,8 @@ export function AppLayout() {
 
   // Switching accounts always starts a fresh conversation.
   useEffect(() => {
+    // Ignore transient null values during refetch/state propagation.
+    if (!accountId) return
     if (lastAccountIdRef.current === accountId) return
     lastAccountIdRef.current = accountId
 

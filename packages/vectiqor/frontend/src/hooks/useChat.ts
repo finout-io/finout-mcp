@@ -11,7 +11,7 @@ export interface ChatState {
   setMessages: (messages: Message[]) => void
 }
 
-export function useChat(): ChatState {
+export function useChat(accountId: string | null): ChatState {
   const [messages, setMessages] = useState<Message[]>([])
   const [isSending, setIsSending] = useState(false)
 
@@ -31,6 +31,7 @@ export function useChat(): ChatState {
           message: content,
           conversation_history: messages,
           model,
+          account_id: accountId ?? undefined,
         })
 
         const wallTime = (Date.now() - wallStart) / 1000
@@ -47,17 +48,22 @@ export function useChat(): ChatState {
 
         setMessages([...nextMessages, assistantMessage])
       } catch (err) {
-        setMessages(messages)
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+        const assistantError: Message = {
+          role: 'assistant',
+          content: `I couldn't complete that request. ${errorMessage}`,
+        }
+        setMessages([...nextMessages, assistantError])
         notifications.show({
           title: 'Failed to send message',
-          message: err instanceof Error ? err.message : 'Unknown error',
+          message: errorMessage,
           color: 'red',
         })
       } finally {
         setIsSending(false)
       }
     },
-    [messages, isSending],
+    [messages, isSending, accountId],
   )
 
   const clearMessages = useCallback(() => setMessages([]), [])
