@@ -145,13 +145,16 @@ class MCPBridge:
             if not self.process or self.process.poll() is not None:
                 raise Exception("MCP server is not running")
 
-            # Send request
             request_str = json.dumps(request) + "\n"
-            self.process.stdin.write(request_str)
-            self.process.stdin.flush()
+
+            def _send_and_receive() -> str:
+                # Blocking stdio operations must not run on the event loop thread.
+                self.process.stdin.write(request_str)
+                self.process.stdin.flush()
+                return self.process.stdout.readline()
 
             # Read response
-            response_str = self.process.stdout.readline()
+            response_str = await asyncio.to_thread(_send_and_receive)
             if not response_str:
                 raise Exception("MCP server closed connection")
 
@@ -555,7 +558,8 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
         messages.append({"role": "user", "content": request.message})
 
         # Call Claude with tools (use model from request)
-        response = anthropic_client.messages.create(
+        response = await asyncio.to_thread(
+            anthropic_client.messages.create,
             model=request.model,
             max_tokens=4096,
             system=(
@@ -568,7 +572,7 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
                 "and note any friction points you encountered."
             ),
             tools=claude_tools,
-            messages=messages
+            messages=messages,
         )
         usage_totals = _empty_usage_totals()
         if getattr(response, "usage", None):
@@ -648,11 +652,12 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
 
-            response = anthropic_client.messages.create(
+            response = await asyncio.to_thread(
+                anthropic_client.messages.create,
                 model=request.model,
                 max_tokens=4096,
                 tools=claude_tools,
-                messages=messages
+                messages=messages,
             )
             if getattr(response, "usage", None):
                 _accumulate_usage(usage_totals, response.usage)
