@@ -686,4 +686,5 @@ class TestToolDescriptions:
         internal_tool_names = {t.name for t in internal_tools}
         assert "get_account_context" in internal_tool_names
         assert "submit_feedback" in internal_tool_names
-        assert len(internal_tools) == 10
+        assert "get_waste_recommendations" in internal_tool_names
+        assert len(internal_tools) == 11

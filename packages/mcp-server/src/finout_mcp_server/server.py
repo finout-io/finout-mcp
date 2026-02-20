@@ -53,18 +53,14 @@ PUBLIC_TOOLS: set[str] = {
     "get_waste_recommendations",
 }
 
-VECTIQOR_INTERNAL_TOOLS: set[str] = {
-    "query_costs",
-    "compare_costs",
-    "list_available_filters",
-    "search_filters",
-    "get_filter_values",
-    "get_usage_unit_types",
+VECTIQOR_INTERNAL_EXTRA_TOOLS: set[str] = {
     "debug_filters",
     "discover_context",
     "get_account_context",
     "submit_feedback",
 }
+
+VECTIQOR_INTERNAL_TOOLS: set[str] = PUBLIC_TOOLS | VECTIQOR_INTERNAL_EXTRA_TOOLS
 
 INTERNAL_API_TOOLS: set[str] = {
     "query_costs",

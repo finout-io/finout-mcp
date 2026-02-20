@@ -78,14 +78,18 @@ async def test_list_tools_public_hides_internal_only_tools(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_tools_internal_hides_public_key_secret_tools(monkeypatch):
+async def test_list_tools_internal_is_superset_of_public(monkeypatch):
+    monkeypatch.setattr(server_module, "runtime_mode", server_module.MCPMode.PUBLIC.value)
+    public_tools = await server_module.list_tools()
+    public_names = {tool.name for tool in public_tools}
+
     monkeypatch.setattr(
         server_module, "runtime_mode", server_module.MCPMode.VECTIQOR_INTERNAL.value
     )
     tools = await server_module.list_tools()
     names = {tool.name for tool in tools}
 
-    assert "get_waste_recommendations" not in names
+    assert public_names.issubset(names)
     assert "get_anomalies" not in names
     assert "discover_context" in names
     assert "get_account_context" in names
@@ -102,15 +106,21 @@ async def test_call_tool_blocks_internal_only_tool_in_public_mode(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_call_tool_blocks_key_secret_tool_in_internal_mode(monkeypatch):
+async def test_call_tool_allows_key_secret_tool_in_internal_mode(monkeypatch):
     client = _DummyClient()
     monkeypatch.setattr(server_module, "finout_client", client)
     monkeypatch.setattr(
         server_module, "runtime_mode", server_module.MCPMode.VECTIQOR_INTERNAL.value
     )
 
+    # Bypass implementation details and validate runtime gating only.
+    async def _fake_waste(_: dict) -> dict:
+        return {"ok": True}
+
+    monkeypatch.setattr(server_module, "get_waste_recommendations_impl", _fake_waste)
+
     response = await server_module.call_tool("get_waste_recommendations", {})
-    assert "Tool not available in this deployment mode" in response[0].text
+    assert "Tool not available in this deployment mode" not in response[0].text
 
 
 def test_public_entrypoint_is_fixed_public_mode(monkeypatch):
