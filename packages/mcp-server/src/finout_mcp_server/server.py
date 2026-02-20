@@ -50,9 +50,7 @@ PUBLIC_TOOLS: set[str] = {
     "search_filters",
     "get_filter_values",
     "get_usage_unit_types",
-    "get_anomalies",
     "get_waste_recommendations",
-    "submit_feedback",
 }
 
 VECTIQOR_INTERNAL_TOOLS: set[str] = {
@@ -82,7 +80,6 @@ INTERNAL_API_TOOLS: set[str] = {
 
 KEY_SECRET_TOOLS: set[str] = {
     "get_waste_recommendations",
-    "get_anomalies",
 }
 
 
@@ -1193,18 +1190,47 @@ async def get_waste_recommendations_impl(args: dict) -> dict:
     total_savings = 0
 
     for rec in recommendations[:50]:  # Limit to top 50
-        saving = rec.get("projected_savings") or rec.get("potential_savings", 0)
+        # CostGuard payloads vary by scan type; normalize defensively.
+        saving = (
+            rec.get("monthly_savings")
+            or rec.get("projected_savings")
+            or rec.get("potential_savings")
+            or 0
+        )
+        if not saving and rec.get("yearly_savings"):
+            saving = rec.get("yearly_savings", 0) / 12
         total_savings += saving
+
+        resource_metadata = rec.get("resource_metadata", {})
+        if not isinstance(resource_metadata, dict):
+            resource_metadata = {}
+
+        recommendation_text = (
+            rec.get("recommendation")
+            or rec.get("scan_name")
+            or rec.get("title")
+            or "Review this resource for optimization opportunity."
+        )
+        details = rec.get("details")
+        if not details and resource_metadata:
+            details = json.dumps(resource_metadata, ensure_ascii=False)
 
         formatted.append(
             {
-                "resource": rec.get("resource_name") or rec.get("resource_id", "Unknown"),
-                "service": rec.get("service", "Unknown"),
+                "resource": (
+                    rec.get("resource_name")
+                    or resource_metadata.get("resourceName")
+                    or resource_metadata.get("name")
+                    or rec.get("resource_id", "Unknown")
+                ),
+                "service": rec.get("service") or rec.get("cost_center", "Unknown"),
                 "type": rec.get("scan_type") or rec.get("recommendation_type", "Unknown"),
-                "current_monthly_cost": format_currency(rec.get("current_cost", 0)),
+                "current_monthly_cost": format_currency(
+                    rec.get("current_cost") or rec.get("resource_waste", 0)
+                ),
                 "potential_monthly_savings": format_currency(saving),
-                "recommendation": rec["recommendation"],
-                "details": rec.get("details", ""),
+                "recommendation": recommendation_text,
+                "details": details or "",
             }
         )
 
@@ -2059,9 +2085,7 @@ def main() -> None:
             "finout-mcp - Finout public MCP server\n\n"
             "Required env vars at runtime:\n"
             "  FINOUT_CLIENT_ID\n"
-            "  FINOUT_SECRET_KEY\n\n"
-            "Optional env vars:\n"
-            "  FINOUT_API_URL (default: https://app.finout.io)\n"
+            "  FINOUT_SECRET_KEY\n"
         )
         return
 

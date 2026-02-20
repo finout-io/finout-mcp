@@ -650,10 +650,6 @@ class TestToolDescriptions:
         assert "savings" in tool_map["get_waste_recommendations"].lower()
         assert "waste" in tool_map["get_waste_recommendations"].lower()
 
-        # get_anomalies should mention trigger words
-        assert "spike" in tool_map["get_anomalies"].lower()
-        assert "anomaly" in tool_map["get_anomalies"].lower()
-
         # list_available_filters should warn against casual use
         assert "ONLY" in tool_map["list_available_filters"]
 
@@ -681,8 +677,9 @@ class TestToolDescriptions:
         public_tools = await server_module.list_tools()
         public_tool_names = {t.name for t in public_tools}
         assert "get_account_context" not in public_tool_names
-        assert "submit_feedback" in public_tool_names
-        assert len(public_tools) == 9
+        assert "submit_feedback" not in public_tool_names
+        assert "get_anomalies" not in public_tool_names
+        assert len(public_tools) == 7
 
         server_module.runtime_mode = server_module.MCPMode.VECTIQOR_INTERNAL.value
         internal_tools = await server_module.list_tools()
