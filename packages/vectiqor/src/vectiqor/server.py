@@ -353,9 +353,6 @@ _account_cache: Optional[Dict[str, Any]] = None
 _account_cache_time: Optional[datetime] = None
 _account_cache_ttl = timedelta(hours=3)  # Cache for 3 hours
 
-# Last selected account persistence
-_last_account_file = package_root / ".last_account"
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage MCP server and database lifecycle"""
@@ -465,22 +462,6 @@ def _build_usage_summary(model: str, usage_totals: Dict[str, int]) -> Dict[str, 
         "estimated_cost_usd": _estimate_usage_cost_usd(model, usage_totals),
     }
 
-
-def save_last_account(account_id: str) -> None:
-    """Save the last selected account ID to file"""
-    try:
-        _last_account_file.write_text(account_id)
-    except Exception as e:
-        print(f"Warning: Could not save last account: {e}")
-
-def load_last_account() -> Optional[str]:
-    """Load the last selected account ID from file"""
-    try:
-        if _last_account_file.exists():
-            return _last_account_file.read_text().strip()
-    except Exception as e:
-        print(f"Warning: Could not load last account: {e}")
-    return None
 
 def convert_mcp_tools_to_claude_format(mcp_tools: List[Dict]) -> List[Dict]:
     """Convert MCP tool definitions to Claude API format"""

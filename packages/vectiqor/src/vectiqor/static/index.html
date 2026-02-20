@@ -1290,6 +1290,10 @@
             const message = input.value.trim();
 
             if (!message) return;
+            if (!currentAccountId) {
+                showError('Please select an account first.');
+                return;
+            }
 
             // Disable input
             input.disabled = true;
@@ -1641,27 +1645,27 @@
                         try {
                             await autoStartMCP(currentAccountId, accountName);
                         } catch (error) {
+                            currentAccountId = null;
+                            input.value = '';
                             input.placeholder = 'Session failed - select account';
                             console.error('Session initialization failed:', error);
                         }
                     } else {
-                        // No current account found, show first account or placeholder
-                        if (allAccounts.length > 0) {
-                            const firstAccount = allAccounts[0];
-                            const accountName = firstAccount.accountName || firstAccount.name || firstAccount.accountId;
-                            input.value = accountName;
-                            input.placeholder = 'Select account';
-                            currentAccountId = firstAccount.accountId;
+                        // No previous UI selection found - UI selects the first account.
+                        const firstAccount = allAccounts[0];
+                        const accountName =
+                            firstAccount.accountName || firstAccount.name || firstAccount.accountId;
+                        input.value = accountName;
+                        input.placeholder = 'Select account';
+                        currentAccountId = firstAccount.accountId;
 
-                            // Auto-start MCP with first account
-                            try {
-                                await autoStartMCP(currentAccountId, accountName);
-                            } catch (error) {
-                                input.placeholder = 'Session failed - select account';
-                                console.error('Session initialization failed:', error);
-                            }
-                        } else {
-                            input.placeholder = 'Select account';
+                        try {
+                            await autoStartMCP(currentAccountId, accountName);
+                        } catch (error) {
+                            currentAccountId = null;
+                            input.value = '';
+                            input.placeholder = 'Session failed - select account';
+                            console.error('Session initialization failed:', error);
                         }
                     }
 
