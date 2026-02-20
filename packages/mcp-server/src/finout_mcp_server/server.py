@@ -104,6 +104,7 @@ def _init_client_for_mode(mode: MCPMode) -> FinoutClient:
 
     return FinoutClient(
         internal_api_url=internal_api_url,
+        account_id=os.getenv("FINOUT_ACCOUNT_ID"),
         internal_auth_mode=InternalAuthMode.AUTHORIZED_HEADERS,
         allow_missing_credentials=True,
     )

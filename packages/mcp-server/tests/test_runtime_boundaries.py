@@ -140,3 +140,15 @@ def test_public_package_exposes_only_public_script():
 
     assert "finout-mcp" in scripts
     assert "vectiqor-mcp-internal" not in scripts
+
+
+def test_internal_mode_reads_finout_account_id_env(monkeypatch):
+    monkeypatch.setenv("FINOUT_ACCOUNT_ID", "11111111-1111-1111-1111-111111111111")
+
+    client = server_module._init_client_for_mode(server_module.MCPMode.VECTIQOR_INTERNAL)
+    try:
+        assert client.account_id == "11111111-1111-1111-1111-111111111111"
+    finally:
+        import asyncio
+
+        asyncio.run(client.close())
