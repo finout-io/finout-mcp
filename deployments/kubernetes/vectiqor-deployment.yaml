@@ -28,6 +28,9 @@ spec:
         - 0.0.0.0
         - --port
         - "80"
+        # Keep backend keepalive above ALB idle timeout to avoid connection reuse issues.
+        - --timeout-keep-alive
+        - "620"
         - --no-access-log
         ports:
         - containerPort: 80
@@ -59,6 +62,9 @@ spec:
             configMapKeyRef:
               name: vectiqor-config
               key: finout-internal-api-url
+        # 0/-1/none disables timeout. Keep > typical long tool+LLM round-trips.
+        - name: VECTIQOR_CHAT_TIMEOUT_SECONDS
+          value: "540"
         # Anthropic API Configuration
         - name: ANTHROPIC_API_KEY
           valueFrom:
@@ -78,13 +84,13 @@ spec:
             port: 80
           initialDelaySeconds: 30
           periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
+          timeoutSeconds: 10
+          failureThreshold: 6
         readinessProbe:
           httpGet:
             path: /api/health
             port: 80
-          initialDelaySeconds: 10
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 2
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 6

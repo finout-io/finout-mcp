@@ -20,6 +20,7 @@ export interface TokenUsage {
 export interface Message {
   role: MessageRole
   content: string
+  thinking_trace?: string
   tool_calls?: ToolCall[]
   usage?: TokenUsage
   model?: string

@@ -2,6 +2,7 @@ import { Box, Center, Group, Stack, Text } from '@mantine/core'
 import { ToolCallCard } from './ToolCallCard'
 import { ChartPanel } from './ChartPanel'
 import type { Message } from '../../types'
+import { formatReadableText } from '../../utils/textFormatting'
 
 function modelEmoji(model?: string): string {
   if (!model) return '🤖'
@@ -58,8 +59,48 @@ export function ChatMessage({ message }: Props) {
       >
         <Stack gap="xs">
           <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {message.content}
+            {formatReadableText(message.content)}
           </Text>
+
+          {!isUser && message.thinking_trace && message.thinking_trace.trim().length > 0 && (
+            <Box
+              component="details"
+              style={(theme) => ({
+                fontSize: theme.fontSizes.xs,
+                color: theme.colors.gray[4],
+                border: `1px solid ${theme.colors.dark[4]}`,
+                borderRadius: theme.radius.sm,
+                padding: `${theme.spacing.xs} ${theme.spacing.sm}`,
+              })}
+            >
+              <Box
+                component="summary"
+                style={{
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  fontWeight: 600,
+                  opacity: 0.9,
+                }}
+              >
+                Thinking
+              </Box>
+              <Box
+                component="pre"
+                style={(theme) => ({
+                  margin: `${theme.spacing.xs} 0 0`,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontSize: theme.fontSizes.xs,
+                  lineHeight: 1.35,
+                  color: theme.colors.gray[3],
+                  maxHeight: 260,
+                  overflowY: 'auto',
+                })}
+              >
+                {formatReadableText(message.thinking_trace)}
+              </Box>
+            </Box>
+          )}
 
           {!isUser && message.tool_calls?.map((tc, idx) => (
             <ChartPanel key={idx} output={tc.output} />

@@ -200,6 +200,8 @@ export function AppLayout() {
           <ChatArea
             messages={chat.messages}
             isSending={chat.isSending}
+            statusMessage={chat.statusMessage}
+            streamingText={chat.streamingText}
             onSuggestedQuestion={chat.sendMessage}
             model={model}
             sessionReady={session.isReady}

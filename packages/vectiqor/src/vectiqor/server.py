@@ -11,7 +11,7 @@ import secrets
 import shutil
 import sys
 from uuid import UUID
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable, Awaitable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -220,7 +220,29 @@ class SessionData:
 sessions: Dict[str, SessionData] = {}
 MAX_CONCURRENT_SESSIONS = 10
 SESSION_TIMEOUT = timedelta(minutes=30)
-CHAT_REQUEST_TIMEOUT_SECONDS = float(os.getenv("VECTIQOR_CHAT_TIMEOUT_SECONDS", "110"))
+def _read_timeout_seconds(env_var: str, default: float) -> Optional[float]:
+    raw = os.getenv(env_var)
+    if raw is None or raw.strip() == "":
+        return default
+
+    value = raw.strip().lower()
+    if value in {"0", "-1", "none", "off", "disabled", "infinite", "inf"}:
+        return None
+
+    try:
+        parsed = float(raw)
+    except ValueError:
+        print(f"Invalid {env_var}={raw!r}; falling back to {default}s")
+        return default
+
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+CHAT_REQUEST_TIMEOUT_SECONDS = _read_timeout_seconds("VECTIQOR_CHAT_TIMEOUT_SECONDS", 540.0)
+MAX_TOOL_OUTPUT_PREVIEW_CHARS = int(os.getenv("VECTIQOR_TOOL_OUTPUT_PREVIEW_CHARS", "12000"))
+MAX_TOTAL_TOOL_OUTPUT_CHARS = int(os.getenv("VECTIQOR_MAX_TOTAL_TOOL_OUTPUT_CHARS", "150000"))
 SESSION_COOKIE_NAME = "vectiqor_session_id"
 ACCOUNT_COOKIE_NAME = "vectiqor_account_id"
 
@@ -511,177 +533,403 @@ async def health():
         "max_sessions": MAX_CONCURRENT_SESSIONS
     }
 
-@app.post("/api/chat")
-async def chat(request: ChatRequest, http_request: Request, response: Response):
-    """
-    Handle chat requests with Claude API and MCP tools (session-based)
-    """
-    # Get session ID
-    session_id = get_or_create_session_id(http_request, response)
+def _chat_timeout_detail() -> str:
+    if CHAT_REQUEST_TIMEOUT_SECONDS is None:
+        return "Chat request timed out. Please retry with a narrower query."
+    return (
+        f"Chat request timed out after {int(CHAT_REQUEST_TIMEOUT_SECONDS)}s. "
+        "Please retry with a narrower query."
+    )
 
-    # Get/recover session MCP
+
+@asynccontextmanager
+async def _maybe_timeout(timeout_seconds: Optional[float]):
+    if timeout_seconds is None:
+        yield
+        return
+    async with asyncio.timeout(timeout_seconds):
+        yield
+
+
+async def _call_claude_messages_create(
+    *,
+    status_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    status_phase: Optional[str] = None,
+    status_message: Optional[str] = None,
+    token_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+    **kwargs: Any,
+):
+    loop = asyncio.get_running_loop()
+
+    def _create():
+        if not token_callback:
+            return anthropic_client.messages.create(**kwargs)
+
+        with anthropic_client.messages.stream(**kwargs) as stream:
+            for text_chunk in stream.text_stream:
+                if not text_chunk:
+                    continue
+                future = asyncio.run_coroutine_threadsafe(token_callback(text_chunk), loop)
+                try:
+                    future.result(timeout=5)
+                except Exception:
+                    # Don't fail the request if token emission to SSE was interrupted.
+                    pass
+            return stream.get_final_message()
+
+    task = asyncio.create_task(asyncio.to_thread(_create))
+    if not status_callback or not status_phase or not status_message:
+        return await task
+
+    started = datetime.now()
+    while True:
+        try:
+            # Keep the Claude call alive while emitting periodic status ticks.
+            # wait_for() cancels awaited tasks on timeout unless shielded.
+            return await asyncio.wait_for(asyncio.shield(task), timeout=8.0)
+        except asyncio.TimeoutError:
+            elapsed = int((datetime.now() - started).total_seconds())
+            await status_callback(
+                {
+                    "phase": status_phase,
+                    "message": f"{status_message} ({elapsed}s)",
+                }
+            )
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+
+
+def _compact_tool_calls_for_transport(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Keep transport payload bounded so SSE final event stays reliable even for large tool outputs.
+    """
+    remaining = max(0, MAX_TOTAL_TOOL_OUTPUT_CHARS)
+    compact: List[Dict[str, Any]] = []
+
+    for call in tool_calls:
+        out_value = call.get("output")
+        if isinstance(out_value, str):
+            out_text = out_value
+        else:
+            try:
+                out_text = json.dumps(out_value, ensure_ascii=False, default=str)
+            except Exception:
+                out_text = str(out_value)
+
+        if len(out_text) > MAX_TOOL_OUTPUT_PREVIEW_CHARS:
+            out_text = out_text[:MAX_TOOL_OUTPUT_PREVIEW_CHARS] + "\n... (truncated)"
+
+        if remaining <= 0:
+            compact.append(
+                {
+                    "name": "system",
+                    "input": {},
+                    "output": "Additional tool output omitted to keep response size bounded.",
+                    "truncated": True,
+                }
+            )
+            break
+
+        if len(out_text) > remaining:
+            out_text = out_text[:remaining] + "\n... (truncated)"
+
+        compact_call = dict(call)
+        compact_call["output"] = out_text
+        compact.append(compact_call)
+        remaining -= len(out_text)
+
+    return compact
+
+
+async def _run_chat_pipeline(
+    request: ChatRequest,
+    session_mcp: MCPBridge,
+    session_id: str,
+    status_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    token_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+) -> Dict[str, Any]:
+    """Execute chat + MCP tool loop, optionally emitting progress status events."""
+    if status_callback:
+        await status_callback({"phase": "thinking", "message": "Thinking..."})
+
+    # Get available tools from MCP
+    mcp_tools = await session_mcp.list_tools()
+    claude_tools = convert_mcp_tools_to_claude_format(mcp_tools)
+
+    # Build messages for Claude
+    messages = [{"role": msg.role, "content": msg.content} for msg in request.conversation_history]
+    messages.append({"role": "user", "content": request.message})
+
+    # Call Claude with tools (use model from request)
+    llm_response = await _call_claude_messages_create(
+        status_callback=status_callback,
+        status_phase="thinking",
+        status_message="Thinking...",
+        token_callback=token_callback,
+        model=request.model,
+        max_tokens=4096,
+        system=(
+            "You are a cloud cost analysis assistant for Finout. "
+            "You have access to tools to query costs, detect anomalies, find waste, and explore filters.\n\n"
+            "After every interaction where you used tools to answer the user's question, "
+            "you MUST call submit_feedback before finishing your response. "
+            "Rate your ability to answer (1=couldn't answer, 5=excellent), "
+            "pick the query_type that best matches what was asked, "
+            "and note any friction points you encountered."
+        ),
+        tools=claude_tools,
+        messages=messages,
+    )
+    usage_totals = _empty_usage_totals()
+    if getattr(llm_response, "usage", None):
+        _accumulate_usage(usage_totals, llm_response.usage)
+
+    # Track tool calls for display
+    all_tool_calls = []
+    total_tool_time = 0.0
+
+    # Handle tool calls
+    while llm_response.stop_reason == "tool_use":
+        tool_results = []
+        if status_callback:
+            await status_callback({"phase": "tool", "message": "Running tools..."})
+
+        for content_block in llm_response.content:
+            if content_block.type != "tool_use":
+                continue
+
+            tool_name = content_block.name
+            tool_input = content_block.input
+            tool_id = content_block.id
+            print(f"Calling tool: {tool_name} with {tool_input}")
+
+            if status_callback:
+                await status_callback(
+                    {
+                        "phase": "tool",
+                        "message": f"Running {tool_name}...",
+                        "tool_name": tool_name,
+                    }
+                )
+
+            try:
+                tool_start = datetime.now()
+                result = await session_mcp.call_tool(tool_name, tool_input)
+                tool_duration = (datetime.now() - tool_start).total_seconds()
+                total_tool_time += tool_duration
+
+                all_tool_calls.append({"name": tool_name, "input": tool_input, "output": result})
+
+                if tool_name == "submit_feedback":
+                    try:
+                        await db.save_feedback(
+                            account_id=session_mcp.current_account_id,
+                            rating=tool_input.get("rating"),
+                            query_type=tool_input.get("query_type"),
+                            tools_used=tool_input.get("tools_used"),
+                            friction_points=tool_input.get("friction_points"),
+                            suggestion=tool_input.get("suggestion"),
+                            session_id=session_id,
+                        )
+                    except Exception as e:
+                        print(f"Failed to save feedback to database: {e}")
+
+                tool_results.append(
+                    {"type": "tool_result", "tool_use_id": tool_id, "content": result}
+                )
+            except Exception as e:
+                error_msg = f"Error calling tool: {str(e)}"
+                all_tool_calls.append(
+                    {
+                        "name": tool_name,
+                        "input": tool_input,
+                        "output": error_msg,
+                        "error": True,
+                    }
+                )
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": error_msg,
+                        "is_error": True,
+                    }
+                )
+
+        messages.append({"role": "assistant", "content": llm_response.content})
+        messages.append({"role": "user", "content": tool_results})
+
+        if status_callback:
+            await status_callback({"phase": "analysis", "message": "Reviewing tool results..."})
+
+        llm_response = await _call_claude_messages_create(
+            status_callback=status_callback,
+            status_phase="analysis",
+            status_message="Reviewing tool results...",
+            token_callback=token_callback,
+            model=request.model,
+            max_tokens=4096,
+            tools=claude_tools,
+            messages=messages,
+        )
+        if getattr(llm_response, "usage", None):
+            _accumulate_usage(usage_totals, llm_response.usage)
+
+    response_text = ""
+    for content_block in llm_response.content:
+        if hasattr(content_block, "text"):
+            response_text += content_block.text
+
+    return {
+        "response": response_text,
+        "tool_calls": _compact_tool_calls_for_transport(all_tool_calls),
+        "tool_time": round(total_tool_time, 2),
+        "usage": _build_usage_summary(request.model, usage_totals),
+    }
+
+
+async def _get_validated_session_mcp(
+    request: ChatRequest, http_request: Request, session_id: str
+) -> MCPBridge:
     requested_account = request.account_id if _is_valid_account_id(request.account_id) else None
     account_hint = requested_account or get_account_hint(http_request)
     session_mcp = await ensure_session_mcp(session_id, account_hint)
 
     if not session_mcp:
-        raise HTTPException(
-            status_code=400,
-            detail="No account selected. Please select an account first."
-        )
+        raise HTTPException(status_code=400, detail="No account selected. Please select an account first.")
 
-    # Check if MCP process is running
     if not session_mcp.process or session_mcp.process.poll() is not None:
         raise HTTPException(
-            status_code=500,
-            detail="MCP server not running. Please try switching accounts again."
+            status_code=500, detail="MCP server not running. Please try switching accounts again."
         )
+
+    return session_mcp
+
+
+@app.post("/api/chat")
+async def chat(request: ChatRequest, http_request: Request, response: Response):
+    """Handle chat requests with Claude API and MCP tools (session-based)."""
+    session_id = get_or_create_session_id(http_request, response)
+    session_mcp = await _get_validated_session_mcp(request, http_request, session_id)
 
     try:
-        async with asyncio.timeout(CHAT_REQUEST_TIMEOUT_SECONDS):
-            # Get available tools from MCP
-            mcp_tools = await session_mcp.list_tools()
-            claude_tools = convert_mcp_tools_to_claude_format(mcp_tools)
-
-            # Build messages for Claude
-            messages = [
-                {"role": msg.role, "content": msg.content}
-                for msg in request.conversation_history
-            ]
-            messages.append({"role": "user", "content": request.message})
-
-            # Call Claude with tools (use model from request)
-            llm_response = await asyncio.to_thread(
-                anthropic_client.messages.create,
-                model=request.model,
-                max_tokens=4096,
-                system=(
-                    "You are a cloud cost analysis assistant for Finout. "
-                    "You have access to tools to query costs, detect anomalies, find waste, and explore filters.\n\n"
-                    "After every interaction where you used tools to answer the user's question, "
-                    "you MUST call submit_feedback before finishing your response. "
-                    "Rate your ability to answer (1=couldn't answer, 5=excellent), "
-                    "pick the query_type that best matches what was asked, "
-                    "and note any friction points you encountered."
-                ),
-                tools=claude_tools,
-                messages=messages,
-            )
-            usage_totals = _empty_usage_totals()
-            if getattr(llm_response, "usage", None):
-                _accumulate_usage(usage_totals, llm_response.usage)
-
-            # Track tool calls for display
-            all_tool_calls = []
-            total_tool_time = 0.0
-
-            # Handle tool calls
-            while llm_response.stop_reason == "tool_use":
-                # Extract tool calls
-                tool_results = []
-
-                for content_block in llm_response.content:
-                    if content_block.type == "tool_use":
-                        tool_name = content_block.name
-                        tool_input = content_block.input
-                        tool_id = content_block.id
-
-                        print(f"Calling tool: {tool_name} with {tool_input}")
-
-                        try:
-                            # Time tool execution
-                            tool_start = datetime.now()
-                            # Call MCP tool (session-isolated MCP instance)
-                            result = await session_mcp.call_tool(tool_name, tool_input)
-                            tool_duration = (datetime.now() - tool_start).total_seconds()
-                            total_tool_time += tool_duration
-
-                            # Track for display
-                            all_tool_calls.append({
-                                "name": tool_name,
-                                "input": tool_input,
-                                "output": result
-                            })
-
-                            # Save feedback to database if this is a feedback submission
-                            if tool_name == "submit_feedback":
-                                try:
-                                    await db.save_feedback(
-                                        account_id=session_mcp.current_account_id,
-                                        rating=tool_input.get("rating"),
-                                        query_type=tool_input.get("query_type"),
-                                        tools_used=tool_input.get("tools_used"),
-                                        friction_points=tool_input.get("friction_points"),
-                                        suggestion=tool_input.get("suggestion"),
-                                        session_id=session_id,
-                                    )
-                                except Exception as e:
-                                    print(f"Failed to save feedback to database: {e}")
-
-                            tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": tool_id,
-                                "content": result
-                            })
-                        except Exception as e:
-                            error_msg = f"Error calling tool: {str(e)}"
-
-                            # Track error for display
-                            all_tool_calls.append({
-                                "name": tool_name,
-                                "input": tool_input,
-                                "output": error_msg,
-                                "error": True
-                            })
-
-                            tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": tool_id,
-                                "content": error_msg,
-                                "is_error": True
-                            })
-
-                # Continue conversation with tool results
-                messages.append({"role": "assistant", "content": llm_response.content})
-                messages.append({"role": "user", "content": tool_results})
-
-                llm_response = await asyncio.to_thread(
-                    anthropic_client.messages.create,
-                    model=request.model,
-                    max_tokens=4096,
-                    tools=claude_tools,
-                    messages=messages,
-                )
-                if getattr(llm_response, "usage", None):
-                    _accumulate_usage(usage_totals, llm_response.usage)
-
-            # Extract final text response
-            response_text = ""
-            for content_block in llm_response.content:
-                if hasattr(content_block, "text"):
-                    response_text += content_block.text
-
-            return {
-                "response": response_text,
-                "tool_calls": all_tool_calls,  # Include tool call details
-                "tool_time": round(total_tool_time, 2),  # Time spent in tool execution
-                "usage": _build_usage_summary(request.model, usage_totals),
-                "conversation_history": messages + [{"role": "assistant", "content": response_text}]
-            }
-
+        async with _maybe_timeout(CHAT_REQUEST_TIMEOUT_SECONDS):
+            return await _run_chat_pipeline(request, session_mcp, session_id)
     except TimeoutError:
-        raise HTTPException(
-            status_code=504,
-            detail=(
-                f"Chat request timed out after {int(CHAT_REQUEST_TIMEOUT_SECONDS)}s. "
-                "Please retry with a narrower query."
-            ),
-        )
+        raise HTTPException(status_code=504, detail=_chat_timeout_detail())
     except Exception as e:
         print(f"Error in chat: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest, http_request: Request):
+    """Handle chat requests via SSE with progress events and heartbeats."""
+    session_id = http_request.cookies.get(SESSION_COOKIE_NAME) or secrets.token_urlsafe(32)
+    session_mcp = await _get_validated_session_mcp(request, http_request, session_id)
+
+    async def event_generator():
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        done = asyncio.Event()
+
+        async def send_event(event: str, payload: Dict[str, Any]) -> None:
+            await queue.put(f"event: {event}\ndata: {json.dumps(payload, default=str)}\n\n")
+
+        async def worker():
+            terminal_sent = False
+            try:
+                async with _maybe_timeout(CHAT_REQUEST_TIMEOUT_SECONDS):
+                    result = await _run_chat_pipeline(
+                        request,
+                        session_mcp,
+                        session_id,
+                        status_callback=lambda payload: send_event("status", payload),
+                        token_callback=lambda chunk: send_event("token", {"text": chunk}),
+                    )
+                try:
+                    payload_len = len(json.dumps(result, default=str))
+                    print(f"[chat-stream] final payload bytes={payload_len}")
+                except Exception:
+                    pass
+                await send_event("final", result)
+                terminal_sent = True
+            except TimeoutError:
+                await send_event("error", {"status": 504, "detail": _chat_timeout_detail()})
+                terminal_sent = True
+            except HTTPException as e:
+                await send_event(
+                    "error",
+                    {"status": e.status_code, "detail": str(e.detail)},
+                )
+                terminal_sent = True
+            except asyncio.CancelledError:
+                print("[chat-stream] worker cancelled")
+                raise
+            except Exception as e:
+                print(f"Error in chat stream: {e}")
+                await send_event("error", {"status": 500, "detail": str(e)})
+                terminal_sent = True
+            finally:
+                if not terminal_sent:
+                    try:
+                        await send_event(
+                            "error",
+                            {
+                                "status": 500,
+                                "detail": "Stream ended unexpectedly before completion.",
+                            },
+                        )
+                    except Exception:
+                        pass
+                done.set()
+
+        async def heartbeat():
+            while not done.is_set():
+                await asyncio.sleep(10)
+                # Use a proper SSE event (not comment-only) to avoid intermediary buffering/idle drops.
+                await send_event("ping", {"ts": datetime.utcnow().isoformat()})
+
+        worker_task = asyncio.create_task(worker())
+        heartbeat_task = asyncio.create_task(heartbeat())
+
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    yield item
+                except asyncio.TimeoutError:
+                    # Drain any late-arriving items after worker completion before closing stream.
+                    if done.is_set():
+                        while not queue.empty():
+                            yield queue.get_nowait()
+                        if queue.empty():
+                            break
+                    continue
+        finally:
+            for task in (heartbeat_task, worker_task):
+                task.cancel()
+            await asyncio.gather(heartbeat_task, worker_task, return_exceptions=True)
+
+    stream_response = StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+    stream_response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session_id,
+        max_age=SESSION_TIMEOUT.total_seconds(),
+        httponly=True,
+        samesite="lax",
+    )
+    return stream_response
 
 @app.get("/api/tools")
 async def list_tools(http_request: Request, response: Response):
