@@ -51,6 +51,8 @@ PUBLIC_TOOLS: set[str] = {
     "get_filter_values",
     "get_usage_unit_types",
     "get_waste_recommendations",
+    "get_anomalies",
+    "get_financial_plans",
 }
 
 VECTIQOR_INTERNAL_EXTRA_TOOLS: set[str] = {
@@ -72,6 +74,8 @@ INTERNAL_API_TOOLS: set[str] = {
     "debug_filters",
     "discover_context",
     "get_account_context",
+    "get_anomalies",
+    "get_financial_plans",
 }
 
 KEY_SECRET_TOOLS: set[str] = {
@@ -462,6 +466,36 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="get_financial_plans",
+            description=(
+                "Get financial plans (budgets and forecasts) for the account.\n\n"
+                "WHEN TO USE: When the user asks about 'budget', 'financial plan', 'forecast', "
+                "'planned spend', 'budget vs actual', or 'are we on track'.\n\n"
+                "Each plan has line items (one per dimension value) with monthly budget and "
+                "optional forecast amounts.\n\n"
+                "PRESENTING RESULTS: Show the plan name, period, total budget, and top line items "
+                "sorted by budget. If forecast is available, compare budget vs forecast."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Optional: Filter plans by name (partial, case-insensitive)",
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": (
+                            "Month to show budgets for in 'YYYY-M' format (no zero-padding). "
+                            "Examples: '2026-2' for Feb 2026, '2025-12' for Dec 2025. "
+                            "Defaults to current month."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
             name="get_waste_recommendations",
             description=(
                 "Get CostGuard waste detection and optimization recommendations.\n\n"
@@ -713,8 +747,12 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Submit feedback about your experience answering the user's question. "
                 "Rate how well you were able to answer and note any friction points.\n\n"
-                "WHEN TO CALL: After every completed interaction where you queried data.\n"
-                "DO NOT call for simple questions that didn't need tools."
+                "WHEN TO CALL: Call this as your final tool call alongside wrapping up the "
+                "interaction — not as a standalone response. Always pair it with your text "
+                "answer; never let it be the only thing you do.\n\n"
+                "WHAT TO NOTE: anything that was harder than expected, any API errors, "
+                "filters that were missing or ambiguous, or things that worked especially well. "
+                "Include a concrete suggestion when relevant."
             ),
             inputSchema={
                 "type": "object",
@@ -852,6 +890,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await compare_costs_impl(arguments)
         elif name == "get_anomalies":
             result = await get_anomalies_impl(arguments)
+        elif name == "get_financial_plans":
+            result = await get_financial_plans_impl(arguments)
         elif name == "get_waste_recommendations":
             result = await get_waste_recommendations_impl(arguments)
         elif name == "list_available_filters":
@@ -1135,29 +1175,29 @@ async def get_anomalies_impl(args: dict) -> dict:
     time_period = args.get("time_period", "last_7_days")
     severity = args.get("severity")
 
-    try:
-        anomalies = await finout_client.get_anomalies(time_period=time_period, severity=severity)
-    except NotImplementedError as e:
-        return {
-            "error": "Anomalies API not yet available",
-            "message": str(e),
-            "anomalies": [],
-            "anomaly_count": 0,
-            "note": "Contact Finout support for anomaly detection API access",
-        }
+    anomalies = await finout_client.get_anomalies(time_period=time_period, severity=severity)
 
-    # Format for readability
+    total_impact = sum(a.get("cost_impact", 0) for a in anomalies)
+
     formatted_anomalies = []
     for anomaly in anomalies:
+        raw_date = anomaly.get("date")
+        try:
+            ts = int(raw_date) / 1000 if raw_date is not None else 0
+        except (TypeError, ValueError):
+            ts = 0
+        date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else "Unknown"
+        percent_over_expected = float(anomaly.get("percent_over_expected", 0) or 0)
         formatted_anomalies.append(
             {
-                "date": anomaly.get("date"),
-                "service": anomaly.get("service"),
+                "date": date_str,
+                "alert_name": anomaly.get("alert_name"),
+                "dimension": f"{anomaly.get('dimension_type', '')}: {anomaly.get('dimension_value', '')}",
                 "severity": anomaly.get("severity"),
-                "cost_impact": format_currency(anomaly.get("costImpact", 0)),
-                "expected_cost": format_currency(anomaly.get("expectedCost", 0)),
-                "actual_cost": format_currency(anomaly.get("actualCost", 0)),
-                "description": anomaly.get("description"),
+                "cost_impact": format_currency(anomaly.get("cost_impact", 0)),
+                "expected_cost": format_currency(anomaly.get("expected_cost", 0)),
+                "actual_cost": format_currency(anomaly.get("actual_cost", 0)),
+                "percent_over_expected": f"{percent_over_expected:+.1f}%",
             }
         )
 
@@ -1166,7 +1206,58 @@ async def get_anomalies_impl(args: dict) -> dict:
         "severity_filter": severity,
         "anomaly_count": len(formatted_anomalies),
         "anomalies": formatted_anomalies,
-        "total_impact": format_currency(sum(a.get("costImpact", 0) for a in anomalies)),
+        "total_impact": format_currency(total_impact),
+        "_presentation_hint": (
+            "Present anomalies sorted by cost impact. "
+            "Group by date if there are many. "
+            "Highlight the largest surprises with their percent over expected."
+        ),
+    }
+
+
+async def get_financial_plans_impl(args: dict) -> dict:
+    """Implementation of get_financial_plans tool"""
+    assert finout_client is not None
+
+    name = args.get("name")
+    period = args.get("period")
+
+    plans = await finout_client.get_financial_plans(name=name, period=period)
+
+    formatted = []
+    for plan in plans:
+        items = plan.get("top_line_items", [])
+        formatted_items = [
+            {
+                "key": item["key"],
+                "budget": format_currency(item["budget"]),
+                "forecast": format_currency(item["forecast"])
+                if item.get("forecast") is not None
+                else None,
+            }
+            for item in items
+        ]
+
+        entry: dict[str, Any] = {
+            "name": plan["name"],
+            "period": plan["period"],
+            "cost_type": plan["cost_type"],
+            "total_budget": format_currency(plan["total_budget"]),
+            "active_line_items": plan["active_line_item_count"],
+            "top_line_items": formatted_items,
+        }
+        if plan.get("total_forecast") is not None:
+            entry["total_forecast"] = format_currency(plan["total_forecast"])
+
+        formatted.append(entry)
+
+    return {
+        "plan_count": len(formatted),
+        "plans": formatted,
+        "_presentation_hint": (
+            "Show plan name, period, total budget and top line items. "
+            "If forecast is present, compare budget vs forecast."
+        ),
     }
 
 

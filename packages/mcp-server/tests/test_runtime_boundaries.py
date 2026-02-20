@@ -90,7 +90,7 @@ async def test_list_tools_internal_is_superset_of_public(monkeypatch):
     names = {tool.name for tool in tools}
 
     assert public_names.issubset(names)
-    assert "get_anomalies" not in names
+    assert "get_anomalies" in names
     assert "discover_context" in names
     assert "get_account_context" in names
 

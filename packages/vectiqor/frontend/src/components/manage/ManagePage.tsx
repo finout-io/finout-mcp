@@ -9,6 +9,7 @@ import {
   Group,
   Loader,
   Popover,
+  Rating,
   ScrollArea,
   Select,
   SimpleGrid,
@@ -166,9 +167,6 @@ function ConversationsTab() {
 
 // ─── Feedback tab ─────────────────────────────────────────────────────────────
 
-const STARS = ['', '⭐', '⭐⭐', '⭐⭐⭐', '⭐⭐⭐⭐', '⭐⭐⭐⭐⭐']
-const RATING_COLORS = ['', 'red', 'red', 'yellow', 'teal', 'teal'] as const
-
 function FeedbackTab() {
   const [accountFilter, setAccountFilter] = useState<string | null>(null)
 
@@ -232,7 +230,7 @@ function FeedbackTab() {
         <Table striped highlightOnHover withTableBorder>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>Rating</Table.Th>
+              <Table.Th w={170}>Rating</Table.Th>
               <Table.Th>Account</Table.Th>
               <Table.Th>Query type</Table.Th>
               <Table.Th>Tools used</Table.Th>
@@ -245,9 +243,10 @@ function FeedbackTab() {
             {filtered.map((f) => (
               <Table.Tr key={f.id}>
                 <Table.Td>
-                  <Badge color={RATING_COLORS[f.rating] ?? 'gray'} variant="light">
-                    {STARS[f.rating]}
-                  </Badge>
+                  <Group gap={8} wrap="nowrap">
+                    <Rating value={Math.max(0, Math.min(5, f.rating))} readOnly count={5} />
+                    <Text size="xs" c="dimmed">{f.rating}/5</Text>
+                  </Group>
                 </Table.Td>
                 <Table.Td>
                   <Text size="xs">{f.account_id}</Text>

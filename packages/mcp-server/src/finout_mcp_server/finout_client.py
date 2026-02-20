@@ -268,26 +268,170 @@ class FinoutClient:
         self, time_period: str = "last_7_days", severity: str | None = None
     ) -> list[dict[str, Any]]:
         """
-        Fetch detected cost anomalies.
+        Fetch detected cost anomalies from alert executions.
 
         Args:
             time_period: Time period to check for anomalies
-            severity: Filter by severity (e.g., 'high', 'medium', 'low')
+            severity: Optional filter by severity ('high', 'medium', 'low')
+                      Computed from percent over expected:
+                      high >= 50%, medium >= 20%, low < 20%
 
         Returns:
-            List of anomaly objects
-
-        Note: Anomalies API endpoint not yet documented in Finout API docs.
-              This is a placeholder implementation.
+            List of anomaly objects sorted by cost impact descending
         """
-        # TODO: Find the correct Finout anomalies API endpoint
-        # Searched docs.finout.io but no API endpoint documented
-        # Anomalies exist in UI but no programmatic access documented yet
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured.")
 
-        raise NotImplementedError(
-            "Anomalies API endpoint not yet available in Finout API documentation. "
-            "Please contact Finout support for anomaly detection API access."
+        headers = self._get_internal_headers()
+
+        response = await self.internal_client.get(
+            "/alerts-service/alert-execution",
+            headers=headers,
         )
+        response.raise_for_status()
+
+        all_executions = response.json()
+        if not isinstance(all_executions, list):
+            return []
+
+        # Filter by time period (API doesn't support server-side date filtering)
+        start_ts, end_ts = self._parse_time_period(time_period)
+        start_ms = start_ts * 1000
+        end_ms = end_ts * 1000
+
+        result = []
+        for ex in all_executions:
+            raw_ex_date = ex.get("date")
+            try:
+                ex_date = int(raw_ex_date)
+            except (TypeError, ValueError):
+                continue
+
+            if not (start_ms <= ex_date <= end_ms):
+                continue
+
+            data = ex.get("data", {})
+            expected = data.get("expectedCost", 0)
+            actual = data.get("actualCost", 0)
+            impact = actual - expected
+            pct_over = ((impact / expected) * 100) if expected > 0 else 0
+
+            if pct_over >= 50:
+                computed_severity = "high"
+            elif pct_over >= 20:
+                computed_severity = "medium"
+            else:
+                computed_severity = "low"
+
+            if severity and computed_severity != severity:
+                continue
+
+            query = data.get("query", {})
+            group_by = query.get("groupBy", {})
+
+            result.append(
+                {
+                    "id": ex.get("id"),
+                    "alert_name": ex.get("name"),
+                    "dimension_type": group_by.get("path", ""),
+                    "dimension_value": data.get("key", ""),
+                    "expected_cost": expected,
+                    "actual_cost": actual,
+                    "cost_impact": impact,
+                    "percent_over_expected": round(pct_over, 1),
+                    "severity": computed_severity,
+                    "date": ex_date,
+                    "threshold": data.get("threshold", {}),
+                }
+            )
+
+        result.sort(key=lambda x: x["cost_impact"], reverse=True)
+        return result
+
+    async def get_financial_plans(
+        self,
+        name: str | None = None,
+        period: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch financial plans (budgets) for the account.
+
+        Args:
+            name: Optional partial name filter (case-insensitive)
+            period: Month in "YYYY-M" format (default: current month).
+                    No zero-padding on month (e.g., "2026-2" not "2026-02").
+
+        Returns:
+            List of financial plan summaries with budget/forecast per line item
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured.")
+
+        headers = self._get_internal_headers()
+        # Internal/VECTIQOR mode requires this explicit permission header.
+        # In public key/secret mode, equivalent auth context is applied upstream.
+        if self.internal_auth_mode == InternalAuthMode.AUTHORIZED_HEADERS:
+            headers["authorized-user-permissions"] = "fin.financial-plans.view.financial-plans"
+
+        response = await self.internal_client.get(
+            "/budgets-service/financial-plan",
+            headers=headers,
+        )
+        response.raise_for_status()
+
+        all_plans = response.json()
+        if not isinstance(all_plans, list):
+            return []
+
+        if not period:
+            now = datetime.now()
+            period = f"{now.year}-{now.month}"
+
+        result = []
+        for plan in all_plans:
+            plan_name = plan.get("name", "")
+            if name and name.lower() not in plan_name.lower():
+                continue
+
+            line_items = plan.get("lineItems", [])
+            period_items = []
+            total_budget = 0.0
+            total_forecast = 0.0
+            has_forecast = False
+
+            for li in line_items:
+                if li.get("isDisabled"):
+                    continue
+                key = li.get("key", [])
+                key_str = ", ".join(key) if isinstance(key, list) else str(key)
+                period_data = li.get("values", {}).get(period, {})
+                budget = period_data.get("budget") or 0
+                forecast = period_data.get("forecast")
+                total_budget += budget
+                if forecast is not None:
+                    total_forecast += forecast
+                    has_forecast = True
+                if budget or forecast is not None:
+                    period_items.append({"key": key_str, "budget": budget, "forecast": forecast})
+
+            period_items.sort(key=lambda x: x["budget"] or 0, reverse=True)
+
+            result.append(
+                {
+                    "id": plan.get("id"),
+                    "name": plan_name,
+                    "cost_type": plan.get("costType"),
+                    "start_month": plan.get("startMonth"),
+                    "years": plan.get("years"),
+                    "period": period,
+                    "total_budget": total_budget,
+                    "total_forecast": total_forecast if has_forecast else None,
+                    "active_line_item_count": len(period_items),
+                    "top_line_items": period_items[:20],
+                }
+            )
+
+        return result
 
     async def get_costguard_scans(self) -> list[dict[str, Any]]:
         """
