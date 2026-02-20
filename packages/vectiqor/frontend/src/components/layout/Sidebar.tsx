@@ -33,7 +33,7 @@ export function Sidebar({
       <Group justify="center">
         <Image
           src="/vectiqor-logo.svg"
-          alt="Vertiqor"
+          alt="Vectiqor"
           h={52}
           fit="contain"
           fallbackSrc="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='52'%3E%3Crect width='100%25' height='100%25' fill='%2325272b'/%3E%3Ctext x='50%25' y='54%25' text-anchor='middle' fill='%23E6E8ED' font-family='Arial' font-weight='700' font-size='22'%3EVECTIQOR%3C/text%3E%3C/svg%3E"

@@ -477,11 +477,16 @@ def convert_mcp_tools_to_claude_format(mcp_tools: List[Dict]) -> List[Dict]:
 
     return claude_tools
 
+def _frontend_index_path() -> Path:
+    """Return React frontend index path from built dist output."""
+    return Path(__file__).resolve().parents[2] / "frontend" / "dist" / "index.html"
+
+
 @app.get("/share/{share_token}")
 @app.get("/manage")
 async def spa_routes(share_token: str = ""):
-    """Serve the SPA for client-side routes (React Router handles rendering)"""
-    index_path = Path(__file__).parent / "static" / "index.html"
+    """Serve the SPA for client-side routes (React Router handles rendering)."""
+    index_path = _frontend_index_path()
     if not index_path.exists():
         raise HTTPException(status_code=503, detail="Frontend not built")
     return HTMLResponse(content=index_path.read_text())
@@ -970,10 +975,10 @@ async def get_feedback_stats(account_id: Optional[str] = None):
         print(f"Error getting feedback stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Serve frontend SPA (must be last — API routes above take priority)
-_static_dir = Path(__file__).parent / "static"
-if _static_dir.exists():
-    app.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="frontend")
+# Serve frontend SPA assets (must be last — API routes above take priority)
+_frontend_dist_dir = _frontend_index_path().parent
+if (_frontend_dist_dir / "index.html").exists():
+    app.mount("/", StaticFiles(directory=str(_frontend_dist_dir), html=True), name="frontend")
 
 
 def main():

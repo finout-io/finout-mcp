@@ -1,5 +1,6 @@
 import { Box, Center, Group, Stack, Text } from '@mantine/core'
 import { ToolCallCard } from './ToolCallCard'
+import { ChartPanel } from './ChartPanel'
 import type { Message } from '../../types'
 
 function modelEmoji(model?: string): string {
@@ -59,6 +60,10 @@ export function ChatMessage({ message }: Props) {
           <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
             {message.content}
           </Text>
+
+          {!isUser && message.tool_calls?.map((tc, idx) => (
+            <ChartPanel key={idx} output={tc.output} />
+          ))}
 
           {message.tool_calls && message.tool_calls.length > 0 && (
             <Stack gap={4}>

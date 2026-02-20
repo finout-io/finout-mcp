@@ -29,12 +29,23 @@ export function AppLayout() {
   const [shareToken, setShareToken] = useState<string | undefined>()
   // Ref so the auto-save effect always reads the latest ID without becoming a dep
   const activeConversationIdRef = useRef<string | undefined>(undefined)
+  const lastAccountIdRef = useRef<string | null>(null)
 
   const accountId = session.selectedAccount?.accountId ?? null
   const { save, isSaving, loadConversation } = useConversations(accountId)
 
   // Keep ref in sync with state
   useEffect(() => { activeConversationIdRef.current = activeConversationId }, [activeConversationId])
+
+  // Switching accounts always starts a fresh conversation.
+  useEffect(() => {
+    if (lastAccountIdRef.current === accountId) return
+    lastAccountIdRef.current = accountId
+
+    chat.clearMessages()
+    setActiveConversationId(undefined)
+    setShareToken(undefined)
+  }, [accountId, chat])
 
   // Auto-save after every assistant response, updating the same conversation
   useEffect(() => {
