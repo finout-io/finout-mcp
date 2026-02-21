@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Accordion,
@@ -8,7 +8,6 @@ import {
   Center,
   Group,
   Loader,
-  Popover,
   Rating,
   ScrollArea,
   Select,
@@ -22,21 +21,69 @@ import {
 } from '@mantine/core'
 import { listConversations, getConversation } from '../../api/conversations'
 import { listFeedback, getFeedbackStats } from '../../api/feedback'
+import { getAccounts } from '../../api/accounts'
 import { ChatMessage } from '../chat/ChatMessage'
 import type { Conversation, ConversationSummary } from '../../types'
 
-function formatDate(value: unknown): string {
+function parseTimestamp(value: unknown): Date | null {
+  if (!value) return null
+
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? null : value
+  }
+  if (typeof value === 'number') {
+    const d = new Date(value)
+    return isNaN(d.getTime()) ? null : d
+  }
+  if (typeof value === 'object') {
+    const obj = value as { $date?: unknown; created_at?: unknown; createdAt?: unknown }
+    const nested = obj.$date ?? obj.created_at ?? obj.createdAt
+    if (nested !== undefined) return parseTimestamp(nested)
+  }
+
+  const raw = String(value).trim()
+  if (!raw) return null
+
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T')
+  const withTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(normalized)
+    ? normalized
+    : `${normalized}Z`
+
+  const parsed = new Date(withTimezone)
+  if (!isNaN(parsed.getTime())) return parsed
+
+  const fallback = new Date(raw)
+  return isNaN(fallback.getTime()) ? null : fallback
+}
+
+function formatDateTime(value: unknown): string {
+  const date = parseTimestamp(value)
+  if (date) return date.toLocaleString()
   if (!value) return '—'
-  const str = String(value)
-  // asyncpg returns naive datetime strings without timezone — append Z to treat as UTC
-  const iso = str.includes('+') || str.endsWith('Z') ? str : str + 'Z'
-  const d = new Date(iso)
-  return isNaN(d.getTime()) ? str : d.toLocaleDateString()
+  return String(value)
+}
+
+function accountLabel(accountId: string, accountNameById: Map<string, string>): string {
+  return accountNameById.get(accountId) ?? `Unknown (${accountId.slice(0, 8)}…)`
+}
+
+function sortByCreatedAtDesc<T extends { created_at: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const aTime = parseTimestamp(a.created_at)?.getTime() ?? 0
+    const bTime = parseTimestamp(b.created_at)?.getTime() ?? 0
+    return bTime - aTime
+  })
 }
 
 // ─── Conversations tab ────────────────────────────────────────────────────────
 
-function ConversationRow({ summary }: { summary: ConversationSummary }) {
+function ConversationRow({
+  summary,
+  accountNameById,
+}: {
+  summary: ConversationSummary
+  accountNameById: Map<string, string>
+}) {
   const [open, setOpen] = useState(false)
   const { data: full, isFetching } = useQuery<Conversation>({
     queryKey: ['conversation', summary.id],
@@ -57,14 +104,14 @@ function ConversationRow({ summary }: { summary: ConversationSummary }) {
               {summary.name}
             </Text>
             <Text size="xs" c="dimmed">
-              {summary.account_id}
+              {accountLabel(summary.account_id, accountNameById)}
             </Text>
           </Box>
           <Badge size="sm" variant="light" color="teal" style={{ flexShrink: 0 }}>
             {summary.model.includes('haiku') ? 'Haiku' : summary.model.includes('opus') ? 'Opus' : 'Sonnet'}
           </Badge>
-          <Text size="xs" c="dimmed" style={{ flexShrink: 0, width: 80, textAlign: 'right' }}>
-            {formatDate(summary.created_at)}
+          <Text size="xs" c="dimmed" style={{ flexShrink: 0, width: 170, textAlign: 'right' }}>
+            {formatDateTime(summary.created_at)}
           </Text>
         </Group>
       </Accordion.Control>
@@ -108,7 +155,7 @@ function ConversationRow({ summary }: { summary: ConversationSummary }) {
   )
 }
 
-function ConversationsTab() {
+function ConversationsTab({ accountNameById }: { accountNameById: Map<string, string> }) {
   const [search, setSearch] = useState('')
   const [accountFilter, setAccountFilter] = useState<string | null>(null)
 
@@ -118,13 +165,14 @@ function ConversationsTab() {
     staleTime: 30 * 1000,
   })
 
-  const accounts = [...new Set(all.map((c) => c.account_id))].sort()
+  const accounts = [...new Set(all.map((c) => c.account_id))]
+    .sort((a, b) => accountLabel(a, accountNameById).localeCompare(accountLabel(b, accountNameById)))
 
-  const filtered = all.filter((c) => {
+  const filtered = sortByCreatedAtDesc(all.filter((c) => {
     const matchSearch = !search || c.name.toLowerCase().includes(search.toLowerCase())
     const matchAccount = !accountFilter || c.account_id === accountFilter
     return matchSearch && matchAccount
-  })
+  }))
 
   return (
     <Stack gap="md">
@@ -138,7 +186,7 @@ function ConversationsTab() {
         />
         <Select
           placeholder="All accounts"
-          data={accounts.map((a) => ({ value: a, label: a }))}
+          data={accounts.map((a) => ({ value: a, label: accountLabel(a, accountNameById) }))}
           value={accountFilter}
           onChange={setAccountFilter}
           clearable
@@ -157,7 +205,7 @@ function ConversationsTab() {
       ) : (
         <Accordion variant="separated" chevronPosition="right">
           {filtered.map((c) => (
-            <ConversationRow key={c.id} summary={c} />
+            <ConversationRow key={c.id} summary={c} accountNameById={accountNameById} />
           ))}
         </Accordion>
       )}
@@ -167,8 +215,9 @@ function ConversationsTab() {
 
 // ─── Feedback tab ─────────────────────────────────────────────────────────────
 
-function FeedbackTab() {
+function FeedbackTab({ accountNameById }: { accountNameById: Map<string, string> }) {
   const [accountFilter, setAccountFilter] = useState<string | null>(null)
+  const [expandedFeedbackId, setExpandedFeedbackId] = useState<string | null>(null)
 
   const { data: feedback = [], isLoading } = useQuery({
     queryKey: ['manage-feedback'],
@@ -182,11 +231,12 @@ function FeedbackTab() {
     staleTime: 30 * 1000,
   })
 
-  const accounts = [...new Set(feedback.map((f) => f.account_id))].sort()
+  const accounts = [...new Set(feedback.map((f) => f.account_id))]
+    .sort((a, b) => accountLabel(a, accountNameById).localeCompare(accountLabel(b, accountNameById)))
 
-  const filtered = accountFilter
+  const filtered = sortByCreatedAtDesc(accountFilter
     ? feedback.filter((f) => f.account_id === accountFilter)
-    : feedback
+    : feedback)
 
   return (
     <Stack gap="md">
@@ -215,7 +265,7 @@ function FeedbackTab() {
       {/* Filter */}
       <Select
         placeholder="All accounts"
-        data={accounts.map((a) => ({ value: a, label: a }))}
+        data={accounts.map((a) => ({ value: a, label: accountLabel(a, accountNameById) }))}
         value={accountFilter}
         onChange={setAccountFilter}
         clearable
@@ -227,64 +277,106 @@ function FeedbackTab() {
       {isLoading ? (
         <Center py="xl"><Loader color="teal" /></Center>
       ) : (
-        <Table striped highlightOnHover withTableBorder>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th w={170}>Rating</Table.Th>
-              <Table.Th>Account</Table.Th>
-              <Table.Th>Query type</Table.Th>
-              <Table.Th>Tools used</Table.Th>
-              <Table.Th>Friction</Table.Th>
-              <Table.Th>Suggestion</Table.Th>
-              <Table.Th>Date</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {filtered.map((f) => (
-              <Table.Tr key={f.id}>
-                <Table.Td>
-                  <Group gap={8} wrap="nowrap">
-                    <Rating value={Math.max(0, Math.min(5, f.rating))} readOnly count={5} />
-                    <Text size="xs" c="dimmed">{f.rating}/5</Text>
-                  </Group>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs">{f.account_id}</Text>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs">{f.query_type ?? '—'}</Text>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs">{f.tools_used?.join(', ') ?? '—'}</Text>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs">{f.friction_points?.join(', ') ?? '—'}</Text>
-                </Table.Td>
-                <Table.Td style={{ maxWidth: 200 }}>
-                  {f.suggestion ? (
-                    <Popover width={320} position="left" withArrow shadow="md">
-                      <Popover.Target>
-                        <Text size="xs" truncate style={{ cursor: 'pointer', textDecoration: 'underline dotted' }}>
-                          {f.suggestion}
-                        </Text>
-                      </Popover.Target>
-                      <Popover.Dropdown>
-                        <ScrollArea mah={200}>
-                          <Text size="sm">{f.suggestion}</Text>
-                        </ScrollArea>
-                      </Popover.Dropdown>
-                    </Popover>
-                  ) : (
-                    <Text size="xs" c="dimmed">—</Text>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs">{formatDate(f.created_at)}</Text>
-                </Table.Td>
+        <ScrollArea>
+          <Table striped highlightOnHover withTableBorder miw={1100}>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th w={170}>Rating</Table.Th>
+                <Table.Th w={240}>Account</Table.Th>
+                <Table.Th w={120}>Query type</Table.Th>
+                <Table.Th w={240}>Tools used</Table.Th>
+                <Table.Th w={260}>Friction</Table.Th>
+                <Table.Th w={320}>Suggestion</Table.Th>
+                <Table.Th w={190}>Date</Table.Th>
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {filtered.map((f) => {
+                const isExpanded = expandedFeedbackId === f.id
+                const toolsText = f.tools_used?.join(', ') ?? ''
+                const frictionText = f.friction_points?.join(', ') ?? ''
+                const suggestionText = f.suggestion ?? ''
+                return (
+                  <Fragment key={f.id}>
+                    <Table.Tr
+                      onClick={() => setExpandedFeedbackId(isExpanded ? null : f.id)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <Table.Td>
+                        <Group gap={8} wrap="nowrap">
+                          <Rating value={Math.max(0, Math.min(5, f.rating))} readOnly count={5} />
+                          <Text size="xs" c="dimmed">{f.rating}/5</Text>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs">{accountLabel(f.account_id, accountNameById)}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs">{f.query_type ?? '—'}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" lineClamp={1}>{toolsText || '—'}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" lineClamp={2}>{frictionText || '—'}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" lineClamp={2}>{suggestionText || '—'}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Stack gap={2}>
+                          <Text size="xs">{formatDateTime(f.created_at)}</Text>
+                          <Text size="10px" c="dimmed">
+                            {isExpanded ? 'Click to collapse' : 'Click to expand'}
+                          </Text>
+                        </Stack>
+                      </Table.Td>
+                    </Table.Tr>
+
+                    {isExpanded && (
+                      <Table.Tr>
+                        <Table.Td colSpan={7}>
+                          <Stack gap="sm">
+                            <Group justify="space-between">
+                              <Text size="sm" fw={600}>Feedback details</Text>
+                              <Text size="xs" c="dimmed">{formatDateTime(f.created_at)}</Text>
+                            </Group>
+                            <Text size="xs">
+                              <Text span fw={600}>Account: </Text>
+                              {accountLabel(f.account_id, accountNameById)}
+                            </Text>
+                            <Text size="xs">
+                              <Text span fw={600}>Query type: </Text>
+                              {f.query_type ?? '—'}
+                            </Text>
+                            <Box>
+                              <Text size="xs" fw={600} mb={4}>Tools used</Text>
+                              <Text size="xs" style={{ whiteSpace: 'pre-wrap' }}>
+                                {toolsText || '—'}
+                              </Text>
+                            </Box>
+                            <Box>
+                              <Text size="xs" fw={600} mb={4}>Friction points</Text>
+                              <Text size="xs" style={{ whiteSpace: 'pre-wrap' }}>
+                                {frictionText || '—'}
+                              </Text>
+                            </Box>
+                            <Box>
+                              <Text size="xs" fw={600} mb={4}>Suggestion</Text>
+                              <Text size="xs" style={{ whiteSpace: 'pre-wrap' }}>
+                                {suggestionText || '—'}
+                              </Text>
+                            </Box>
+                          </Stack>
+                        </Table.Td>
+                      </Table.Tr>
+                    )}
+                  </Fragment>
+                )
+              })}
+            </Table.Tbody>
+          </Table>
+        </ScrollArea>
       )}
     </Stack>
   )
@@ -293,6 +385,13 @@ function FeedbackTab() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function ManagePage() {
+  const { data: accountsData } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: getAccounts,
+    staleTime: 3 * 60 * 60 * 1000,
+  })
+  const accountNameById = new Map((accountsData?.accounts ?? []).map((a) => [a.accountId, a.name]))
+
   return (
     <Box p="xl" style={{ maxWidth: 1200, margin: '0 auto' }}>
       <Stack gap="lg">
@@ -308,11 +407,11 @@ export function ManagePage() {
           </Tabs.List>
 
           <Tabs.Panel value="conversations" pt="md">
-            <ConversationsTab />
+            <ConversationsTab accountNameById={accountNameById} />
           </Tabs.Panel>
 
           <Tabs.Panel value="feedback" pt="md">
-            <FeedbackTab />
+            <FeedbackTab accountNameById={accountNameById} />
           </Tabs.Panel>
         </Tabs>
       </Stack>
