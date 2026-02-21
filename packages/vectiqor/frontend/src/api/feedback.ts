@@ -15,6 +15,8 @@ interface FeedbackItemRaw {
   suggestion?: string
   created_at?: string
   createdAt?: string
+  created?: string
+  date?: string
 }
 
 export interface FeedbackItem {
@@ -37,7 +39,7 @@ function normalizeFeedbackItem(raw: FeedbackItemRaw): FeedbackItem {
     tools_used: raw.tools_used ?? raw.toolsUsed ?? [],
     friction_points: raw.friction_points ?? raw.frictionPoints ?? [],
     suggestion: raw.suggestion,
-    created_at: raw.created_at ?? raw.createdAt ?? '',
+    created_at: raw.created_at ?? raw.createdAt ?? raw.created ?? raw.date ?? '',
   }
 }
 

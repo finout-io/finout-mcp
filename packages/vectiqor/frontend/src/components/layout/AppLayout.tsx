@@ -18,6 +18,7 @@ import { ChatArea } from '../chat/ChatArea'
 import { ChatInput } from '../chat/ChatInput'
 import type { ConversationSummary, ModelId } from '../../types'
 import { MODEL_OPTIONS } from '../../types'
+import { Link } from 'react-router-dom'
 
 export function AppLayout() {
   const session = useSession()
@@ -185,6 +186,14 @@ export function AppLayout() {
                 </Button>
               </Tooltip>
             )}
+            <Button
+              component={Link}
+              to="/manage"
+              size="xs"
+              variant="subtle"
+            >
+              Manage
+            </Button>
             <Button
               size="xs"
               variant="subtle"

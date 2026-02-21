@@ -322,7 +322,6 @@ class TestFinoutClientInternalAPI:
                         "type": "col",
                     }
                 ],
-                x_axis_group_by="daily",
             )
 
             # Verify API call
@@ -334,7 +333,7 @@ class TestFinoutClientInternalAPI:
             assert "date" in payload
             assert "filters" in payload
             assert "groupBys" in payload
-            assert payload["xAxisGroupBy"] == "daily"
+            assert "xAxisGroupBy" not in payload
 
             # Verify result
             assert result == sample_cost_response
@@ -423,13 +422,6 @@ class TestFinoutClientInternalAPI:
             await client.query_costs_with_filters(
                 time_period="last_30_days",
                 group_by="service",  # Should be a list
-            )
-
-        # Invalid x_axis_group_by
-        with pytest.raises(ValueError, match="x_axis_group_by must be"):
-            await client.query_costs_with_filters(
-                time_period="last_30_days",
-                x_axis_group_by="yearly",  # Invalid value
             )
 
         await client.close()

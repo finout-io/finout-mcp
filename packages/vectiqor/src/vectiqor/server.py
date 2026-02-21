@@ -672,6 +672,11 @@ async def _run_chat_pipeline(
         system=(
             "You are a cloud cost analysis assistant for Finout. "
             "You have access to tools to query costs, detect anomalies, find waste, and explore filters.\n\n"
+            "CHARTS: The UI automatically renders interactive charts from tool call data — "
+            "pie charts for single-dimension breakdowns, stacked bar charts for time-series. "
+            "Never generate ASCII charts, text charts, or raw-data tables. "
+            "After tool calls, give 2-4 sentences of key insights (total, biggest driver, notable trend). "
+            "The chart handles the visual detail.\n\n"
             "After every interaction where you used tools to answer the user's question, "
             "you MUST call submit_feedback before finishing your response. "
             "Rate your ability to answer (1=couldn't answer, 5=excellent), "

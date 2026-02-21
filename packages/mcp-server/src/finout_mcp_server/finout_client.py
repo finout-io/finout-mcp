@@ -1198,11 +1198,6 @@ class FinoutClient:
                         normalized_group_by.append(group)
                 payload["groupBys"] = normalized_group_by  # Note: plural "groupBys"
 
-            if x_axis_group_by:
-                if x_axis_group_by not in ["daily", "monthly"]:
-                    raise ValueError("x_axis_group_by must be 'daily' or 'monthly'")
-                payload["xAxisGroupBy"] = x_axis_group_by
-
             # Add usage configuration if provided (for usage queries instead of cost)
             if usage_configuration:
                 payload["usageConfiguration"] = usage_configuration

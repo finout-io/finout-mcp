@@ -117,6 +117,30 @@ class Database:
                 """
             )
 
+            # Backward-compatible migration for older DBs that may lack defaults
+            # or contain legacy null timestamps.
+            await conn.execute(
+                """
+                ALTER TABLE feedback
+                ALTER COLUMN created_at SET DEFAULT clock_timestamp();
+                """
+            )
+            await conn.execute(
+                """
+                UPDATE feedback AS f
+                SET created_at = COALESCE(c.updated_at, c.created_at, NOW())
+                FROM conversations AS c
+                WHERE f.created_at IS NULL AND f.conversation_id = c.id;
+                """
+            )
+            await conn.execute(
+                """
+                UPDATE feedback
+                SET created_at = clock_timestamp()
+                WHERE created_at IS NULL;
+                """
+            )
+
     async def save_conversation(
         self,
         name: str,
@@ -277,9 +301,9 @@ class Database:
                 """
                 INSERT INTO feedback (
                     id, conversation_id, account_id, session_id, rating, query_type,
-                    tools_used, friction_points, suggestion
+                    tools_used, friction_points, suggestion, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, clock_timestamp())
                 RETURNING id, account_id, rating, query_type, created_at
                 """,
                 uuid.uuid4(),
@@ -306,35 +330,49 @@ class Database:
         """List feedback with optional filtering"""
         async with self.pool.acquire() as conn:
             query = """
-                SELECT id, conversation_id, account_id, session_id, rating, query_type,
-                       tools_used, friction_points, suggestion, created_at
-                FROM feedback
+                SELECT
+                    f.id,
+                    f.conversation_id,
+                    f.account_id,
+                    f.session_id,
+                    f.rating,
+                    f.query_type,
+                    f.tools_used,
+                    f.friction_points,
+                    f.suggestion,
+                    COALESCE(f.created_at, c.updated_at, c.created_at) AS created_at
+                FROM feedback f
+                LEFT JOIN conversations c ON c.id = f.conversation_id
                 WHERE 1=1
             """
             params = []
             param_idx = 1
 
             if account_id:
-                query += f" AND account_id = ${param_idx}"
+                query += f" AND f.account_id = ${param_idx}"
                 params.append(account_id)
                 param_idx += 1
 
             if min_rating:
-                query += f" AND rating >= ${param_idx}"
+                query += f" AND f.rating >= ${param_idx}"
                 params.append(min_rating)
                 param_idx += 1
 
             if max_rating:
-                query += f" AND rating <= ${param_idx}"
+                query += f" AND f.rating <= ${param_idx}"
                 params.append(max_rating)
                 param_idx += 1
 
             if query_type:
-                query += f" AND query_type = ${param_idx}"
+                query += f" AND f.query_type = ${param_idx}"
                 params.append(query_type)
                 param_idx += 1
 
-            query += f" ORDER BY created_at DESC LIMIT ${param_idx}"
+            query += (
+                " ORDER BY COALESCE(f.created_at, c.updated_at, c.created_at) DESC NULLS LAST,"
+                " f.ctid DESC"
+                f" LIMIT ${param_idx}"
+            )
             params.append(limit)
 
             rows = await conn.fetch(query, *params)

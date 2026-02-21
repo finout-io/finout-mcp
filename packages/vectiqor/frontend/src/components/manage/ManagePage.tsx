@@ -17,6 +17,7 @@ import {
   Tabs,
   Text,
   TextInput,
+  Tooltip,
   Title,
 } from '@mantine/core'
 import { listConversations, getConversation } from '../../api/conversations'
@@ -44,7 +45,9 @@ function parseTimestamp(value: unknown): Date | null {
   const raw = String(value).trim()
   if (!raw) return null
 
-  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T')
+  const normalizedBase = raw.includes('T') ? raw : raw.replace(' ', 'T')
+  // JS Date parsing is inconsistent with >3 fractional second digits (microseconds).
+  const normalized = normalizedBase.replace(/(\.\d{3})\d+/, '$1')
   const withTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(normalized)
     ? normalized
     : `${normalized}Z`
@@ -69,8 +72,33 @@ function accountLabel(accountId: string, accountNameById: Map<string, string>): 
 
 function sortByCreatedAtDesc<T extends { created_at: string }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
-    const aTime = parseTimestamp(a.created_at)?.getTime() ?? 0
-    const bTime = parseTimestamp(b.created_at)?.getTime() ?? 0
+    const aParsed = parseTimestamp(a.created_at)
+    const bParsed = parseTimestamp(b.created_at)
+    const aTime = aParsed?.getTime() ?? Number.NEGATIVE_INFINITY
+    const bTime = bParsed?.getTime() ?? Number.NEGATIVE_INFINITY
+    if (aTime !== bTime) return bTime - aTime
+    // Fallback for non-parseable values: compare raw strings descending.
+    return String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
+  })
+}
+
+function renderCollapsedCell(text: string | undefined, lines: number = 2) {
+  if (!text) return <Text size="xs" c="dimmed">—</Text>
+  return (
+    <Tooltip label={text} multiline w={460} withArrow openDelay={250}>
+      <Text size="xs" lineClamp={lines} style={{ cursor: 'help' }}>
+        {text}
+      </Text>
+    </Tooltip>
+  )
+}
+
+function sortFeedbackByCreatedAtDesc<T extends { created_at: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const aParsed = parseTimestamp(a.created_at)
+    const bParsed = parseTimestamp(b.created_at)
+    const aTime = aParsed?.getTime() ?? Number.NEGATIVE_INFINITY
+    const bTime = bParsed?.getTime() ?? Number.NEGATIVE_INFINITY
     return bTime - aTime
   })
 }
@@ -222,19 +250,19 @@ function FeedbackTab({ accountNameById }: { accountNameById: Map<string, string>
   const { data: feedback = [], isLoading } = useQuery({
     queryKey: ['manage-feedback'],
     queryFn: () => listFeedback(),
-    staleTime: 30 * 1000,
+    staleTime: 0,
   })
 
   const { data: stats } = useQuery({
     queryKey: ['manage-feedback-stats', accountFilter],
     queryFn: () => getFeedbackStats(accountFilter ?? undefined),
-    staleTime: 30 * 1000,
+    staleTime: 0,
   })
 
   const accounts = [...new Set(feedback.map((f) => f.account_id))]
     .sort((a, b) => accountLabel(a, accountNameById).localeCompare(accountLabel(b, accountNameById)))
 
-  const filtered = sortByCreatedAtDesc(accountFilter
+  const filtered = sortFeedbackByCreatedAtDesc(accountFilter
     ? feedback.filter((f) => f.account_id === accountFilter)
     : feedback)
 
@@ -288,6 +316,7 @@ function FeedbackTab({ accountNameById }: { accountNameById: Map<string, string>
                 <Table.Th w={260}>Friction</Table.Th>
                 <Table.Th w={320}>Suggestion</Table.Th>
                 <Table.Th w={190}>Date</Table.Th>
+                <Table.Th w={120}>Details</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -315,27 +344,45 @@ function FeedbackTab({ accountNameById }: { accountNameById: Map<string, string>
                         <Text size="xs">{f.query_type ?? '—'}</Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="xs" lineClamp={1}>{toolsText || '—'}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="xs" lineClamp={2}>{frictionText || '—'}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="xs" lineClamp={2}>{suggestionText || '—'}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Stack gap={2}>
-                          <Text size="xs">{formatDateTime(f.created_at)}</Text>
-                          <Text size="10px" c="dimmed">
-                            {isExpanded ? 'Click to collapse' : 'Click to expand'}
+                        {isExpanded ? (
+                          <Text size="xs" style={{ whiteSpace: 'pre-wrap' }}>
+                            {toolsText || '—'}
                           </Text>
-                        </Stack>
+                        ) : (
+                          renderCollapsedCell(toolsText, 1)
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        {isExpanded ? (
+                          <Text size="xs" style={{ whiteSpace: 'pre-wrap' }}>
+                            {frictionText || '—'}
+                          </Text>
+                        ) : (
+                          renderCollapsedCell(frictionText, 2)
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        {isExpanded ? (
+                          <Text size="xs" style={{ whiteSpace: 'pre-wrap' }}>
+                            {suggestionText || '—'}
+                          </Text>
+                        ) : (
+                          renderCollapsedCell(suggestionText, 2)
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs">{formatDateTime(f.created_at)}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="dimmed">
+                          {isExpanded ? 'Collapse' : 'Expand'}
+                        </Text>
                       </Table.Td>
                     </Table.Tr>
 
                     {isExpanded && (
                       <Table.Tr>
-                        <Table.Td colSpan={7}>
+                        <Table.Td colSpan={8}>
                           <Stack gap="sm">
                             <Group justify="space-between">
                               <Text size="sm" fw={600}>Feedback details</Text>

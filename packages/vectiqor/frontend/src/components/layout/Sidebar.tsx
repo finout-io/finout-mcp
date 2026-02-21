@@ -1,5 +1,4 @@
-import { Box, Button, Divider, Group, Image, Stack, Text } from '@mantine/core'
-import { Link } from 'react-router-dom'
+import { Button, Divider, Group, Image, Stack, Text } from '@mantine/core'
 import { AccountSelector } from '../sidebar/AccountSelector'
 import { ModelSelector } from '../sidebar/ModelSelector'
 import { ConversationList } from '../sidebar/ConversationList'
@@ -66,27 +65,11 @@ export function Sidebar({
         Saved conversations
       </Text>
 
-      <Box style={{ flex: 1, minHeight: 0 }}>
-        <ConversationList
-          accountId={selectedAccountId}
-          activeId={activeConversationId}
-          onSelect={onSelectConversation}
-        />
-      </Box>
-
-      <Box mt="auto">
-        <Divider mb="xs" />
-        <Button
-          component={Link}
-          to="/manage"
-          variant="subtle"
-          color="gray"
-          size="xs"
-          fullWidth
-        >
-          Manage Conversations & Feedback
-        </Button>
-      </Box>
+      <ConversationList
+        accountId={selectedAccountId}
+        activeId={activeConversationId}
+        onSelect={onSelectConversation}
+      />
     </Stack>
   )
 }

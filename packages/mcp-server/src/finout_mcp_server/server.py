@@ -176,8 +176,13 @@ async def list_tools() -> list[Tool]:
                 "2) Copy the FULL filter object from search results (costCenter, key, path, type)\n"
                 "3) Preserve EXACT capitalization - cost centers are case-sensitive!\n"
                 "4) Add operator ('is' for equals) and value (single string), then query\n\n"
-                "PRESENTING RESULTS: Summarize with total cost, top 5 items, and percentage of total. "
-                "Use a table if more than 3 items. Mention the time period.\n\n"
+                "TIME-SERIES: The API always returns daily time-series data automatically. "
+                "Every result includes a nested 'data' array with daily cost points. "
+                "To get 'daily cost by service': use group_by with a service dimension — "
+                "each service row will have daily cost points. No extra parameter needed.\n\n"
+                "PRESENTING RESULTS: The UI auto-renders a chart from the result data. "
+                "Give 2-4 sentences of key insights: total, biggest driver, notable trend. "
+                "No table or raw data dump needed.\n\n"
                 "COST + USAGE IN ONE QUERY:\n"
                 "- Cost is ALWAYS returned in results\n"
                 "- To ALSO get usage: Provide usage_configuration\n"
@@ -286,11 +291,6 @@ async def list_tools() -> list[Tool]:
                             "Optional: Dimensions to group by. "
                             "Must include full metadata from search_filters!"
                         ),
-                    },
-                    "x_axis_group_by": {
-                        "type": "string",
-                        "enum": ["daily", "monthly"],
-                        "description": "Optional: Time-based grouping for x-axis",
                     },
                     "usage_configuration": {
                         "type": "object",
@@ -1181,7 +1181,6 @@ async def query_costs_impl(args: dict) -> dict:
     time_period = args.get("time_period", "last_30_days")
     filters = args.get("filters", [])
     group_by = args.get("group_by")
-    x_axis_group_by = args.get("x_axis_group_by")
     usage_configuration = args.get("usage_configuration")
 
     # Check if internal API is configured
@@ -1239,7 +1238,6 @@ async def query_costs_impl(args: dict) -> dict:
         time_period=time_period,
         filters=filters if filters else None,
         group_by=group_by,
-        x_axis_group_by=x_axis_group_by,
         usage_configuration=usage_configuration,
     )
 
@@ -1254,8 +1252,8 @@ async def query_costs_impl(args: dict) -> dict:
         "data": summarized,
         "query_timestamp": datetime.now().isoformat(),
         "_presentation_hint": (
-            "Summarize: total cost, top 5 items, percentage of total. "
-            "Use a table if more than 3 items."
+            "The UI renders a chart automatically. Give 2-4 sentences: "
+            "total cost, biggest driver, notable trend. No table needed."
         ),
     }
 
