@@ -1,8 +1,8 @@
 import { Box, Center, Group, Stack, Text } from '@mantine/core'
 import { ToolCallCard } from './ToolCallCard'
 import { ChartPanel } from './ChartPanel'
+import { MarkdownRenderer } from './MarkdownRenderer'
 import type { Message } from '../../types'
-import { formatReadableText } from '../../utils/textFormatting'
 
 function modelEmoji(model?: string): string {
   if (!model) return '🤖'
@@ -58,9 +58,13 @@ export function ChatMessage({ message }: Props) {
         })}
       >
         <Stack gap="xs">
-          <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {formatReadableText(message.content)}
-          </Text>
+          {isUser ? (
+            <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {message.content}
+            </Text>
+          ) : (
+            <MarkdownRenderer content={message.content} size="sm" />
+          )}
 
           {!isUser && message.thinking_trace && message.thinking_trace.trim().length > 0 && (
             <Box
@@ -97,7 +101,7 @@ export function ChatMessage({ message }: Props) {
                   overflowY: 'auto',
                 })}
               >
-                {formatReadableText(message.thinking_trace)}
+                {message.thinking_trace}
               </Box>
             </Box>
           )}

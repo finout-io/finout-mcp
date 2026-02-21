@@ -73,6 +73,7 @@ async def test_list_tools_public_hides_internal_only_tools(monkeypatch):
     assert "discover_context" not in names
     assert "get_account_context" not in names
     assert "debug_filters" not in names
+    assert "create_dashboard" not in names
     assert "query_costs" in names
     assert "get_waste_recommendations" in names
 
@@ -93,6 +94,7 @@ async def test_list_tools_internal_is_superset_of_public(monkeypatch):
     assert "get_anomalies" in names
     assert "discover_context" in names
     assert "get_account_context" in names
+    assert "create_dashboard" in names
 
 
 @pytest.mark.asyncio
@@ -102,6 +104,12 @@ async def test_call_tool_blocks_internal_only_tool_in_public_mode(monkeypatch):
     monkeypatch.setattr(server_module, "runtime_mode", server_module.MCPMode.PUBLIC.value)
 
     response = await server_module.call_tool("discover_context", {"query": "foo"})
+    assert "Tool not available in this deployment mode" in response[0].text
+
+    response = await server_module.call_tool(
+        "create_dashboard",
+        {"name": "x", "widgets": [{"type": "freeText", "name": "n", "text": "t"}]},
+    )
     assert "Tool not available in this deployment mode" in response[0].text
 
 

@@ -61,6 +61,7 @@ VECTIQOR_INTERNAL_EXTRA_TOOLS: set[str] = {
     "discover_context",
     "get_account_context",
     "submit_feedback",
+    "create_dashboard",
 }
 
 VECTIQOR_INTERNAL_TOOLS: set[str] = PUBLIC_TOOLS | VECTIQOR_INTERNAL_EXTRA_TOOLS
@@ -78,6 +79,7 @@ INTERNAL_API_TOOLS: set[str] = {
     "get_anomalies",
     "get_financial_plans",
     "create_view",
+    "create_dashboard",
 }
 
 KEY_SECRET_TOOLS: set[str] = {
@@ -501,6 +503,11 @@ async def list_tools() -> list[Tool]:
             name="create_view",
             description=(
                 "Save the current query as a reusable view in Finout.\n\n"
+                "CRITICAL: You MUST call this tool to save a view. "
+                "NEVER present a view as saved without actually calling this tool. "
+                "The view URL is assigned by the API — you cannot know it in advance.\n\n"
+                "USER CONSENT: Ask for confirmation before saving "
+                "(e.g., 'Do you want me to save this as a view?').\n\n"
                 "WHEN TO USE: After answering a query_costs question, proactively offer to save it. "
                 "'Would you like me to save this as a view?'\n\n"
                 "Inputs: name (required), filters, group_by, time_period, cost_type"
@@ -565,6 +572,129 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["name"],
+            },
+        ),
+        Tool(
+            name="create_dashboard",
+            description=(
+                "Create a multi-widget dashboard in Finout for complex multi-dimensional analysis.\n\n"
+                "CRITICAL: You MUST call this tool to create a dashboard. "
+                "NEVER describe or present a dashboard as created without actually calling this tool. "
+                "The dashboard URL and widget IDs are assigned by the API — you cannot know them in advance.\n\n"
+                "USER CONSENT: NEVER create dashboards automatically. "
+                "Create only if the user explicitly asks or confirms creation.\n\n"
+                "WHEN TO USE:\n"
+                "- Simple analysis (one dimension) → use create_view instead\n"
+                "  e.g., 'EC2 costs by region' → one view\n"
+                "- Complex analysis (multiple dimensions or trend) → use create_dashboard\n"
+                "  e.g., 'EC2 by region AND by instance type, with trend' → 3+ widgets\n\n"
+                "COMPOSE WIDGETS:\n"
+                "- One costUsage widget per breakdown dimension\n"
+                "- One costUsage widget with x_axis_group_by='daily' for trend over time\n"
+                "- One anomaly widget to show cost anomaly count (great for overview dashboards)\n"
+                "- One freeText widget for a brief plain-text label or summary\n\n"
+                "freeText WARNING: The widget renders PLAIN TEXT only — no markdown. "
+                "Do NOT use **, #, -, *, bullet points, or any markdown formatting in text widgets. "
+                "Keep freeText short (2-3 sentences max).\n\n"
+                "KEEP IT SIMPLE: Dashboards with 3-5 widgets using relative time periods "
+                "(e.g., last_30_days, last_7_days) are more useful and reusable than "
+                "many widgets with hardcoded date ranges. Prefer relative time periods unless "
+                "the user explicitly asked for a specific historical comparison.\n\n"
+                "NOTE: group_by per widget is a SINGLE object (one dimension per widget), "
+                "not an array. To show multiple dimensions, create multiple costUsage widgets.\n\n"
+                "If an existing relevant dashboard was found via discover_context, share that "
+                "URL instead of creating a new one."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Dashboard title",
+                    },
+                    "widgets": {
+                        "type": "array",
+                        "description": "List of widgets to create in this dashboard",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["costUsage", "anomaly", "freeText"],
+                                    "description": (
+                                        "Widget type: "
+                                        "costUsage (cost chart, requires filters/group_by/date), "
+                                        "anomaly (count of detected cost anomalies, just needs time_period), "
+                                        "freeText (plain-text annotation)"
+                                    ),
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "description": "Widget title",
+                                },
+                                "filters": {
+                                    "type": "array",
+                                    "description": "costUsage: filters (same format as query_costs)",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "costCenter": {"type": "string"},
+                                            "key": {"type": "string"},
+                                            "path": {"type": "string"},
+                                            "type": {"type": "string"},
+                                            "operator": {"type": "string", "default": "is"},
+                                            "value": {
+                                                "oneOf": [
+                                                    {"type": "string"},
+                                                    {"type": "array", "items": {"type": "string"}},
+                                                ]
+                                            },
+                                        },
+                                        "required": ["costCenter", "key", "path", "type", "value"],
+                                    },
+                                },
+                                "group_by": {
+                                    "type": "object",
+                                    "description": "costUsage: single group-by dimension (NOT array)",
+                                    "properties": {
+                                        "costCenter": {"type": "string"},
+                                        "key": {"type": "string"},
+                                        "path": {"type": "string"},
+                                        "type": {"type": "string"},
+                                    },
+                                    "required": ["costCenter", "key", "path", "type"],
+                                },
+                                "x_axis_group_by": {
+                                    "type": "string",
+                                    "enum": ["daily", "monthly"],
+                                    "description": "costUsage: time-based x-axis grouping for trend charts",
+                                },
+                                "time_period": {
+                                    "type": "string",
+                                    "description": "costUsage: time period (default: last_30_days)",
+                                    "default": "last_30_days",
+                                },
+                                "cost_type": {
+                                    "type": "string",
+                                    "enum": [
+                                        "netAmortizedCost",
+                                        "blendedCost",
+                                        "unblendedCost",
+                                        "amortizedCost",
+                                    ],
+                                    "description": "costUsage: cost metric type",
+                                    "default": "netAmortizedCost",
+                                },
+                                "text": {
+                                    "type": "string",
+                                    "description": "freeText: plain text content (NO markdown — the widget does not render it)",
+                                },
+                            },
+                            "required": ["type", "name"],
+                        },
+                    },
+                },
+                "required": ["name", "widgets"],
             },
         ),
         Tool(
@@ -766,7 +896,10 @@ async def list_tools() -> list[Tool]:
                 '- "production" → finds production views, shows env=prod filters\n'
                 '- "kafka" → finds Kafka-related dashboards and their configurations\n\n'
                 "DO NOT use for standard cost queries where you already know the filter. "
-                "Use search_filters instead."
+                "Use search_filters instead.\n\n"
+                "PRESENTING RESULTS: When dashboards are found, always share the URL so the user "
+                "can open them directly. If a relevant dashboard already exists, share that link "
+                "before offering to create a new one with create_dashboard."
             ),
             inputSchema={
                 "type": "object",
@@ -984,6 +1117,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await submit_feedback_impl(arguments)
         elif name == "create_view":
             result = await create_view_impl(arguments)
+        elif name == "create_dashboard":
+            result = await create_dashboard_impl(arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1353,11 +1488,40 @@ async def create_view_impl(args: dict) -> dict:
         time_period=time_period,
         cost_type=cost_type,
     )
+    view_id = view.get("id")
+    account_id = finout_client.account_id
+    url = f"https://app.finout.io/app/total-cost?view={view_id}"
+    if account_id:
+        url += f"&accountId={account_id}"
     return {
-        "id": view.get("id"),
+        "id": view_id,
         "name": view.get("name"),
-        "url": f"https://app.finout.io/views/{view.get('id')}",
-        "_presentation_hint": "Tell the user the view was saved and share the name.",
+        "url": url,
+        "_presentation_hint": "Tell the user the view was saved and share the link.",
+    }
+
+
+async def create_dashboard_impl(args: dict) -> dict:
+    """Implementation of create_dashboard tool"""
+    assert finout_client is not None
+    name = args["name"]
+    widgets = args["widgets"]
+
+    dashboard = await finout_client.create_dashboard(name=name, widgets=widgets)
+    dashboard_id = dashboard.get("id")
+    account_id = finout_client.account_id
+    url = f"https://app.finout.io/app/dashboards/{dashboard_id}"
+    if account_id:
+        url += f"?accountId={account_id}"
+    return {
+        "id": dashboard_id,
+        "name": dashboard.get("name"),
+        "url": url,
+        "widget_count": len(widgets),
+        "_presentation_hint": (
+            f"Tell the user the dashboard was created with {len(widgets)} widgets "
+            "and share the link."
+        ),
     }
 
 
@@ -1733,10 +1897,14 @@ async def discover_context_impl(args: dict) -> dict:
                     traceback.print_exc(file=sys.stderr)
                     pass
 
+            d_url = f"https://app.finout.io/app/dashboards/{dashboard['id']}"
+            if finout_client.account_id:
+                d_url += f"?accountId={finout_client.account_id}"
             dashboards_list.append(
                 {
                     "id": dashboard["id"],
                     "name": dashboard["name"],
+                    "url": d_url,
                     "widgets": widgets,
                     "defaultDate": dashboard.get("defaultDate"),
                 }

@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { Box, Center, Group, Text } from '@mantine/core'
 import { ChatMessage } from './ChatMessage'
+import { MarkdownRenderer } from './MarkdownRenderer'
 import { WelcomeScreen } from './WelcomeScreen'
 import type { Message, ModelId } from '../../types'
-import { formatReadableText } from '../../utils/textFormatting'
 
 function StreamingAssistantMessage({
   model,
@@ -22,9 +22,7 @@ function StreamingAssistantMessage({
     return null
   }
 
-  const text = hasStream
-    ? formatReadableText(streamingText)
-    : (statusMessage || 'Thinking...')
+  const text = hasStream ? streamingText : (statusMessage || 'Thinking...')
 
   return (
     <Group align="flex-start" gap="xs" mb="md">
@@ -49,9 +47,7 @@ function StreamingAssistantMessage({
           backgroundColor: theme.colors.dark[6],
         })}
       >
-        <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {text}
-        </Text>
+        <MarkdownRenderer content={text} size="sm" />
         {!hasStream && hasStatus && (
           <Text size="xs" c="dimmed" mt={6}>
             {statusMessage || 'Thinking...'}

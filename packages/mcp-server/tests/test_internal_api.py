@@ -2,7 +2,7 @@
 Tests for Internal API integration - filter discovery and cost queries.
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -573,6 +573,66 @@ class TestDebugCurl:
 
         await client.close()
 
+    @pytest.mark.asyncio
+    async def test_create_dashboard_rolls_back_shell_on_widget_failure(self):
+        """If widget creation fails, dashboard shell is cleaned up best-effort."""
+        client = FinoutClient(
+            client_id="test",
+            secret_key="test",
+            internal_api_url="http://localhost:3000",
+            account_id="test-account",
+        )
+
+        create_shell_resp = Mock()
+        create_shell_resp.status_code = 200
+        create_shell_resp.json.return_value = {"id": "dash-123", "name": "Test"}
+        create_shell_resp.raise_for_status = Mock()
+
+        widget_fail_resp = Mock()
+        widget_fail_resp.status_code = 500
+        widget_fail_resp.raise_for_status = Mock(
+            side_effect=httpx.HTTPStatusError(
+                "boom",
+                request=httpx.Request("POST", "http://localhost:3000/dashboard-service/widget"),
+                response=httpx.Response(500),
+            )
+        )
+
+        delete_resp = Mock()
+        delete_resp.status_code = 204
+        delete_resp.raise_for_status = Mock()
+
+        with (
+            patch.object(
+                client.internal_client,
+                "post",
+                new=AsyncMock(side_effect=[create_shell_resp, widget_fail_resp]),
+            ) as mock_post,
+            patch.object(
+                client.internal_client,
+                "delete",
+                new=AsyncMock(return_value=delete_resp),
+            ) as mock_delete,
+            patch.object(
+                client.internal_client,
+                "put",
+                new=AsyncMock(),
+            ) as mock_put,
+        ):
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.create_dashboard(
+                    name="Test",
+                    widgets=[{"type": "freeText", "name": "Note", "text": "hello"}],
+                )
+
+            assert mock_post.call_count == 2
+            mock_delete.assert_awaited_once()
+            delete_path = mock_delete.await_args.args[0]
+            assert delete_path == "/dashboard-service/dashboard/dash-123"
+            mock_put.assert_not_awaited()
+
+        await client.close()
+
 
 class TestSubmitFeedback:
     """Tests for submit_feedback tool handler"""
@@ -665,6 +725,9 @@ class TestToolDescriptions:
 
         # debug_filters should discourage normal use
         assert "DO NOT" in internal_tool_map["debug_filters"]
+        assert "USER CONSENT" in internal_tool_map["create_dashboard"]
+        assert "no markdown" in internal_tool_map["create_dashboard"].lower()
+        assert "markdown annotation" not in internal_tool_map["create_dashboard"].lower()
 
     @pytest.mark.asyncio
     async def test_new_tools_registered(self):
@@ -687,4 +750,33 @@ class TestToolDescriptions:
         assert "get_account_context" in internal_tool_names
         assert "submit_feedback" in internal_tool_names
         assert "get_waste_recommendations" in internal_tool_names
-        assert len(internal_tools) == 14
+        assert len(internal_tools) == 15
+
+    @pytest.mark.asyncio
+    async def test_create_dashboard_impl_formats_presentation_hint(self):
+        """Dashboard creation hint should not contain unresolved placeholders."""
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            account_id = "acct-1"
+
+            async def create_dashboard(self, name: str, widgets: list[dict]):
+                return {"id": "dash-1", "name": name}
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.create_dashboard_impl(
+                {
+                    "name": "My Dash",
+                    "widgets": [{"type": "freeText", "name": "Summary", "text": "hello"}],
+                }
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        assert result["url"].endswith("/app/dashboards/dash-1?accountId=acct-1")
+        assert "{widget_count}" not in result["_presentation_hint"]
+        assert "1 widgets" in result["_presentation_hint"]

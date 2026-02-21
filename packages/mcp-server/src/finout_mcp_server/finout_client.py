@@ -1477,6 +1477,208 @@ class FinoutClient:
         response.raise_for_status()
         return response.json()
 
+    async def create_dashboard(
+        self,
+        name: str,
+        widgets: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """
+        Create a dashboard with multiple widgets.
+
+        Each widget dict must have:
+          type: "costUsage" | "anomaly" | "freeText"
+          name: str
+        For costUsage: filters?, group_by?, x_axis_group_by?, time_period?, cost_type?
+        For anomaly: time_period?
+        For freeText: text
+        """
+        import sys
+
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured.")
+        internal_client = self.internal_client
+        headers = self._get_internal_headers()
+        if self.internal_auth_mode == InternalAuthMode.AUTHORIZED_HEADERS:
+            headers["authorized-user-permissions"] = "fin.dashboards.create.dashboards"
+        dashboard_id: str | None = None
+
+        async def _cleanup_failed_dashboard() -> None:
+            if not dashboard_id:
+                return
+            try:
+                cleanup_headers = headers.copy()
+                if self.internal_auth_mode == InternalAuthMode.AUTHORIZED_HEADERS:
+                    cleanup_headers["authorized-user-permissions"] = (
+                        "fin.dashboards.delete.dashboards"
+                    )
+                delete_resp = await internal_client.delete(
+                    f"/dashboard-service/dashboard/{dashboard_id}",
+                    headers=cleanup_headers,
+                )
+                if delete_resp.status_code >= 400:
+                    print(
+                        f"[dashboard] cleanup delete failed status={delete_resp.status_code}",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(f"[dashboard] cleanup delete ok id={dashboard_id}", file=sys.stderr)
+            except Exception as cleanup_error:
+                print(
+                    f"[dashboard] cleanup delete error id={dashboard_id}: {cleanup_error}",
+                    file=sys.stderr,
+                )
+
+        # Step 1: Create empty dashboard shell
+        resp = await internal_client.post(
+            "/dashboard-service/dashboard",
+            json={"name": name, "widgets": []},
+            headers=headers,
+        )
+        resp.raise_for_status()
+        dashboard = resp.json()
+        dashboard_id = dashboard["id"]
+        print(f"[dashboard] Created shell: id={dashboard_id}", file=sys.stderr)
+
+        try:
+            # Step 2: Create each widget
+            widgets_grid: list[dict[str, Any]] = []
+            current_y = 0
+
+            for i, widget_spec in enumerate(widgets):
+                widget_type = widget_spec["type"]
+                widget_name = widget_spec["name"]
+
+                if widget_type == "costUsage":
+                    time_period = widget_spec.get("time_period", "last_30_days")
+                    cost_type_str = widget_spec.get("cost_type", CostType.NET_AMORTIZED.value)
+                    filters = widget_spec.get("filters")
+                    group_by = widget_spec.get("group_by")
+                    x_axis_group_by = widget_spec.get("x_axis_group_by")
+
+                    config: dict[str, Any] = {
+                        "metrics": ["cost"],
+                        "date": self._build_date_payload(time_period),
+                        "costType": cost_type_str,
+                        "calculationMethod": "sum",
+                        "numberOfGroups": 30,
+                        "showOthers": True,
+                    }
+                    if filters:
+                        config["filters"] = self._build_filter_payload(filters)
+                    if group_by:
+                        config["groupBy"] = group_by
+                    if x_axis_group_by:
+                        config["xAxisGroupBy"] = {"type": "TIME_FIELD", "value": x_axis_group_by}
+
+                    resp = await internal_client.post(
+                        "/dashboard-service/widget",
+                        json={
+                            "name": widget_name,
+                            "type": "costUsage",
+                            "dashboardId": dashboard_id,
+                            "configuration": config,
+                            "visualization": {
+                                "type": "column",
+                                "showDescription": False,
+                                "showEventAnnotations": False,
+                                "customCta": {"text": "", "url": ""},
+                            },
+                        },
+                        headers=headers,
+                    )
+                    print(
+                        f"[dashboard] Widget[{i}] POST status={resp.status_code} type=costUsage",
+                        file=sys.stderr,
+                    )
+                    resp.raise_for_status()
+                    h = 3
+
+                elif widget_type == "anomaly":
+                    time_period = widget_spec.get("time_period", "last_7_days")
+                    resp = await internal_client.post(
+                        "/dashboard-service/widget",
+                        json={
+                            "name": widget_name,
+                            "type": "anomaly",
+                            "dashboardId": dashboard_id,
+                            "configuration": {
+                                "date": self._build_date_payload(time_period),
+                            },
+                            "visualization": {
+                                "type": "numeric",
+                                "showDescription": False,
+                                "horizontalAlignment": "center",
+                                "verticalAlignment": "center",
+                                "customCta": {"text": "", "url": ""},
+                            },
+                        },
+                        headers=headers,
+                    )
+                    print(
+                        f"[dashboard] Widget[{i}] POST status={resp.status_code} type=anomaly",
+                        file=sys.stderr,
+                    )
+                    resp.raise_for_status()
+                    h = 2
+
+                elif widget_type == "freeText":
+                    resp = await internal_client.post(
+                        "/dashboard-service/widget",
+                        json={
+                            "name": widget_name,
+                            "type": "freeText",
+                            "dashboardId": dashboard_id,
+                            "configuration": {
+                                "text": widget_spec.get("text", ""),
+                                "fontSize": "16px",
+                                "color": "black",
+                                "alignment": "left",
+                            },
+                        },
+                        headers=headers,
+                    )
+                    print(
+                        f"[dashboard] Widget[{i}] POST status={resp.status_code} type=freeText",
+                        file=sys.stderr,
+                    )
+                    resp.raise_for_status()
+                    h = 2
+
+                else:
+                    raise ValueError(f"Unsupported widget type: {widget_type}")
+
+                widget_data = resp.json()
+                widget_id = widget_data.get("id")
+                if not widget_id:
+                    raise ValueError(
+                        f"Widget creation returned no id for widget[{i}] '{widget_name}': {widget_data}"
+                    )
+                print(f"[dashboard] Widget[{i}] id={widget_id}", file=sys.stderr)
+                widgets_grid.append(
+                    {
+                        "widgetId": widget_id,
+                        "configuration": {"x": 0, "y": current_y, "w": 8, "h": h},
+                    }
+                )
+                current_y += h
+
+            print(f"[dashboard] Linking {len(widgets_grid)} widgets via PUT", file=sys.stderr)
+
+            # Step 3: Link widgets to dashboard (PUT requires edit permission)
+            if self.internal_auth_mode == InternalAuthMode.AUTHORIZED_HEADERS:
+                headers["authorized-user-permissions"] = "fin.dashboards.edit.dashboards"
+            resp = await internal_client.put(
+                f"/dashboard-service/dashboard/{dashboard_id}",
+                json={"name": name, "widgets": widgets_grid},
+                headers=headers,
+            )
+            print(f"[dashboard] PUT status={resp.status_code}", file=sys.stderr)
+            resp.raise_for_status()
+            return dashboard
+        except Exception:
+            await _cleanup_failed_dashboard()
+            raise
+
     async def get_data_explorers(self) -> list[dict[str, Any]]:
         """
         Fetch all data explorers for the account.
