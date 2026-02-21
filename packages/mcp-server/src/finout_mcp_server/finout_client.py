@@ -1198,6 +1198,21 @@ class FinoutClient:
                         normalized_group_by.append(group)
                 payload["groupBys"] = normalized_group_by  # Note: plural "groupBys"
 
+            if x_axis_group_by:
+                # Mapping from friendly names to API values
+                granularity_map = {
+                    "daily": "day",
+                    "weekly": "week",
+                    "monthly": "month",
+                    "quarterly": "quarter",
+                    "day": "day",
+                    "week": "week",
+                    "month": "month",
+                    "quarter": "quarter",
+                }
+                api_value = granularity_map.get(x_axis_group_by, x_axis_group_by)
+                payload["xAxisGroupBy"] = {"type": "time", "value": api_value}
+
             # Add usage configuration if provided (for usage queries instead of cost)
             if usage_configuration:
                 payload["usageConfiguration"] = usage_configuration

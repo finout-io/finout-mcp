@@ -322,6 +322,7 @@ class TestFinoutClientInternalAPI:
                         "type": "col",
                     }
                 ],
+                x_axis_group_by="daily",
             )
 
             # Verify API call
@@ -333,7 +334,8 @@ class TestFinoutClientInternalAPI:
             assert "date" in payload
             assert "filters" in payload
             assert "groupBys" in payload
-            assert "xAxisGroupBy" not in payload
+            # Must be an object {"type": "time", "value": "day"}, not a plain string
+            assert payload["xAxisGroupBy"] == {"type": "time", "value": "day"}
 
             # Verify result
             assert result == sample_cost_response

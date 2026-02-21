@@ -176,10 +176,11 @@ async def list_tools() -> list[Tool]:
                 "2) Copy the FULL filter object from search results (costCenter, key, path, type)\n"
                 "3) Preserve EXACT capitalization - cost centers are case-sensitive!\n"
                 "4) Add operator ('is' for equals) and value (single string), then query\n\n"
-                "TIME-SERIES: The API always returns daily time-series data automatically. "
-                "Every result includes a nested 'data' array with daily cost points. "
-                "To get 'daily cost by service': use group_by with a service dimension — "
-                "each service row will have daily cost points. No extra parameter needed.\n\n"
+                "TIME-SERIES: Results always include a nested 'data' array of time-series points. "
+                "Default granularity is daily. Use x_axis_group_by to change it: "
+                "'weekly' or 'monthly' for longer periods. "
+                "Example: 'daily cost by service for last 7 days' → group_by=[service], no x_axis_group_by needed. "
+                "'monthly cost trend for last quarter' → x_axis_group_by='monthly'.\n\n"
                 "PRESENTING RESULTS: The UI auto-renders a chart from the result data. "
                 "Give 2-4 sentences of key insights: total, biggest driver, notable trend. "
                 "No table or raw data dump needed.\n\n"
@@ -290,6 +291,15 @@ async def list_tools() -> list[Tool]:
                         "description": (
                             "Optional: Dimensions to group by. "
                             "Must include full metadata from search_filters!"
+                        ),
+                    },
+                    "x_axis_group_by": {
+                        "type": "string",
+                        "enum": ["daily", "weekly", "monthly", "quarterly"],
+                        "description": (
+                            "Optional: Time granularity for the x-axis. "
+                            "Default is daily (omit for daily). "
+                            "Use 'monthly' for longer ranges like last_quarter or last_month."
                         ),
                     },
                     "usage_configuration": {
@@ -1181,6 +1191,7 @@ async def query_costs_impl(args: dict) -> dict:
     time_period = args.get("time_period", "last_30_days")
     filters = args.get("filters", [])
     group_by = args.get("group_by")
+    x_axis_group_by = args.get("x_axis_group_by")
     usage_configuration = args.get("usage_configuration")
 
     # Check if internal API is configured
@@ -1238,6 +1249,7 @@ async def query_costs_impl(args: dict) -> dict:
         time_period=time_period,
         filters=filters if filters else None,
         group_by=group_by,
+        x_axis_group_by=x_axis_group_by,
         usage_configuration=usage_configuration,
     )
 
