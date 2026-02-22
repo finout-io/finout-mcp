@@ -77,14 +77,54 @@ export function ChatArea({
   model,
   sessionReady,
 }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const shouldFollowRef = useRef(true)
+  const userPausedRef = useRef(false)
+  const prevIsSendingRef = useRef(false)
+  const userScrollIntentUntilRef = useRef(0)
+
+  const isNearBottom = (): boolean => {
+    const el = containerRef.current
+    if (!el) return true
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    return distanceFromBottom < 80
+  }
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // New request cycle: re-enable auto-follow.
+    if (!prevIsSendingRef.current && isSending) {
+      userPausedRef.current = false
+      shouldFollowRef.current = true
+    }
+    prevIsSendingRef.current = isSending
+  }, [isSending])
+
+  useEffect(() => {
+    if (shouldFollowRef.current && !userPausedRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages, isSending, streamingText])
+
+  const markUserScrollIntent = () => {
+    // Small window to associate the next scroll event with explicit user input.
+    userScrollIntentUntilRef.current = Date.now() + 600
+  }
 
   return (
     <Box
+      ref={containerRef}
+      onWheel={markUserScrollIntent}
+      onTouchStart={markUserScrollIntent}
+      onKeyDown={markUserScrollIntent}
+      onScroll={() => {
+        // Pause auto-follow only for explicit user scrolling while streaming.
+        // Programmatic scroll (from render updates) should not disable follow mode.
+        if (isSending && Date.now() <= userScrollIntentUntilRef.current) {
+          userPausedRef.current = true
+        }
+        shouldFollowRef.current = isNearBottom()
+      }}
       style={{
         flex: 1,
         overflowY: 'auto',
