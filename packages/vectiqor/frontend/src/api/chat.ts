@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { ChatResponse, Message } from '../types'
+import type { ChatResponse, Message, ToolCall } from '../types'
 
 export interface SendMessageParams {
   message: string
@@ -28,6 +28,13 @@ function startAbortTimer(controller: AbortController): number | undefined {
     return undefined
   }
   return window.setTimeout(() => controller.abort(), CHAT_REQUEST_TIMEOUT_MS)
+}
+
+export async function fetchToolOutputs(requestId: string): Promise<ToolCall[]> {
+  const data = await apiFetch<{ tool_calls: ToolCall[] }>(
+    `/api/chat/tool-outputs/${requestId}`,
+  )
+  return data.tool_calls
 }
 
 export async function sendMessage(params: SendMessageParams): Promise<ChatResponse> {

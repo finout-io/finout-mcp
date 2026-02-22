@@ -62,6 +62,7 @@ VECTIQOR_INTERNAL_EXTRA_TOOLS: set[str] = {
     "get_account_context",
     "submit_feedback",
     "create_dashboard",
+    "render_chart",
 }
 
 VECTIQOR_INTERNAL_TOOLS: set[str] = PUBLIC_TOOLS | VECTIQOR_INTERNAL_EXTRA_TOOLS
@@ -85,6 +86,35 @@ INTERNAL_API_TOOLS: set[str] = {
 KEY_SECRET_TOOLS: set[str] = {
     "get_waste_recommendations",
 }
+
+
+def _auto_granularity(time_period: str) -> str:
+    """Choose the coarsest time bucket that fits the period exactly."""
+    if time_period in (
+        "last_7_days",
+        "this_week",
+        "last_week",
+        "two_weeks_ago",
+        "week_before_last",
+    ):
+        return "weekly"
+    if time_period in ("this_month", "last_month", "month_to_date"):
+        return "monthly"
+    if time_period == "last_quarter":
+        return "monthly"
+    if " to " in time_period:
+        try:
+            start_str, end_str = time_period.split(" to ", 1)
+            start = datetime.strptime(start_str.strip(), "%Y-%m-%d")
+            end = datetime.strptime(end_str.strip(), "%Y-%m-%d")
+            duration_days = (end - start).days + 1
+            if duration_days == 7:
+                return "weekly"
+            if duration_days >= 28:
+                return "monthly"
+        except ValueError:
+            pass
+    return "daily"
 
 
 def _allowed_tools_for_runtime() -> set[str]:
@@ -119,38 +149,48 @@ def format_currency(amount: float) -> str:
     return f"${amount:,.2f}"
 
 
-def summarize_cost_data(data: dict, max_items: int = 50) -> dict:
+def summarize_cost_data(data: dict | list, max_items: int = 25) -> dict | list:
     """
-    Summarize cost data to avoid overwhelming the LLM with too much detail.
-    Groups small items into "Other" category.
+    Reduce cost data to what Claude actually needs for analysis.
 
-    Args:
-        data: Raw cost query response
-        max_items: Maximum number of items to return explicitly
+    For list responses (cost-service row array):
+      - Keeps Total row + top max_items service rows by totalCost
+      - Collapses the tail into a single "Other" row so totals still balance
+      - Strips display-only fields (dateRange, comparedRangeDate, percentOfTotalCost)
 
-    Returns:
-        Summarized cost data
+    For legacy dict responses with a "breakdown" key: groups small items as before.
     """
-    # This is a simplified implementation
-    # In production, you'd parse Finout's actual response structure
+    strip_keys = {"dateRange", "comparedRangeDate", "percentOfTotalCost"}
+
+    if isinstance(data, list):
+        total_rows = [r for r in data if isinstance(r, dict) and r.get("name") == "Total"]
+        service_rows = [r for r in data if isinstance(r, dict) and r.get("name") != "Total"]
+
+        service_rows.sort(key=lambda x: x.get("totalCost", 0), reverse=True)
+
+        if len(service_rows) > max_items:
+            other_cost = sum(r.get("totalCost", 0) for r in service_rows[max_items:])
+            service_rows = service_rows[:max_items]
+            if other_cost > 0:
+                service_rows.append({"name": "Other", "totalCost": other_cost})
+
+        result = total_rows + service_rows
+        for row in result:
+            if isinstance(row, dict):
+                for key in strip_keys:
+                    row.pop(key, None)
+        return result
 
     if "breakdown" in data and isinstance(data["breakdown"], list):
         breakdown = data["breakdown"]
-
         if len(breakdown) <= max_items:
             return data
-
-        # Sort by cost descending
         sorted_breakdown = sorted(breakdown, key=lambda x: x.get("cost", 0), reverse=True)
-
-        # Keep top items, sum the rest
         top_items = sorted_breakdown[:max_items]
         other_items = sorted_breakdown[max_items:]
         other_total = sum(item.get("cost", 0) for item in other_items)
-
         if other_total > 0:
             top_items.append({"name": f"Other ({len(other_items)} items)", "cost": other_total})
-
         data["breakdown"] = top_items
         data["_summarized"] = True
         data["_total_items"] = len(breakdown)
@@ -176,14 +216,13 @@ async def list_tools() -> list[Tool]:
                 "2) Copy the FULL filter object from search results (costCenter, key, path, type)\n"
                 "3) Preserve EXACT capitalization - cost centers are case-sensitive!\n"
                 "4) Add operator ('is' for equals) and value (single string), then query\n\n"
-                "TIME-SERIES: Results always include a nested 'data' array of time-series points. "
-                "Default granularity is daily. Use x_axis_group_by to change it: "
-                "'weekly' or 'monthly' for longer periods. "
-                "Example: 'daily cost by service for last 7 days' → group_by=[service], no x_axis_group_by needed. "
-                "'monthly cost trend for last quarter' → x_axis_group_by='monthly'.\n\n"
-                "PRESENTING RESULTS: The UI auto-renders a chart from the result data. "
-                "Give 2-4 sentences of key insights: total, biggest driver, notable trend. "
-                "No table or raw data dump needed.\n\n"
+                "TIME-SERIES: The API always returns time-series data (nested 'data' array per row). "
+                "The server auto-selects the right granularity — omit x_axis_group_by unless the user "
+                "explicitly requests a different one. NEVER manually aggregate or sum numbers — "
+                "read totals directly from the API response.\n\n"
+                "PRESENTING RESULTS: Give 2-4 sentences of key insights: total, biggest driver, "
+                "notable trend. No table or raw data dump needed. "
+                "To visualize results, call render_chart with curated data.\n\n"
                 "COST + USAGE IN ONE QUERY:\n"
                 "- Cost is ALWAYS returned in results\n"
                 "- To ALSO get usage: Provide usage_configuration\n"
@@ -297,9 +336,13 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "enum": ["daily", "weekly", "monthly", "quarterly"],
                         "description": (
-                            "Optional: Time granularity for the x-axis. "
-                            "Default is daily (omit for daily). "
-                            "Use 'monthly' for longer ranges like last_quarter or last_month."
+                            "Override the auto-selected granularity. The server picks the coarsest "
+                            "bucket that fits the period exactly (weekly for named-week periods, "
+                            "monthly for named-month/quarter periods, daily otherwise). "
+                            "Only set this when the user explicitly requests a different granularity: "
+                            "'daily breakdown for last month' → 'daily'; "
+                            "'weekly view for last quarter' → 'weekly'; "
+                            "any trend question on a month/quarter period → 'daily'."
                         ),
                     },
                     "usage_configuration": {
@@ -349,7 +392,8 @@ async def list_tools() -> list[Tool]:
                 "WORKFLOW: Same as query_costs - call search_filters first for filter metadata.\n\n"
                 "PRESENTING RESULTS: Always include the percentage change AND absolute delta. "
                 "Lead with the trend direction (up/down), then the delta, then the breakdown. "
-                "Use a table for grouped comparisons."
+                "Use a table for grouped comparisons. "
+                "To visualize results, call render_chart with curated data."
             ),
             inputSchema={
                 "type": "object",
@@ -1011,6 +1055,123 @@ async def list_tools() -> list[Tool]:
                 "required": ["rating", "query_type", "tools_used"],
             },
         ),
+        Tool(
+            name="render_chart",
+            description=(
+                "Render a chart in the UI with exactly the data you want to visualize.\n\n"
+                "WHEN TO USE: After answering a cost question, call this to visualize "
+                "the key data point. Don't chart everything — chart what matters.\n\n"
+                "RULES:\n"
+                "- Call AFTER your text summary, not instead of it\n"
+                "- Use curated/synthesized data, not raw API output\n"
+                "- One chart per answer is usually enough\n"
+                "- If the user asks 'show me a chart', call this\n"
+                "- categories length MUST equal every series.data length\n"
+                "- pie chart MUST have exactly one series\n"
+                "- series.data values MUST be numeric\n\n"
+                "CHART TYPES:\n"
+                "- bar: horizontal bars, good for ranking/comparison\n"
+                "- column: vertical bars, good for categorical comparison\n"
+                "- line: trend over time\n"
+                "- pie: proportion/share breakdown\n\n"
+                "ADVANCED:\n"
+                "- Optional colors: provide chart-level `colors` or per-series `color`\n"
+                "- Multi-axis line charts: define `y_axes` and set `series[].y_axis` index"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Chart title",
+                    },
+                    "chart_type": {
+                        "type": "string",
+                        "enum": ["bar", "line", "pie", "column"],
+                        "description": "Chart type",
+                    },
+                    "categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "description": "X-axis labels",
+                    },
+                    "series": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "data": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "items": {"type": "number"},
+                                },
+                                "color": {
+                                    "type": "string",
+                                    "description": "Optional color for this series (e.g. '#38B28E')",
+                                },
+                                "y_axis": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": (
+                                        "Optional y-axis index for line charts (requires y_axes). "
+                                        "Example: 0 for cost axis, 1 for usage axis."
+                                    ),
+                                },
+                            },
+                            "required": ["name", "data"],
+                        },
+                        "description": "Data series to plot",
+                    },
+                    "colors": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional chart palette. Used when series colors are not provided. "
+                            "Example: ['#38B28E', '#4B9BFF']"
+                        ),
+                    },
+                    "y_axes": {
+                        "type": "array",
+                        "description": "Optional y-axis definitions for multi-axis line charts",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {
+                                    "type": "string",
+                                    "description": "Axis label (e.g., 'Cost ($)', 'Usage (hrs)')",
+                                },
+                                "opposite": {
+                                    "type": "boolean",
+                                    "description": "Place axis on right side when true",
+                                    "default": False,
+                                },
+                                "min": {
+                                    "type": "number",
+                                    "description": "Optional minimum value for this axis",
+                                },
+                                "max": {
+                                    "type": "number",
+                                    "description": "Optional maximum value for this axis",
+                                },
+                            },
+                            "required": ["label"],
+                        },
+                    },
+                    "x_label": {
+                        "type": "string",
+                        "description": "Optional x-axis label",
+                    },
+                    "y_label": {
+                        "type": "string",
+                        "description": "Optional y-axis label (defaults to 'Cost ($)')",
+                    },
+                },
+                "required": ["title", "chart_type", "categories", "series"],
+            },
+        ),
     ]
     allowed = _allowed_tools_for_runtime()
     return [tool for tool in all_tools if tool.name in allowed]
@@ -1129,6 +1290,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await create_view_impl(arguments)
         elif name == "create_dashboard":
             result = await create_dashboard_impl(arguments)
+        elif name == "render_chart":
+            result = await render_chart_impl(arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1191,7 +1354,7 @@ async def query_costs_impl(args: dict) -> dict:
     time_period = args.get("time_period", "last_30_days")
     filters = args.get("filters", [])
     group_by = args.get("group_by")
-    x_axis_group_by = args.get("x_axis_group_by")
+    x_axis_group_by = args.get("x_axis_group_by") or _auto_granularity(time_period)
     usage_configuration = args.get("usage_configuration")
 
     # Check if internal API is configured
@@ -1264,8 +1427,8 @@ async def query_costs_impl(args: dict) -> dict:
         "data": summarized,
         "query_timestamp": datetime.now().isoformat(),
         "_presentation_hint": (
-            "The UI renders a chart automatically. Give 2-4 sentences: "
-            "total cost, biggest driver, notable trend. No table needed."
+            "Give 2-4 sentences: total cost, biggest driver, notable trend. "
+            "No table needed. Call render_chart to visualize key data points."
         ),
     }
 
@@ -2072,6 +2235,101 @@ async def submit_feedback_impl(args: dict) -> dict:
     return {
         "status": "recorded",
         "total_feedback_count": len(feedback_log),
+    }
+
+
+async def render_chart_impl(args: dict) -> dict:
+    """Implementation of render_chart tool — validates and passes through chart data."""
+    required = ["title", "chart_type", "categories", "series"]
+    missing = [f for f in required if f not in args]
+    if missing:
+        raise ValueError(f"Missing required fields: {missing}")
+
+    valid_types = {"bar", "line", "pie", "column"}
+    if args["chart_type"] not in valid_types:
+        raise ValueError(f"chart_type must be one of: {sorted(valid_types)}")
+
+    if not isinstance(args["categories"], list):
+        raise ValueError("categories must be an array of strings")
+    if len(args["categories"]) == 0:
+        raise ValueError("categories must be a non-empty array")
+    if not all(isinstance(c, str) and c.strip() for c in args["categories"]):
+        raise ValueError("categories must contain non-empty strings")
+
+    if not isinstance(args["series"], list) or len(args["series"]) == 0:
+        raise ValueError("series must be a non-empty array")
+
+    y_axes = args.get("y_axes")
+    if y_axes is not None:
+        if args["chart_type"] != "line":
+            raise ValueError("y_axes is only supported for line charts")
+        if not isinstance(y_axes, list) or len(y_axes) == 0:
+            raise ValueError("y_axes must be a non-empty array when provided")
+        for i, axis in enumerate(y_axes):
+            if not isinstance(axis, dict):
+                raise ValueError(f"y_axes[{i}] must be an object")
+            label = axis.get("label")
+            if not isinstance(label, str) or not label.strip():
+                raise ValueError(f"y_axes[{i}].label must be a non-empty string")
+            if "opposite" in axis and not isinstance(axis["opposite"], bool):
+                raise ValueError(f"y_axes[{i}].opposite must be a boolean")
+            if "min" in axis and not isinstance(axis["min"], int | float):
+                raise ValueError(f"y_axes[{i}].min must be a number")
+            if "max" in axis and not isinstance(axis["max"], int | float):
+                raise ValueError(f"y_axes[{i}].max must be a number")
+
+    colors = args.get("colors")
+    if colors is not None:
+        if not isinstance(colors, list) or len(colors) == 0:
+            raise ValueError("colors must be a non-empty array when provided")
+        for i, color in enumerate(colors):
+            if not isinstance(color, str) or not color.strip():
+                raise ValueError(f"colors[{i}] must be a non-empty string")
+
+    category_count = len(args["categories"])
+    for i, s in enumerate(args["series"]):
+        if not isinstance(s, dict) or "name" not in s or "data" not in s:
+            raise ValueError(f"series[{i}] must have 'name' and 'data' fields")
+        if not isinstance(s["name"], str) or not s["name"].strip():
+            raise ValueError(f"series[{i}].name must be a non-empty string")
+        if not isinstance(s["data"], list):
+            raise ValueError(f"series[{i}].data must be an array of numbers")
+        if len(s["data"]) != category_count:
+            raise ValueError(
+                f"series[{i}].data length ({len(s['data'])}) must match categories length ({category_count})"
+            )
+        for j, v in enumerate(s["data"]):
+            if not isinstance(v, int | float):
+                raise ValueError(f"series[{i}].data[{j}] must be a number")
+        if "color" in s and (not isinstance(s["color"], str) or not s["color"].strip()):
+            raise ValueError(f"series[{i}].color must be a non-empty string")
+        if "y_axis" in s:
+            if args["chart_type"] != "line":
+                raise ValueError(f"series[{i}].y_axis is only supported for line charts")
+            if not isinstance(s["y_axis"], int) or s["y_axis"] < 0:
+                raise ValueError(f"series[{i}].y_axis must be a non-negative integer")
+            if not isinstance(y_axes, list):
+                raise ValueError(
+                    f"series[{i}].y_axis requires y_axes to be defined for line charts"
+                )
+            if s["y_axis"] >= len(y_axes):
+                raise ValueError(
+                    f"series[{i}].y_axis ({s['y_axis']}) out of range for y_axes "
+                    f"(len={len(y_axes)})"
+                )
+
+    if args["chart_type"] == "pie" and len(args["series"]) != 1:
+        raise ValueError("pie charts must have exactly one series")
+
+    return {
+        "title": args["title"],
+        "chart_type": args["chart_type"],
+        "categories": args["categories"],
+        "series": args["series"],
+        "colors": colors,
+        "y_axes": y_axes,
+        "x_label": args.get("x_label"),
+        "y_label": args.get("y_label", "Cost ($)"),
     }
 
 

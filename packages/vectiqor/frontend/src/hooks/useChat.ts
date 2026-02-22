@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { notifications } from '@mantine/notifications'
-import { sendMessageStream } from '../api/chat'
-import type { Message, ModelId } from '../types'
+import { sendMessageStream, fetchToolOutputs } from '../api/chat'
+import type { ChatResponse, Message, ModelId } from '../types'
 
 export interface ChatState {
   messages: Message[]
@@ -32,6 +32,7 @@ export function useChat(accountId: string | null): ChatState {
 
       const wallStart = Date.now()
       let streamedText = ''
+      let captured: { response: ChatResponse; wallTime: number; streamedText: string } | null = null
 
       try {
         await sendMessageStream(
@@ -50,37 +51,60 @@ export function useChat(accountId: string | null): ChatState {
               streamedText += text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
               setStreamingText(streamedText)
             },
+            // Don't update state here — just capture so we can fetch outputs
+            // before the single setMessages call below.
             onFinal: (response) => {
-              const wallTime = (Date.now() - wallStart) / 1000
-              const finalContent = (response.response || streamedText)
-                .replace(/\r\n/g, '\n')
-                .replace(/\r/g, '\n')
-              let thinkingTrace = ''
-              const trimmedFinal = finalContent.trim()
-              if (trimmedFinal) {
-                const idx = streamedText.lastIndexOf(trimmedFinal)
-                if (idx > 0) {
-                  thinkingTrace = streamedText.slice(0, idx).trim()
-                }
-              } else {
-                thinkingTrace = streamedText.trim()
-              }
-              const assistantMessage: Message = {
-                role: 'assistant',
-                content: finalContent,
-                thinking_trace: thinkingTrace || undefined,
-                tool_calls: response.tool_calls,
-                usage: response.usage,
-                model: response.usage.model,
-                tool_time: response.tool_time,
-                total_time: wallTime,
-              }
-              setStatusMessage(null)
-              setStreamingText('')
-              setMessages([...nextMessages, assistantMessage])
+              captured = { response, wallTime: (Date.now() - wallStart) / 1000, streamedText }
             },
           },
         )
+
+        // TypeScript CFA doesn't track mutations through callbacks; cast explicitly.
+        // sendMessageStream guarantees onFinal is called before resolving (throws otherwise).
+        const cap = captured as { response: ChatResponse; wallTime: number; streamedText: string } | null
+        if (cap) {
+          const { response, wallTime } = cap
+          const finalContent = (response.response || cap.streamedText)
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+          let thinkingTrace = ''
+          const trimmedFinal = finalContent.trim()
+          if (trimmedFinal) {
+            const idx = cap.streamedText.lastIndexOf(trimmedFinal)
+            if (idx > 0) {
+              thinkingTrace = cap.streamedText.slice(0, idx).trim()
+            }
+          } else {
+            thinkingTrace = cap.streamedText.trim()
+          }
+
+          // Fetch full tool outputs before committing to state so that auto-save
+          // always receives complete data (avoids a double-setMessages race with isSaving).
+          let toolCalls = response.tool_calls
+          if (response.request_id && response.tool_calls.length > 0) {
+            try {
+              toolCalls = await fetchToolOutputs(response.request_id)
+            } catch {
+              // Non-critical: charts won't show but text response is intact
+            }
+          }
+
+          const assistantMessage: Message = {
+            role: 'assistant',
+            content: finalContent,
+            thinking_trace: thinkingTrace || undefined,
+            tool_calls: toolCalls,
+            usage: response.usage,
+            model: response.usage.model,
+            tool_time: response.tool_time,
+            total_time: wallTime,
+          }
+          // Single setMessages call — React 18 batches this with setIsSending(false)
+          // from finally, so auto-save fires exactly once with full tool outputs.
+          setStatusMessage(null)
+          setStreamingText('')
+          setMessages([...nextMessages, assistantMessage])
+        }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Unknown error'
         setStatusMessage(null)

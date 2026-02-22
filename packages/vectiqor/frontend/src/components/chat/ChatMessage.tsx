@@ -106,8 +106,11 @@ export function ChatMessage({ message }: Props) {
             </Box>
           )}
 
-          {!isUser && message.tool_calls?.map((tc, idx) => (
-            <ChartPanel key={idx} output={tc.output} />
+          {!isUser && message.tool_calls?.filter((tc) => tc.name === 'render_chart').map((tc, idx) => (
+            <ChartPanel
+              key={`${tc.name}-${idx}-${JSON.stringify(tc.input ?? {}).length}`}
+              output={tc.output}
+            />
           ))}
 
           {message.tool_calls && message.tool_calls.length > 0 && (

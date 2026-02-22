@@ -59,6 +59,7 @@ export interface ConversationSummary {
 
 export interface ChatResponse {
   response: string
+  request_id?: string
   tool_calls: ToolCall[]
   usage: TokenUsage
   tool_time: number

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 import pytest
 
+from finout_mcp_server.server import _auto_granularity
 from src.finout_mcp_server.finout_client import FinoutClient
 
 
@@ -744,7 +745,8 @@ class TestToolDescriptions:
         assert "get_account_context" in internal_tool_names
         assert "submit_feedback" in internal_tool_names
         assert "get_waste_recommendations" in internal_tool_names
-        assert len(internal_tools) == 15
+        assert "render_chart" in internal_tool_names
+        assert len(internal_tools) == 16
 
     @pytest.mark.asyncio
     async def test_create_dashboard_impl_formats_presentation_hint(self):
@@ -774,3 +776,234 @@ class TestToolDescriptions:
         assert result["url"].endswith("/app/dashboards/dash-1?accountId=acct-1")
         assert "{widget_count}" not in result["_presentation_hint"]
         assert "1 widgets" in result["_presentation_hint"]
+
+
+class TestAutoGranularity:
+    def test_week_periods_return_weekly(self):
+        for p in ("last_7_days", "this_week", "last_week", "two_weeks_ago"):
+            assert _auto_granularity(p) == "weekly"
+
+    def test_month_periods_return_monthly(self):
+        for p in ("this_month", "last_month", "month_to_date"):
+            assert _auto_granularity(p) == "monthly"
+
+    def test_last_quarter_returns_monthly(self):
+        assert _auto_granularity("last_quarter") == "monthly"
+
+    def test_daily_fallbacks(self):
+        for p in ("today", "yesterday", "last_30_days"):
+            assert _auto_granularity(p) == "daily"
+
+    def test_custom_range_7_days_weekly(self):
+        assert _auto_granularity("2026-01-01 to 2026-01-07") == "weekly"
+
+    def test_custom_range_one_month_monthly(self):
+        assert _auto_granularity("2026-01-01 to 2026-01-31") == "monthly"
+
+    def test_custom_range_10_days_daily(self):
+        assert _auto_granularity("2026-01-01 to 2026-01-10") == "daily"
+
+
+class TestRenderChart:
+    """Tests for render_chart tool"""
+
+    @pytest.mark.asyncio
+    async def test_render_chart_valid(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        result = await render_chart_impl(
+            {
+                "title": "Top Costs",
+                "chart_type": "bar",
+                "categories": ["EC2", "RDS", "S3"],
+                "series": [{"name": "Cost", "data": [22000, 12000, 8000]}],
+            }
+        )
+
+        assert result["title"] == "Top Costs"
+        assert result["chart_type"] == "bar"
+        assert result["categories"] == ["EC2", "RDS", "S3"]
+        assert len(result["series"]) == 1
+        assert result["y_label"] == "Cost ($)"
+
+    @pytest.mark.asyncio
+    async def test_render_chart_missing_required_fields(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        with pytest.raises(ValueError, match="Missing required fields"):
+            await render_chart_impl({"title": "Test"})
+
+    @pytest.mark.asyncio
+    async def test_render_chart_invalid_chart_type(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        with pytest.raises(ValueError, match="chart_type must be one of"):
+            await render_chart_impl(
+                {
+                    "title": "Test",
+                    "chart_type": "scatter",
+                    "categories": ["A"],
+                    "series": [{"name": "S", "data": [1]}],
+                }
+            )
+
+    @pytest.mark.asyncio
+    async def test_render_chart_invalid_series(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        with pytest.raises(ValueError, match="series must be a non-empty array"):
+            await render_chart_impl(
+                {
+                    "title": "Test",
+                    "chart_type": "bar",
+                    "categories": ["A"],
+                    "series": [],
+                }
+            )
+
+    @pytest.mark.asyncio
+    async def test_render_chart_custom_labels(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        result = await render_chart_impl(
+            {
+                "title": "Usage",
+                "chart_type": "line",
+                "categories": ["Jan", "Feb"],
+                "series": [{"name": "Hours", "data": [100, 200]}],
+                "x_label": "Month",
+                "y_label": "Hours",
+            }
+        )
+
+        assert result["x_label"] == "Month"
+        assert result["y_label"] == "Hours"
+
+    @pytest.mark.asyncio
+    async def test_render_chart_series_length_must_match_categories(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        with pytest.raises(ValueError, match="must match categories length"):
+            await render_chart_impl(
+                {
+                    "title": "Mismatch",
+                    "chart_type": "line",
+                    "categories": ["Jan", "Feb", "Mar"],
+                    "series": [{"name": "Cost", "data": [1, 2]}],
+                }
+            )
+
+    @pytest.mark.asyncio
+    async def test_render_chart_series_values_must_be_numbers(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        with pytest.raises(ValueError, match="must be a number"):
+            await render_chart_impl(
+                {
+                    "title": "Invalid Values",
+                    "chart_type": "bar",
+                    "categories": ["A", "B"],
+                    "series": [{"name": "Cost", "data": [1, "two"]}],
+                }
+            )
+
+    @pytest.mark.asyncio
+    async def test_render_chart_pie_requires_single_series(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        with pytest.raises(ValueError, match="pie charts must have exactly one series"):
+            await render_chart_impl(
+                {
+                    "title": "Pie",
+                    "chart_type": "pie",
+                    "categories": ["A", "B"],
+                    "series": [
+                        {"name": "S1", "data": [1, 2]},
+                        {"name": "S2", "data": [3, 4]},
+                    ],
+                }
+            )
+
+    @pytest.mark.asyncio
+    async def test_render_chart_accepts_colors_and_per_series_color(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        result = await render_chart_impl(
+            {
+                "title": "Colored",
+                "chart_type": "bar",
+                "categories": ["A", "B"],
+                "colors": ["#38B28E", "#4B9BFF"],
+                "series": [{"name": "Cost", "data": [1, 2], "color": "#FF8C42"}],
+            }
+        )
+
+        assert result["colors"] == ["#38B28E", "#4B9BFF"]
+        assert result["series"][0]["color"] == "#FF8C42"
+
+    @pytest.mark.asyncio
+    async def test_render_chart_accepts_multi_axis_line(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        result = await render_chart_impl(
+            {
+                "title": "Cost vs Usage",
+                "chart_type": "line",
+                "categories": ["Jan", "Feb"],
+                "y_axes": [
+                    {"label": "Cost ($)", "opposite": False},
+                    {"label": "Usage (hrs)", "opposite": True},
+                ],
+                "series": [
+                    {"name": "Cost", "data": [100, 120], "y_axis": 0, "color": "#38B28E"},
+                    {"name": "Usage", "data": [1000, 1200], "y_axis": 1, "color": "#4B9BFF"},
+                ],
+            }
+        )
+
+        assert result["y_axes"][0]["label"] == "Cost ($)"
+        assert result["series"][1]["y_axis"] == 1
+
+    @pytest.mark.asyncio
+    async def test_render_chart_rejects_y_axis_without_y_axes(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        with pytest.raises(ValueError, match="requires y_axes"):
+            await render_chart_impl(
+                {
+                    "title": "Invalid",
+                    "chart_type": "line",
+                    "categories": ["Jan", "Feb"],
+                    "series": [{"name": "Cost", "data": [1, 2], "y_axis": 0}],
+                }
+            )
+
+    @pytest.mark.asyncio
+    async def test_render_chart_rejects_y_axis_for_non_line(self):
+        from src.finout_mcp_server.server import render_chart_impl
+
+        with pytest.raises(ValueError, match="only supported for line charts"):
+            await render_chart_impl(
+                {
+                    "title": "Invalid",
+                    "chart_type": "bar",
+                    "categories": ["A", "B"],
+                    "series": [{"name": "Cost", "data": [1, 2], "y_axis": 0}],
+                }
+            )
+
+    def test_render_chart_in_vectiqor_tools(self):
+        from src.finout_mcp_server.server import VECTIQOR_INTERNAL_EXTRA_TOOLS
+
+        assert "render_chart" in VECTIQOR_INTERNAL_EXTRA_TOOLS
+
+    @pytest.mark.asyncio
+    async def test_render_chart_not_in_public_tools(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        server_module.runtime_mode = server_module.MCPMode.PUBLIC.value
+        public_tools = await server_module.list_tools()
+        public_tool_names = {t.name for t in public_tools}
+        assert "render_chart" not in public_tool_names

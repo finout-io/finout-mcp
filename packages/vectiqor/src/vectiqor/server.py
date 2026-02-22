@@ -10,7 +10,7 @@ import subprocess
 import secrets
 import shutil
 import sys
-from uuid import UUID
+from uuid import UUID, uuid4
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -241,8 +241,6 @@ def _read_timeout_seconds(env_var: str, default: float) -> Optional[float]:
 
 
 CHAT_REQUEST_TIMEOUT_SECONDS = _read_timeout_seconds("VECTIQOR_CHAT_TIMEOUT_SECONDS", 540.0)
-MAX_TOOL_OUTPUT_PREVIEW_CHARS = int(os.getenv("VECTIQOR_TOOL_OUTPUT_PREVIEW_CHARS", "12000"))
-MAX_TOTAL_TOOL_OUTPUT_CHARS = int(os.getenv("VECTIQOR_MAX_TOTAL_TOOL_OUTPUT_CHARS", "150000"))
 SESSION_COOKIE_NAME = "vectiqor_session_id"
 ACCOUNT_COOKIE_NAME = "vectiqor_account_id"
 
@@ -356,6 +354,16 @@ async def cleanup_idle_sessions():
             if to_remove:
                 print(f"Cleaned up {len(to_remove)} idle sessions. Active sessions: {len(sessions)}")
 
+            # Expire old tool output entries
+            expired = [
+                k for k, v in _tool_output_store.items()
+                if (now - v["created_at"]) > _TOOL_OUTPUT_TTL
+            ]
+            for k in expired:
+                del _tool_output_store[k]
+            if expired:
+                print(f"Expired {len(expired)} tool output entries")
+
         except Exception as e:
             print(f"Error in cleanup task: {e}")
 
@@ -371,6 +379,11 @@ async def evict_oldest_session():
 
 # Global MCP bridge (DEPRECATED - kept for backward compatibility during migration)
 mcp_bridge: Optional[MCPBridge] = None
+
+# Out-of-band tool output store: request_id → {calls, created_at}
+# Outputs are excluded from the SSE final event and fetched separately by the frontend.
+_tool_output_store: Dict[str, Dict[str, Any]] = {}
+_TOOL_OUTPUT_TTL = timedelta(minutes=30)
 
 # Global account cache
 _account_cache: Optional[Dict[str, Any]] = None
@@ -600,46 +613,12 @@ async def _call_claude_messages_create(
             raise
 
 
-def _compact_tool_calls_for_transport(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Keep transport payload bounded so SSE final event stays reliable even for large tool outputs.
-    """
-    remaining = max(0, MAX_TOTAL_TOOL_OUTPUT_CHARS)
-    compact: List[Dict[str, Any]] = []
-
-    for call in tool_calls:
-        out_value = call.get("output")
-        if isinstance(out_value, str):
-            out_text = out_value
-        else:
-            try:
-                out_text = json.dumps(out_value, ensure_ascii=False, default=str)
-            except Exception:
-                out_text = str(out_value)
-
-        if len(out_text) > MAX_TOOL_OUTPUT_PREVIEW_CHARS:
-            out_text = out_text[:MAX_TOOL_OUTPUT_PREVIEW_CHARS] + "\n... (truncated)"
-
-        if remaining <= 0:
-            compact.append(
-                {
-                    "name": "system",
-                    "input": {},
-                    "output": "Additional tool output omitted to keep response size bounded.",
-                    "truncated": True,
-                }
-            )
-            break
-
-        if len(out_text) > remaining:
-            out_text = out_text[:remaining] + "\n... (truncated)"
-
-        compact_call = dict(call)
-        compact_call["output"] = out_text
-        compact.append(compact_call)
-        remaining -= len(out_text)
-
-    return compact
+def _tool_calls_metadata(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return tool call list with outputs stripped — safe to embed in the SSE final event."""
+    return [
+        {"name": tc["name"], "input": tc["input"], "error": tc.get("error", False)}
+        for tc in tool_calls
+    ]
 
 
 async def _run_chat_pipeline(
@@ -786,9 +765,15 @@ async def _run_chat_pipeline(
         if hasattr(content_block, "text"):
             response_text += content_block.text
 
+    # Store full outputs out-of-band so the frontend can fetch them without
+    # bloating the SSE final event.
+    request_id = str(uuid4())
+    _tool_output_store[request_id] = {"calls": all_tool_calls, "created_at": datetime.now()}
+
     return {
         "response": response_text,
-        "tool_calls": _compact_tool_calls_for_transport(all_tool_calls),
+        "request_id": request_id,
+        "tool_calls": _tool_calls_metadata(all_tool_calls),
         "tool_time": round(total_tool_time, 2),
         "usage": _build_usage_summary(request.model, usage_totals),
     }
@@ -1122,6 +1107,15 @@ async def switch_account(request: dict, http_request: Request, response: Respons
         "account_id": account_id,
         "message": f"Switched to account {account_id}"
     }
+
+@app.get("/api/chat/tool-outputs/{request_id}")
+async def get_tool_outputs(request_id: str):
+    """Return full tool call outputs for a completed chat request (out-of-band fetch)."""
+    entry = _tool_output_store.get(request_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Tool outputs not found or expired")
+    return {"tool_calls": entry["calls"]}
+
 
 # Conversation Management Endpoints
 
