@@ -23,12 +23,12 @@ export function ChatInput({ onSend, model, disabled, loading }: Props) {
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (!loading && e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         handleSend()
       }
     },
-    [handleSend],
+    [handleSend, loading],
   )
 
   const handleVoice = useCallback(() => {
@@ -50,7 +50,7 @@ export function ChatInput({ onSend, model, disabled, loading }: Props) {
           value={value}
           onChange={(e) => setValue(e.currentTarget.value)}
           onKeyDown={handleKeyDown}
-          disabled={disabled || loading}
+          disabled={disabled}
           autosize
           minRows={1}
           maxRows={8}
