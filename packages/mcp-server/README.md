@@ -4,9 +4,11 @@ Model Context Protocol server for Finout cloud cost observability. Query costs, 
 
 ## Quick Start
 
+Obtain and API Client ID and Secret Key from your Finout account.
+
 ```bash
 # Install
-pip install finout-mcp-server
+pip install finout-mcp
 
 # Configure
 cat > ~/.config/claude/claude_desktop_config.json <<EOF
@@ -16,7 +18,6 @@ cat > ~/.config/claude/claude_desktop_config.json <<EOF
       "command": "finout-mcp",
       "args": [],
       "env": {
-        "FINOUT_API_URL": "https://app.finout.io",
         "FINOUT_CLIENT_ID": "your-client-id",
         "FINOUT_SECRET_KEY": "your-secret-key"
       }
@@ -26,37 +27,6 @@ cat > ~/.config/claude/claude_desktop_config.json <<EOF
 EOF
 
 # Restart Claude Desktop
-```
-
-## Hosted Public Service
-
-Run MCP over Streamable HTTP (separate from VECTIQOR):
-
-```bash
-finout-mcp-hosted-public
-```
-
-Authentication for hosted requests:
-
-- Send `x-finout-client-id` and `x-finout-secret-key` headers on MCP `POST` calls.
-- Optional override: `x-finout-api-url` (defaults to `https://app.finout.io`).
-
-Defaults:
-
-- `MCP_HOST=0.0.0.0`
-- `MCP_PORT=8080`
-- MCP endpoint: `POST/GET /mcp`
-- Health endpoint: `GET /health`
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `FINOUT_API_URL` | No | API endpoint (`https://app.finout.io` for public mode) |
-| `FINOUT_CLIENT_ID` | Yes in `public` mode | API client ID |
-| `FINOUT_SECRET_KEY` | Yes in `public` mode | API secret key |
-
-Get credentials from your Finout account settings.
 
 ## Tools
 
@@ -83,85 +53,11 @@ Get credentials from your Finout account settings.
 "Show cost anomalies from the past 7 days"
 ```
 
-## Usage Pattern
 
-Most cost queries follow this pattern:
-
-1. Search for relevant filters: `search_filters("service")`
-2. Get filter values if needed: `get_filter_values(...)`
-3. Query costs with filters: `query_costs(time_period, filters, group_by)`
-
-Example:
-```python
-# Find service filter
-filters = search_filters("service")
-
-# Query EC2 costs
-costs = query_costs(
-    time_period="last_30_days",
-    filters=[{
-        "costCenter": "aws",
-        "key": "service",
-        "type": "tag",
-        "operator": "is",
-        "value": "ec2"
-    }]
-)
-```
-
-## Filter Structure
-
-Filters require these fields from search results:
-
-```python
-{
-    "costCenter": "aws",      # From search results
-    "key": "service",          # From search results
-    "type": "tag",             # From search results
-    "path": "AWS/Services",    # From search results
-    "operator": "is",          # "is" for single value, "oneOf" for array
-    "value": "ec2"             # Your filter value
-}
-```
-
-**IMPORTANT:** Always use `search_filters` first to get the exact `type` value. Don't guess.
-
-## Development
-
-```bash
-# Install dependencies
-uv sync
-
-# Run tests
-uv run pytest
-
-# Start locally
-uv run python -m finout_mcp_server
-```
-
-## Troubleshooting
-
-**"Internal API URL not configured"**
-- Set `FINOUT_API_URL` in your environment (optional; defaults to `https://app.finout.io`)
-
-**"No matches found" when searching filters**
-- Use broader search terms (e.g., "service" instead of "ec2")
-- Try different cost centers: "aws", "gcp", "kubernetes", "virtual-tag"
-
-**Filter values not showing up**
-- Use `get_filter_values()` to fetch values on-demand
-- Values are lazy-loaded to avoid overwhelming context
-
-**Query returns no data**
-- Check date range is valid
-- Verify filter values exist using `get_filter_values()`
-- Check operator: use "is" for single value, "oneOf" for array
 
 ## Resources
 
 - [Finout Documentation](https://docs.finout.io)
-- [MCP Protocol Spec](https://modelcontextprotocol.io)
-- [Report Issues](https://github.com/finout/finout-mcp/issues)
 
 ## License
 

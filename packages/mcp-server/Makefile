@@ -31,7 +31,7 @@ hooks:
 
 # Build wheel + sdist into package-local dist directory
 build build-wheel:
-	UV_CACHE_DIR=../../.uv-cache uv build --package finout-mcp-server --out-dir dist --clear
+	UV_CACHE_DIR=../../.uv-cache uv build --package finout-mcp --out-dir dist --clear
 
 # Clean build artifacts
 clean:

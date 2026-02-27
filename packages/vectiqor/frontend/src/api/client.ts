@@ -20,6 +20,11 @@ export async function apiFetch<T>(
     ...options,
   })
 
+  if (response.status === 401) {
+    window.location.href = `/api/login-redirect?next=${encodeURIComponent(window.location.pathname)}`
+    throw new Error('Not authenticated')
+  }
+
   if (!response.ok) {
     let message = `HTTP ${response.status}`
     try {

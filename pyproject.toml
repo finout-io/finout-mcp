@@ -1,5 +1,5 @@
 [project]
-name = "finout-mcp"
+name = "finout-mcp-workspace"
 version = "0.1.0"
 description = "Finout MCP Server - Monorepo"
 requires-python = ">=3.11"
@@ -8,6 +8,7 @@ requires-python = ">=3.11"
 members = ["packages/*"]
 
 [tool.uv.sources]
-finout-mcp-server = { workspace = true }
+finout-mcp = { workspace = true }
+finout-mcp-hosted = { workspace = true }
 vectiqor = { workspace = true }
 vectiqor-mcp-internal = { workspace = true }

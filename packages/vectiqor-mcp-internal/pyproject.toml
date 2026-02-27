@@ -5,7 +5,7 @@ description = "Internal MCP launcher used by VECTIQOR only"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "finout-mcp-server>=0.1.0",
+    "finout-mcp>=0.1.0",
 ]
 
 [project.scripts]

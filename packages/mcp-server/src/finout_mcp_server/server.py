@@ -26,7 +26,7 @@ from mcp.types import (
 from .finout_client import CostType, FinoutClient, InternalAuthMode
 
 # Initialize MCP server
-server = Server("finout-mcp-server")
+server = Server("finout-mcp")
 
 # Global client instance (will be initialized on startup)
 finout_client: FinoutClient | None = None
@@ -53,10 +53,10 @@ PUBLIC_TOOLS: set[str] = {
     "get_waste_recommendations",
     "get_anomalies",
     "get_financial_plans",
-    "create_view",
 }
 
 VECTIQOR_INTERNAL_EXTRA_TOOLS: set[str] = {
+    "create_view",
     "debug_filters",
     "discover_context",
     "get_account_context",

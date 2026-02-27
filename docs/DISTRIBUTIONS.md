@@ -122,5 +122,5 @@ vectiqor-mcp-internal --help
 
 Notes:
 
-- Internal MCP depends on `finout-mcp-server`, so both wheels are required in a clean venv.
-- Public users should only receive `finout-mcp-server`.
+- Internal MCP depends on `finout-mcp`, so both wheels are required in a clean venv.
+- Public users should only receive `finout-mcp`.

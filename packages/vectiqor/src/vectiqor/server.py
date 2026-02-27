@@ -16,15 +16,17 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 
-from fastapi import FastAPI, HTTPException, Response, Request, Cookie
+from fastapi import FastAPI, HTTPException, Response, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from pathlib import Path
+from urllib.parse import quote
 from .db import db
+from .auth import get_jwt_user
 
 # Load .env from package directory
 package_root = Path(__file__).parent.parent.parent
@@ -242,6 +244,7 @@ def _read_timeout_seconds(env_var: str, default: float) -> Optional[float]:
 
 CHAT_REQUEST_TIMEOUT_SECONDS = _read_timeout_seconds("VECTIQOR_CHAT_TIMEOUT_SECONDS", 540.0)
 SESSION_COOKIE_NAME = "vectiqor_session_id"
+PUBLIC_MODE = os.getenv("VECTIQOR_PUBLIC_MODE", "").lower() in ("1", "true", "yes")
 ACCOUNT_COOKIE_NAME = "vectiqor_account_id"
 
 def get_or_create_session_id(request: Request, response: Response) -> str:
@@ -433,6 +436,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+if PUBLIC_MODE:
+    print("PUBLIC_MODE=true: JWT authentication required for all /api/* routes")
+
+    @app.middleware("http")
+    async def jwt_auth_middleware(request: Request, call_next):
+        unauthenticated_paths = {"/api/login-redirect", "/api/health"}
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        if request.url.path.startswith("/api/") and request.url.path not in unauthenticated_paths:
+            try:
+                await get_jwt_user(request)
+            except HTTPException as e:
+                return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
+        return await call_next(request)
+
+
 # Initialize Anthropic client
 anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
@@ -545,6 +564,20 @@ async def health():
         "active_sessions": len(sessions),
         "max_sessions": MAX_CONCURRENT_SESSIONS
     }
+
+
+@app.get("/api/me")
+async def get_me(http_request: Request):
+    """Return authenticated user info (public mode only)."""
+    jwt_user = await get_jwt_user(http_request)
+    return {"email": jwt_user.get("email"), "account_id": jwt_user.get("tenantId")}
+
+
+@app.get("/api/login-redirect")
+async def login_redirect(next: str = "/"):
+    """Redirect to Finout login page."""
+    login_url = os.getenv("FINOUT_LOGIN_URL", "https://app.finout.io/login")
+    return RedirectResponse(url=f"{login_url}?redirect={quote(next)}")
 
 def _chat_timeout_detail() -> str:
     if CHAT_REQUEST_TIMEOUT_SECONDS is None:
@@ -780,10 +813,14 @@ async def _run_chat_pipeline(
 
 
 async def _get_validated_session_mcp(
-    request: ChatRequest, http_request: Request, session_id: str
+    request: ChatRequest,
+    http_request: Request,
+    session_id: str,
+    forced_account_id: Optional[str] = None,
 ) -> MCPBridge:
-    requested_account = request.account_id if _is_valid_account_id(request.account_id) else None
-    account_hint = requested_account or get_account_hint(http_request)
+    account_hint = forced_account_id or (
+        request.account_id if _is_valid_account_id(request.account_id) else None
+    ) or get_account_hint(http_request)
     session_mcp = await ensure_session_mcp(session_id, account_hint)
 
     if not session_mcp:
@@ -801,7 +838,11 @@ async def _get_validated_session_mcp(
 async def chat(request: ChatRequest, http_request: Request, response: Response):
     """Handle chat requests with Claude API and MCP tools (session-based)."""
     session_id = get_or_create_session_id(http_request, response)
-    session_mcp = await _get_validated_session_mcp(request, http_request, session_id)
+    forced_account_id: Optional[str] = None
+    if PUBLIC_MODE:
+        jwt_user = await get_jwt_user(http_request)
+        forced_account_id = jwt_user.get("tenantId")
+    session_mcp = await _get_validated_session_mcp(request, http_request, session_id, forced_account_id)
 
     try:
         async with _maybe_timeout(CHAT_REQUEST_TIMEOUT_SECONDS):
@@ -819,7 +860,11 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
 async def chat_stream(request: ChatRequest, http_request: Request):
     """Handle chat requests via SSE with progress events and heartbeats."""
     session_id = http_request.cookies.get(SESSION_COOKIE_NAME) or secrets.token_urlsafe(32)
-    session_mcp = await _get_validated_session_mcp(request, http_request, session_id)
+    forced_account_id: Optional[str] = None
+    if PUBLIC_MODE:
+        jwt_user = await get_jwt_user(http_request)
+        forced_account_id = jwt_user.get("tenantId")
+    session_mcp = await _get_validated_session_mcp(request, http_request, session_id, forced_account_id)
 
     async def event_generator():
         queue: asyncio.Queue[str] = asyncio.Queue()
@@ -948,6 +993,20 @@ async def get_accounts(http_request: Request, response: Response):
     """Fetch available accounts from Finout internal API (with caching)"""
     global _account_cache, _account_cache_time
 
+    # In public mode, return a single account derived from the JWT
+    if PUBLIC_MODE:
+        jwt_user = await get_jwt_user(http_request)
+        tenant_id = jwt_user.get("tenantId", "")
+        email = jwt_user.get("email", "")
+        session_id = get_or_create_session_id(http_request, response)
+        session = sessions.get(session_id)
+        current_id = session.account_id if session else tenant_id
+        return {
+            "accounts": [{"name": email, "accountId": tenant_id}],
+            "current_account_id": current_id,
+            "cached": False,
+        }
+
     # Get session to determine current account
     session_id = get_or_create_session_id(http_request, response)
     session = sessions.get(session_id)
@@ -1052,7 +1111,12 @@ async def switch_account(request: dict, http_request: Request, response: Respons
     Switch to a different account by creating/restarting session MCP server.
     Each session has its own isolated MCP instance.
     """
-    account_id = request.get("account_id")
+    # In public mode, always use the JWT tenantId — ignore request body
+    if PUBLIC_MODE:
+        jwt_user = await get_jwt_user(http_request)
+        account_id = jwt_user.get("tenantId")
+    else:
+        account_id = request.get("account_id")
     if not account_id:
         raise HTTPException(status_code=400, detail="account_id is required")
     if not _is_valid_account_id(account_id):

@@ -17,7 +17,7 @@ This guide is for end users who want to connect Claude Desktop to Finout using t
 Recommended:
 
 ```bash
-python3 -m pip install --user --upgrade finout-mcp-server
+python3 -m pip install --user --upgrade finout-mcp
 ```
 
 If `finout-mcp` is not found later, add your user bin directory to `PATH`.
@@ -74,7 +74,7 @@ If tools are connected, Claude will call the Finout MCP server automatically.
 
 `command not found: finout-mcp`
 
-- Reinstall with `python3 -m pip install --user --upgrade finout-mcp-server`
+- Reinstall with `python3 -m pip install --user --upgrade finout-mcp`
 - Ensure your user Python bin path is in `PATH`
 
 `Unauthorized`

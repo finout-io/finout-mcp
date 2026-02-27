@@ -38,6 +38,7 @@ class InternalAuthMode(StrEnum):
 
     AUTHORIZED_HEADERS = "authorized_headers"
     KEY_SECRET = "key_secret"
+    BEARER_TOKEN = "bearer_token"
 
 
 class FinoutClient:
@@ -50,6 +51,7 @@ class FinoutClient:
         self,
         client_id: str | None = None,
         secret_key: str | None = None,
+        bearer_token: str | None = None,
         base_url: str = "https://app.finout.io/v1",
         internal_api_url: str | None = None,
         account_id: str | None = None,
@@ -62,6 +64,7 @@ class FinoutClient:
         Args:
             client_id: Finout API client ID (or from FINOUT_CLIENT_ID env var)
             secret_key: Finout API secret key (or from FINOUT_SECRET_KEY env var)
+            bearer_token: OAuth bearer token for hosted public mode
             base_url: Base URL for Finout API
             internal_api_url: API URL (or from FINOUT_API_URL env var)
             account_id: Optional account ID for internal API scope (auto-discovered when possible)
@@ -73,6 +76,7 @@ class FinoutClient:
         """
         self.client_id = client_id or os.getenv("FINOUT_CLIENT_ID")
         self.secret_key = secret_key or os.getenv("FINOUT_SECRET_KEY")
+        self.bearer_token = bearer_token
         self.base_url = base_url
         self.internal_api_url = (
             internal_api_url or os.getenv("FINOUT_API_URL") or "https://app.finout.io"
@@ -648,6 +652,11 @@ class FinoutClient:
             if not headers:
                 raise ValueError("Key/secret mode requires FINOUT_CLIENT_ID and FINOUT_SECRET_KEY.")
             return headers
+
+        if self.internal_auth_mode == InternalAuthMode.BEARER_TOKEN:
+            if not self.bearer_token:
+                raise ValueError("Bearer mode requires an OAuth bearer token.")
+            return {"authorization": f"Bearer {self.bearer_token}"}
 
         if not self.account_id:
             return {"authorized-user-roles": "admin"}

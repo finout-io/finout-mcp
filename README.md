@@ -265,7 +265,7 @@ On every PR and push, CI:
 - validates MCP (`ruff`, `mypy`, `pytest`)
 - builds VECTIQOR frontend and Python compile checks
 - builds Python package artifacts for:
-  - `finout-mcp-server`
+  - `finout-mcp`
   - `vectiqor`
   - `vectiqor-mcp-internal` (internal-only, bundled with VECTIQOR workflows)
 - builds VECTIQOR Docker image
@@ -281,7 +281,7 @@ Optional publish steps:
   - `AWS_SECRET_ACCESS_KEY`
   - `AWS_REGION` (for example `us-east-1`)
 - PyPI package publish (main only): enabled with `PYPI_API_TOKEN`
-  - Only `finout-mcp-server` is published. Internal packages are never published.
+  - Only `finout-mcp` is published. Internal packages are never published.
 
 ---
 
@@ -297,7 +297,7 @@ uv build
 uv publish
 
 # Customers install with
-pip install finout-mcp-server
+pip install finout-mcp
 ```
 
 ---

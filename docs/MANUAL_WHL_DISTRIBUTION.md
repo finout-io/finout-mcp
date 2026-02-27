@@ -30,7 +30,7 @@ Share both:
 - `finout_mcp_server-<version>-py3-none-any.whl`
 - `vectiqor_mcp_internal-<version>-py3-none-any.whl`
 
-`vectiqor-mcp-internal` depends on `finout-mcp-server`, so both wheels are required in a clean environment.
+`vectiqor-mcp-internal` depends on `finout-mcp`, so both wheels are required in a clean environment.
 
 ## Install (Public MCP)
 

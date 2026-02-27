@@ -11,7 +11,7 @@ Get up and running with the Finout MCP Server in 5 minutes.
 ## Step 1: Install Dependencies
 
 ```bash
-cd finout-mcp-server
+cd finout-mcp
 uv sync
 ```
 
@@ -79,7 +79,7 @@ Edit: `~/Library/Application Support/Claude/claude_desktop_config.json`
       "command": "uv",
       "args": [
         "--directory",
-        "/Users/YOUR_USERNAME/path/to/finout-mcp-server",
+        "/Users/YOUR_USERNAME/path/to/finout-mcp",
         "run",
         "finout-mcp"
       ],
@@ -103,7 +103,7 @@ Edit: `%APPDATA%/Claude/claude_desktop_config.json`
       "command": "uv",
       "args": [
         "--directory",
-        "C:\\path\\to\\finout-mcp-server",
+        "C:\\path\\to\\finout-mcp",
         "run",
         "finout-mcp"
       ],
