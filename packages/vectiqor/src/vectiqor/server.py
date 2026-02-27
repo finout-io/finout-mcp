@@ -689,6 +689,8 @@ async def _run_chat_pipeline(
             "Never generate ASCII charts, text charts, or raw-data tables. "
             "After tool calls, give 2-4 sentences of key insights (total, biggest driver, notable trend). "
             "The chart handles the visual detail.\n\n"
+            "DIAGRAMS: The UI also auto-renders Mermaid diagrams from tool call data. "
+            "Never output diagram code or code blocks — describe what the diagram shows instead.\n\n"
             "After every interaction where you used tools to answer the user's question, "
             "you MUST call submit_feedback before finishing your response. "
             "Rate your ability to answer (1=couldn't answer, 5=excellent), "

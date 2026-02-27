@@ -1738,3 +1738,33 @@ class FinoutClient:
         )
         response.raise_for_status()
         return response.json()
+
+    async def get_virtual_tags(self) -> list[dict[str, Any]]:
+        """
+        Fetch all virtual tags for the account.
+
+        Returns:
+            List of virtual tag objects with id, name, type, rules, allocations, etc.
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client required")
+
+        if not self.account_id:
+            await self._ensure_account_id()
+        if not self.account_id:
+            raise ValueError(
+                "Unable to resolve account ID for virtual-tags query. "
+                "Verify the credentials can access account-service."
+            )
+
+        headers = self._get_internal_headers()
+        if self.internal_auth_mode == InternalAuthMode.AUTHORIZED_HEADERS:
+            headers["authorized-user-roles"] = "sysAdmin"
+
+        response = await self.internal_client.get(
+            "/virtual-tags-service/virtual-tag",
+            headers=headers,
+            params={"accountId": self.account_id},
+        )
+        response.raise_for_status()
+        return response.json()

@@ -1,6 +1,7 @@
 import { Box, Center, Group, Stack, Text } from '@mantine/core'
 import { ToolCallCard } from './ToolCallCard'
 import { ChartPanel } from './ChartPanel'
+import { MermaidPanel } from './MermaidPanel'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import type { Message } from '../../types'
 
@@ -111,6 +112,10 @@ export function ChatMessage({ message }: Props) {
               key={`${tc.name}-${idx}-${JSON.stringify(tc.input ?? {}).length}`}
               output={tc.output}
             />
+          ))}
+
+          {!isUser && message.tool_calls?.filter((tc) => tc.name === 'visualize_virtual_tags').map((tc, idx) => (
+            <MermaidPanel key={idx} output={tc.output} />
           ))}
 
           {message.tool_calls && message.tool_calls.length > 0 && (

@@ -63,6 +63,7 @@ VECTIQOR_INTERNAL_EXTRA_TOOLS: set[str] = {
     "submit_feedback",
     "create_dashboard",
     "render_chart",
+    "visualize_virtual_tags",
 }
 
 VECTIQOR_INTERNAL_TOOLS: set[str] = PUBLIC_TOOLS | VECTIQOR_INTERNAL_EXTRA_TOOLS
@@ -81,6 +82,7 @@ INTERNAL_API_TOOLS: set[str] = {
     "get_financial_plans",
     "create_view",
     "create_dashboard",
+    "visualize_virtual_tags",
 }
 
 KEY_SECRET_TOOLS: set[str] = {
@@ -1172,6 +1174,34 @@ async def list_tools() -> list[Tool]:
                 "required": ["title", "chart_type", "categories", "series"],
             },
         ),
+        Tool(
+            name="visualize_virtual_tags",
+            description=(
+                "Visualize virtual tags and their cost allocation relationships as a dependency graph.\n\n"
+                "WHEN TO USE: When the user asks about virtual tag relationships, dependencies, "
+                "hierarchies, how tags reference each other, or wants to see the flow between tags.\n\n"
+                "ALWAYS pass tag_name — infer it from what the user mentioned, or ask them which "
+                "tag to visualize. Without tag_name the diagram shows the entire account graph "
+                "which is too large to be useful.\n\n"
+                "PRESENTING RESULTS: The UI renders the diagram automatically. "
+                "Do NOT output the mermaid_diagram value as text or a code block — "
+                "just describe the relationships in 2-3 sentences."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tag_name": {
+                        "type": "string",
+                        "description": (
+                            "Focus on a specific tag and its connected subgraph "
+                            "(all ancestors and descendants). "
+                            "Case-insensitive partial match on tag name."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
     allowed = _allowed_tools_for_runtime()
     return [tool for tool in all_tools if tool.name in allowed]
@@ -1292,6 +1322,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await create_dashboard_impl(arguments)
         elif name == "render_chart":
             result = await render_chart_impl(arguments)
+        elif name == "visualize_virtual_tags":
+            result = await visualize_virtual_tags_impl(arguments or {})
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -2236,6 +2268,193 @@ async def submit_feedback_impl(args: dict) -> dict:
         "status": "recorded",
         "total_feedback_count": len(feedback_log),
     }
+
+
+def _extract_virtual_tag_references(tag: dict, tag_map: dict[str, str]) -> list[str]:
+    """Extract IDs of virtual tags referenced by this tag's rules."""
+    refs: list[str] = []
+    for rule in tag.get("rules") or []:
+        # A. rule.to is {key: <tag_id>}
+        to = rule.get("to")
+        if isinstance(to, dict) and "key" in to:
+            ref_id = to["key"]
+            if ref_id in tag_map:
+                refs.append(ref_id)
+
+        filters = rule.get("filters") or {}
+        if not isinstance(filters, dict):
+            continue
+
+        # B. direct filter with costCenter == 'virtualTag'
+        if filters.get("costCenter") == "virtualTag" and filters.get("key"):
+            ref_id = filters["key"]
+            if ref_id in tag_map:
+                refs.append(ref_id)
+
+        # C. OR conditions
+        for cond in filters.get("OR") or []:
+            if (
+                isinstance(cond, dict)
+                and cond.get("costCenter") == "virtualTag"
+                and cond.get("key")
+            ):
+                ref_id = cond["key"]
+                if ref_id in tag_map:
+                    refs.append(ref_id)
+
+        # D. AND conditions
+        for cond in filters.get("AND") or []:
+            if (
+                isinstance(cond, dict)
+                and cond.get("costCenter") == "virtualTag"
+                and cond.get("key")
+            ):
+                ref_id = cond["key"]
+                if ref_id in tag_map:
+                    refs.append(ref_id)
+
+    return refs
+
+
+_MAX_GRAPH_NODES = 50
+
+
+def _safe_mermaid_id(tag_id: str) -> str:
+    """Return a Mermaid-safe node ID (alphanumeric + underscore only)."""
+    return "".join(c if c.isalnum() else "_" for c in tag_id)
+
+
+def _safe_mermaid_label(name: str) -> str:
+    """Escape double-quotes inside Mermaid node labels."""
+    return name.replace('"', "'")
+
+
+def _build_virtual_tag_graph(
+    tag_map: dict[str, str],
+    edge_counts: dict[tuple[str, str], int],
+) -> tuple[str, bool]:
+    """
+    Build a styled Mermaid graph LR diagram from virtual tag relationships.
+    Returns (mermaid_diagram, was_truncated).
+    Caps at _MAX_GRAPH_NODES by keeping the highest-degree nodes.
+    """
+    if not edge_counts:
+        return "", False
+
+    degree: dict[str, int] = {}
+    for src, tgt in edge_counts:
+        degree[src] = degree.get(src, 0) + 1
+        degree[tgt] = degree.get(tgt, 0) + 1
+
+    truncated = False
+    if len(degree) > _MAX_GRAPH_NODES:
+        truncated = True
+        top_nodes = {n for n, _ in sorted(degree.items(), key=lambda x: -x[1])[:_MAX_GRAPH_NODES]}
+        edge_counts = {
+            e: c for e, c in edge_counts.items() if e[0] in top_nodes and e[1] in top_nodes
+        }
+
+    if not edge_counts:
+        return "", truncated
+
+    # Classify nodes: roots (no incoming), leaves (no outgoing), middle
+    all_src = {e[0] for e in edge_counts}
+    all_tgt = {e[1] for e in edge_counts}
+    node_ids = sorted(all_src | all_tgt)
+
+    lines: list[str] = [
+        "%%{init: {'theme': 'dark', 'flowchart': {'curve': 'basis', 'nodeSpacing': 45, 'rankSpacing': 90, 'diagramPadding': 20}}}%%",
+        "graph LR",
+        "  classDef root fill:#0ca678,stroke:#087f5b,stroke-width:2px,color:#fff,font-weight:bold",
+        "  classDef leaf fill:#1c7ed6,stroke:#1864ab,stroke-width:2px,color:#fff",
+        "  classDef mid fill:#25262b,stroke:#373a40,stroke-width:1px,color:#c1c2c5",
+    ]
+
+    # Node declarations — rounded pill shape using () syntax
+    for tid in node_ids:
+        mid = _safe_mermaid_id(tid)
+        label = _safe_mermaid_label(tag_map.get(tid, tid))
+        is_root = tid in all_src and tid not in all_tgt
+        is_leaf = tid in all_tgt and tid not in all_src
+        if is_root:
+            lines.append(f'  {mid}("{label}"):::root')
+        elif is_leaf:
+            lines.append(f'  {mid}("{label}"):::leaf')
+        else:
+            lines.append(f'  {mid}("{label}"):::mid')
+
+    # Edges
+    for src, tgt in edge_counts:
+        lines.append(f"  {_safe_mermaid_id(src)} --> {_safe_mermaid_id(tgt)}")
+
+    return "\n".join(lines), truncated
+
+
+def _subgraph_ids(seed_ids: set[str], edge_counts: dict[tuple[str, str], int]) -> set[str]:
+    """Return seed nodes plus their direct neighbors (1 hop, both directions)."""
+    neighbors: dict[str, set[str]] = {}
+    for src, tgt in edge_counts:
+        neighbors.setdefault(src, set()).add(tgt)
+        neighbors.setdefault(tgt, set()).add(src)
+
+    result = set(seed_ids)
+    for node in seed_ids:
+        result.update(neighbors.get(node, set()))
+    return result
+
+
+async def visualize_virtual_tags_impl(args: dict) -> dict:
+    assert finout_client is not None
+
+    tags = await finout_client.get_virtual_tags()
+    if not tags:
+        return {"message": "No virtual tags found for this account."}
+
+    tag_map: dict[str, str] = {t["id"]: t["name"] for t in tags if "id" in t and "name" in t}
+
+    # Build full edge graph
+    all_edges: dict[tuple[str, str], int] = {}
+    for tag in tags:
+        tag_id = tag.get("id")
+        if not tag_id or tag_id not in tag_map:
+            continue
+        for ref_id in _extract_virtual_tag_references(tag, tag_map):
+            edge = (ref_id, tag_id)
+            all_edges[edge] = all_edges.get(edge, 0) + 1
+
+    # Filter to subgraph if tag_name provided
+    tag_name = (args.get("tag_name") or "").strip().lower()
+    if tag_name:
+        seed_ids = {tid for tid, name in tag_map.items() if tag_name in name.lower()}
+        if not seed_ids:
+            return {"message": f"No virtual tag matching '{args['tag_name']}' found."}
+        subgraph = _subgraph_ids(seed_ids, all_edges)
+        edge_counts = {e: c for e, c in all_edges.items() if e[0] in subgraph and e[1] in subgraph}
+        scope_note = f"Showing subgraph for '{args['tag_name']}' ({len(subgraph)} tags, {len(edge_counts)} relationships)."
+    else:
+        edge_counts = all_edges
+        connected = {n for e in all_edges for n in e}
+        scope_note = f"{len(tag_map)} total tags, {len(connected)} interconnected, {len(tag_map) - len(connected)} isolated."
+
+    result: dict[str, Any] = {"scope": scope_note}
+
+    diagram, truncated = _build_virtual_tag_graph(tag_map, edge_counts)
+    if diagram:
+        result["mermaid_diagram"] = diagram
+        if truncated:
+            result["truncation_note"] = (
+                f"Diagram capped at {_MAX_GRAPH_NODES} highest-connected nodes. "
+                "Use tag_name to zoom into a specific subgraph."
+            )
+        result["_presentation_hint"] = (
+            "The UI renders mermaid_diagram automatically. "
+            "Do NOT output the diagram as text or a code block. "
+            "Describe the relationships in 2-3 sentences instead."
+        )
+    else:
+        result["message"] = "No relationships found in this scope — tags are all independent."
+
+    return result
 
 
 async def render_chart_impl(args: dict) -> dict:

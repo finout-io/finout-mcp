@@ -746,7 +746,8 @@ class TestToolDescriptions:
         assert "submit_feedback" in internal_tool_names
         assert "get_waste_recommendations" in internal_tool_names
         assert "render_chart" in internal_tool_names
-        assert len(internal_tools) == 16
+        assert "visualize_virtual_tags" in internal_tool_names
+        assert len(internal_tools) == 17
 
     @pytest.mark.asyncio
     async def test_create_dashboard_impl_formats_presentation_hint(self):
