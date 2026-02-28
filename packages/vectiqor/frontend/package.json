@@ -16,6 +16,7 @@
     "@tanstack/react-query": "^5.62.0",
     "highcharts": "^12.5.0",
     "highcharts-react-official": "^3.2.3",
+    "mermaid": "^11.12.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",

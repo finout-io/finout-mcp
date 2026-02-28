@@ -27,24 +27,27 @@ export function MermaidPanel({ output }: { output: unknown }) {
 
   useEffect(() => {
     if (!diagram || !mermaidRef.current) return
+    let cancelled = false
     const el = mermaidRef.current
     el.removeAttribute('data-processed')
     el.innerHTML = diagram
-    mermaid.run({ nodes: [el] }).then(() => {
-      const svg = el.querySelector('svg')
-      if (!svg) return
-      // Build viewBox from fixed pixel dimensions if not already set
-      if (!svg.getAttribute('viewBox')) {
-        const w = parseFloat(svg.getAttribute('width') ?? '0')
-        const h = parseFloat(svg.getAttribute('height') ?? '0')
-        if (w > 0 && h > 0) svg.setAttribute('viewBox', `0 0 ${w} ${h}`)
-      }
-      // Make fluid — Mermaid often sets an inline max-width that must be cleared
-      svg.setAttribute('width', '100%')
-      svg.style.maxWidth = 'none'
-      svg.style.display = 'block'
-    })
+    mermaid.run({ nodes: [el] })
+      .then(() => {
+        if (cancelled || !el.isConnected) return
+        const svg = el.querySelector('svg')
+        if (!svg) return
+        if (!svg.getAttribute('viewBox')) {
+          const w = parseFloat(svg.getAttribute('width') ?? '0')
+          const h = parseFloat(svg.getAttribute('height') ?? '0')
+          if (w > 0 && h > 0) svg.setAttribute('viewBox', `0 0 ${w} ${h}`)
+        }
+        svg.setAttribute('width', '100%')
+        svg.style.maxWidth = 'none'
+        svg.style.display = 'block'
+      })
+      .catch(() => {}) // element may be detached before async render completes
     setTf({ x: 0, y: 0, scale: 1 })
+    return () => { cancelled = true }
   }, [diagram])
 
   if (!diagram) return null
