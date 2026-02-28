@@ -746,7 +746,7 @@ class TestToolDescriptions:
         assert "submit_feedback" in internal_tool_names
         assert "get_waste_recommendations" in internal_tool_names
         assert "render_chart" in internal_tool_names
-        assert "visualize_virtual_tags" in internal_tool_names
+        assert "analyze_virtual_tags" in internal_tool_names
         assert len(internal_tools) == 17
 
     @pytest.mark.asyncio
@@ -1008,3 +1008,130 @@ class TestRenderChart:
         public_tools = await server_module.list_tools()
         public_tool_names = {t.name for t in public_tools}
         assert "render_chart" not in public_tool_names
+
+
+class TestAnalyzeVirtualTagsHelpers:
+    """Unit tests for analyze_virtual_tags helper functions."""
+
+    def test_infer_tag_type_reallocation(self):
+        from src.finout_mcp_server.server import _infer_tag_type
+
+        tag = {"allocations": [{"type": "metric", "data": {"metricName": "ratio"}}]}
+        assert _infer_tag_type(tag, {}) == "reallocation"
+
+    def test_infer_tag_type_relational(self):
+        from src.finout_mcp_server.server import _infer_tag_type
+
+        tag_map = {"tag-id-1": "Other Tag"}
+        tag = {"rules": [{"filters": {"costCenter": "virtualTag", "key": "tag-id-1"}}]}
+        assert _infer_tag_type(tag, tag_map) == "relational"
+
+    def test_infer_tag_type_custom(self):
+        from src.finout_mcp_server.server import _infer_tag_type
+
+        tag = {"rules": [{"filters": {"costCenter": "amazon-cur", "key": "service"}}]}
+        assert _infer_tag_type(tag, {}) == "custom"
+
+    def test_infer_tag_type_base(self):
+        from src.finout_mcp_server.server import _infer_tag_type
+
+        assert _infer_tag_type({}, {}) == "base"
+        assert _infer_tag_type({"rules": []}, {}) == "base"
+
+    def test_compute_summary_counts(self):
+        from src.finout_mcp_server.server import _compute_summary
+
+        tags = [
+            {"id": "a"},
+            {"id": "b"},
+            {"id": "c"},
+            {"id": "d"},
+        ]
+        tag_id_to_type = {"a": "custom", "b": "custom", "c": "reallocation", "d": "relational"}
+        edges: dict[tuple[str, str], int] = {("a", "c"): 1, ("b", "c"): 1}
+        summary = _compute_summary(tags, edges, tag_id_to_type)
+
+        assert summary["total"] == 4
+        assert summary["with_dependencies"] == 3  # a, b, c
+        assert summary["isolated"] == 1  # d
+        assert summary["by_type"]["custom"] == 2
+        assert summary["by_type"]["reallocation"] == 1
+        assert summary["by_type"]["relational"] == 1
+
+    def test_notable_tags_sorted_by_score(self):
+        from src.finout_mcp_server.server import _notable_tags
+
+        tags = [
+            {"id": "a", "name": "Alpha", "rules": [1, 2, 3]},
+            {"id": "b", "name": "Beta", "rules": []},
+            {"id": "c", "name": "Gamma", "rules": [1]},
+        ]
+        tag_map = {"a": "Alpha", "b": "Beta", "c": "Gamma"}
+        tag_id_to_type = {"a": "custom", "b": "custom", "c": "relational"}
+        edges: dict[tuple[str, str], int] = {("a", "c"): 1, ("b", "c"): 1}
+
+        result = _notable_tags(tags, edges, tag_map, tag_id_to_type)
+        names = [r["name"] for r in result]
+        # c is used_by=2 → score 4; a has depends_on=1 + rules=3 → score 5; b depends_on=1 → score 2
+        assert names[0] == "Alpha"
+        assert names[1] == "Gamma"
+
+    def test_notable_tags_excludes_isolated(self):
+        from src.finout_mcp_server.server import _notable_tags
+
+        tags = [{"id": "a", "name": "Alpha", "rules": []}]
+        tag_map = {"a": "Alpha"}
+        tag_id_to_type = {"a": "base"}
+        edges: dict[tuple[str, str], int] = {}
+
+        result = _notable_tags(tags, edges, tag_map, tag_id_to_type)
+        assert result == []
+
+    def test_get_reallocation_info_metric(self):
+        from src.finout_mcp_server.server import _get_reallocation_info
+
+        tag = {
+            "allocations": [
+                {
+                    "name": "my-split",
+                    "type": "metric",
+                    "data": {
+                        "metricName": "ratio",
+                        "kpiCenterId": "kpi-123",
+                        "tagName": "namespace",
+                        "joinField": "name_skeleton",
+                    },
+                }
+            ]
+        }
+        info = _get_reallocation_info(tag)
+
+        assert info["strategy"] == "metric"
+        assert len(info["metric_sources"]) == 1
+        assert info["metric_sources"][0]["metric"] == "ratio"
+        assert info["metric_sources"][0]["dimension"] == "namespace"
+        assert info["metric_sources"][0]["join_on"] == "name_skeleton"
+        assert info["allocation_count"] == 1
+
+    def test_get_reallocation_info_percentage(self):
+        from src.finout_mcp_server.server import _get_reallocation_info
+
+        tag = {"allocations": [{"type": "percentage", "targets": ["team-a", "team-b"]}]}
+        info = _get_reallocation_info(tag)
+
+        assert info["strategy"] == "percentage"
+        assert info["allocation_count"] == 1
+
+    def test_get_reallocation_info_empty(self):
+        from src.finout_mcp_server.server import _get_reallocation_info
+
+        assert _get_reallocation_info({}) == {
+            "strategy": "unknown",
+            "metric_sources": [],
+            "allocation_count": 0,
+        }
+        assert _get_reallocation_info({"allocations": []}) == {
+            "strategy": "unknown",
+            "metric_sources": [],
+            "allocation_count": 0,
+        }
