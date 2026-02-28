@@ -149,8 +149,11 @@ class FinoutClient:
     @staticmethod
     def _request_to_curl(request: httpx.Request) -> str:
         """Convert an httpx Request to a replayable curl command."""
+        skip_headers = {"accept-encoding", "user-agent"}
         parts = [f"curl -X {request.method}"]
         for key, value in request.headers.items():
+            if key.lower() in skip_headers:
+                continue
             if key.lower() in MASKED_HEADERS:
                 value = "***"
             parts.append(f"  -H '{key}: {value}'")
