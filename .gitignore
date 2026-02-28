@@ -101,6 +101,9 @@ finout-mcp-server/claude_desktop_config.json
 tools/vectiqor/.env
 packages/vectiqor/.last_account
 
+# Local TLS certs for dev testing
+packages/mcp-server-hosted/*.pem
+
 # Frontend dependencies/build artifacts
 **/frontend/node_modules/
 **/frontend/dist/

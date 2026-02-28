@@ -6,37 +6,47 @@ OAuth-capable hosted MCP server for regular Finout users. Internal deployment on
 
 ```
 MCP Client (Claude Desktop / mcp-inspector)
-    │  OAuth PKCE flow + Bearer JWT
+    │  OAuth PKCE flow
     ▼
 finout-mcp-hosted  (this package)
-    │  Verifies Frontegg JWT, extracts tenantId
-    │  Creates FinoutClient per session
+    │  Serves Finout-branded login form
+    │  Authenticates against Frontegg behind the scenes
+    │  Issues auth code → exchanges for Frontegg JWT
+    │  Verifies JWT on /mcp requests
     ▼
 Finout API (app.finout.io)
 ```
 
 The server also supports key/secret auth (`x-finout-client-id` / `x-finout-secret-key` headers) for backward compatibility.
 
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `MCP_BASE_URL` | Yes | Public URL of this server (e.g. `https://mcp.finout.io`) |
+| `FRONTEGG_AUTH_URL` | Yes | Frontegg password auth endpoint (e.g. `https://app-abc123.frontegg.com/identity/resources/auth/v1/user`) |
+| `FRONTEGG_CLIENT_ID` | SSO only | Frontegg OAuth app client ID. Required if any users authenticate via SSO. Register `{MCP_BASE_URL}/oauth/callback` as a redirect URI in the Frontegg app. |
+| `FINOUT_JWT_ISSUER` | Yes | `iss` claim from Frontegg JWT |
+| `FINOUT_JWT_AUDIENCE` | No | `aud` claim from Frontegg JWT. If omitted, audience validation is skipped (common in Frontegg embedded mode). |
+| `FINOUT_JWT_PUBLIC_KEY` | Yes | Base64-encoded RSA public key from Frontegg |
+| `FINOUT_LOGIN_JWT_PUBLIC_KEY` | Cookie auth | Base64-encoded RSA public key for `__fnt_dd_` cookie (`AUTH_LOGIN.PUBLIC` from api-gateway). When set, SSO users on `*.finout.io` are authenticated automatically from their existing browser session — no login form shown. |
+| `FINOUT_INTERNAL_API_URL` | Cookie auth | Internal Finout API URL that trusts `authorized-*` headers (bypasses the api-gateway). Required when `FINOUT_LOGIN_JWT_PUBLIC_KEY` is set. |
+| `FINOUT_API_URL` | No | Finout API base URL for password/Frontegg JWT auth (default: `https://app.finout.io`) |
+| `MCP_HOST` | No | Bind host (default: `0.0.0.0`) |
+| `MCP_PORT` | No | Bind port (default: `8080`) |
+
 ## Frontegg Setup
 
-1. **Enable hosted login** in the Frontegg portal (Env Settings → Authentication → Hosted Login).
-
-2. **Create an OAuth app** (Env Settings → OAuth):
-   - Grant type: Authorization Code + PKCE
-   - Redirect URIs:
-     - `http://localhost:6274/oauth/callback` (mcp-inspector)
-     - `http://localhost:6277/oauth/callback` (alternate mcp-inspector port)
-   - Copy the **Client ID** → `FRONTEGG_MCP_CLIENT_ID`
-
-3. **Get the RSA public key** (Env Settings → Security → JWT):
-   - Copy the PEM, base64-encode it: `base64 -i frontegg_public.pem`
-   - Set as `FINOUT_JWT_PUBLIC_KEY`
-
-4. **Find issuer and audience** by decoding a Frontegg token:
+1. **Get the RSA public key** (Env Settings → Security → JWT):
    ```bash
-   # Paste a token from a logged-in Frontegg session
+   base64 -i frontegg_public.pem
+   ```
+   Set as `FINOUT_JWT_PUBLIC_KEY`.
+
+2. **Find issuer and audience** by decoding a Frontegg token:
+   ```bash
    python3 -c "
-   import base64, json, sys
+   import base64, json
    token = '<paste token here>'
    payload = token.split('.')[1]
    payload += '=' * (-len(payload) % 4)
@@ -46,32 +56,18 @@ The server also supports key/secret auth (`x-finout-client-id` / `x-finout-secre
    - `iss` claim → `FINOUT_JWT_ISSUER`
    - `aud` claim → `FINOUT_JWT_AUDIENCE`
 
-## Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `MCP_BASE_URL` | Yes | Public URL of this server (e.g. `https://mcp.finout.io`) |
-| `FRONTEGG_BASE_URL` | Yes | Frontegg OAuth base URL (e.g. `https://app-abc123.frontegg.com/oauth`) |
-| `FRONTEGG_MCP_CLIENT_ID` | Yes | Frontegg OAuth app client ID |
-| `FINOUT_JWT_ISSUER` | Yes | `iss` claim from Frontegg JWT |
-| `FINOUT_JWT_AUDIENCE` | Yes | `aud` claim from Frontegg JWT |
-| `FINOUT_JWT_PUBLIC_KEY` | Yes | Base64-encoded RSA public key from Frontegg |
-| `FINOUT_API_URL` | No | Finout API base URL (default: `https://app.finout.io`) |
-| `MCP_HOST` | No | Bind host (default: `0.0.0.0`) |
-| `MCP_PORT` | No | Bind port (default: `8080`) |
+3. **Get the auth URL** — typically:
+   `https://app-<id>.frontegg.com/identity/resources/auth/v1/user`
+   Set as `FRONTEGG_AUTH_URL`.
 
 ## Running Locally
 
 ```bash
 cd packages/mcp-server-hosted
-
-# Install with workspace dep resolved
 uv sync
 
-# Set env vars
 export MCP_BASE_URL=http://localhost:8080
-export FRONTEGG_BASE_URL=https://app-abc123.frontegg.com/oauth
-export FRONTEGG_MCP_CLIENT_ID=<client-id>
+export FRONTEGG_AUTH_URL=https://app-abc123.frontegg.com/identity/resources/auth/v1/user
 export FINOUT_JWT_ISSUER=<issuer>
 export FINOUT_JWT_AUDIENCE=<audience>
 export FINOUT_JWT_PUBLIC_KEY=<base64-key>
@@ -84,13 +80,11 @@ Health check: `curl http://localhost:8080/health`
 ## Docker
 
 ```bash
-# From repo root
 docker build -f Dockerfile.mcp-hosted-public -t finout-mcp-hosted .
 
 docker run -p 8080:8080 \
   -e MCP_BASE_URL=https://mcp.finout.io \
-  -e FRONTEGG_BASE_URL=https://app-abc123.frontegg.com/oauth \
-  -e FRONTEGG_MCP_CLIENT_ID=<client-id> \
+  -e FRONTEGG_AUTH_URL=https://app-abc123.frontegg.com/identity/resources/auth/v1/user \
   -e FINOUT_JWT_ISSUER=<issuer> \
   -e FINOUT_JWT_AUDIENCE=<audience> \
   -e FINOUT_JWT_PUBLIC_KEY=<base64-key> \
@@ -105,9 +99,10 @@ npx @modelcontextprotocol/inspector
 
 1. Set server URL: `http://localhost:8080/mcp`
 2. Set auth type: **OAuth 2.0**
-3. The inspector will call `/register` (DCR), then redirect you to Frontegg login
-4. After login, the inspector exchanges the code for a token via `/token`
-5. All MCP requests are authenticated with the Bearer token
+3. The inspector calls `/register` (DCR), then redirects to the Finout login form at `/authorize`
+4. Submit your Finout credentials — the server authenticates against Frontegg
+5. After login, the inspector exchanges the code for a token via `/token`
+6. All MCP requests are authenticated with the Bearer token
 
 ## Running Tests
 
