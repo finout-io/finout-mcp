@@ -182,13 +182,18 @@ def format_filter_metadata_for_llm(
     return "\n".join(lines)
 
 
-def format_search_results(results: list[dict[str, Any]], max_results: int = 50) -> str:
+def format_search_results(
+    results: list[dict[str, Any]],
+    max_results: int = 50,
+    sample_values: dict[str, list[str]] | None = None,
+) -> str:
     """
-    Format filter search results for the LLM.
+    Format filter search results grouped by cost center and type.
 
     Args:
         results: Search results from search_filters_by_keyword
         max_results: Maximum results to display
+        sample_values: Optional dict mapping "costCenter:type:key" to sample value lists
 
     Returns:
         Formatted string
@@ -196,64 +201,51 @@ def format_search_results(results: list[dict[str, Any]], max_results: int = 50) 
     if not results:
         return "No filters found matching your query."
 
-    lines = []
-    lines.append(f"# Search Results ({len(results)} matches)\n")
-
+    sample_values = sample_values or {}
     display_results = results[:max_results]
 
-    # Group by type for clarity
-    tags = [r for r in display_results if r.get("type") == "tag"]
-    columns = [r for r in display_results if r.get("type") == "col"]
-    others = [r for r in display_results if r.get("type") not in ["tag", "col"]]
+    lines: list[str] = []
+    lines.append(f"# Search Results ({len(results)} matches)\n")
 
-    # Show tags first (often what users are looking for)
-    if tags:
-        lines.append("\n## 🏷️ TAGS (Custom Labels)")
-        for i, result in enumerate(tags, 1):
-            key = result.get("key", "")
-            cost_center = result.get("costCenter", "")
-            path = result.get("path", "")
-            value_count = result.get("value_count", 0)
+    # Group by cost center, then by type
+    by_cc: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for r in display_results:
+        cc = r.get("costCenter", "unknown")
+        ft = r.get("type", "unknown")
+        by_cc.setdefault(cc, {}).setdefault(ft, []).append(r)
 
-            lines.append(
-                f"{i}. **{key}** [{cost_center.upper()}] - path: `{path}` ({value_count} values)"
-            )
+    type_labels = {
+        "col": "Standard Columns",
+        "tag": "Custom Tags",
+        "namespace_object": "Kubernetes Resources",
+    }
 
-    # Then columns (standard filters)
-    if columns:
-        lines.append("\n## 📊 COLUMNS (Standard Filters)")
-        for i, result in enumerate(columns, 1):
-            key = result.get("key", "")
-            cost_center = result.get("costCenter", "")
-            path = result.get("path", "")
-            value_count = result.get("value_count", 0)
+    for cc in sorted(by_cc):
+        lines.append(f"\n## {cc}")
+        for ft in sorted(by_cc[cc]):
+            label = type_labels.get(ft, ft)
+            lines.append(f"### {ft} ({label})")
 
-            lines.append(
-                f"{i}. **{key}** [{cost_center.upper()}] - path: `{path}` ({value_count} values)"
-            )
+            for i, result in enumerate(by_cc[cc][ft], 1):
+                key = result.get("key", "")
+                path = result.get("path", "")
+                value_count = result.get("value_count", 0)
 
-    # Any other types
-    if others:
-        lines.append("\n## OTHER")
-        for i, result in enumerate(others, 1):
-            key = result.get("key", "")
-            cost_center = result.get("costCenter", "")
-            filter_type = result.get("type", "")
-            path = result.get("path", "")
-            value_count = result.get("value_count", 0)
+                lines.append(f"{i}. **{key}** - path: `{path}` ({value_count} values)")
 
-            lines.append(
-                f"{i}. **{key}** "
-                f"[{cost_center.upper()}/{filter_type}] "
-                f"- path: `{path}` ({value_count} values)"
-            )
+                # Show sample values if available
+                sv_key = f"{cc}:{ft}:{key}"
+                if sv_key in sample_values and sample_values[sv_key]:
+                    vals = sample_values[sv_key][:8]
+                    lines.append(f"   Values: {', '.join(str(v) for v in vals)}")
 
     if len(results) > max_results:
         remaining = len(results) - max_results
         lines.append(f"\n_(... and {remaining} more results)_")
 
     lines.append(
-        "\n**💡 TIP:** Use get_filter_values(filter_key, cost_center, filter_type) to see actual values for any filter above."
+        "\n**IMPORTANT:** Filter values are often unintuitive (e.g., 'AmazonEC2' not 'ec2'). "
+        "Use get_filter_values(filter_key, cost_center, filter_type) to verify exact values."
     )
 
     return "\n".join(lines)

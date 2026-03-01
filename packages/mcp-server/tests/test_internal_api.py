@@ -1135,3 +1135,378 @@ class TestAnalyzeVirtualTagsHelpers:
             "metric_sources": [],
             "allocation_count": 0,
         }
+
+
+class TestFindClosestValues:
+    """Tests for _find_closest_values helper."""
+
+    def test_exact_match(self):
+        from src.finout_mcp_server.server import _find_closest_values
+
+        result = _find_closest_values("AmazonEC2", ["AmazonEC2", "AmazonS3", "AmazonRDS"])
+        assert result[0] == "AmazonEC2"
+
+    def test_substring_match(self):
+        from src.finout_mcp_server.server import _find_closest_values
+
+        result = _find_closest_values("ec2", ["AmazonEC2", "AmazonS3", "AmazonRDS"])
+        assert "AmazonEC2" in result
+
+    def test_reverse_substring(self):
+        from src.finout_mcp_server.server import _find_closest_values
+
+        result = _find_closest_values("AmazonEC2Instance", ["AmazonEC2", "AmazonS3"])
+        assert "AmazonEC2" in result
+
+    def test_character_overlap(self):
+        from src.finout_mcp_server.server import _find_closest_values
+
+        result = _find_closest_values("s3", ["AmazonS3", "AmazonEC2", "AmazonRDS"])
+        assert len(result) > 0
+
+    def test_no_match(self):
+        from src.finout_mcp_server.server import _find_closest_values
+
+        result = _find_closest_values("zzzzz", ["AmazonEC2", "AmazonS3"])
+        # May return empty or low-score results
+        assert isinstance(result, list)
+
+    def test_top_n_limit(self):
+        from src.finout_mcp_server.server import _find_closest_values
+
+        values = [f"Service{i}" for i in range(20)]
+        result = _find_closest_values("Service", values, top_n=3)
+        assert len(result) <= 3
+
+
+class TestValidateFilterValues:
+    """Tests for _validate_filter_values."""
+
+    @pytest.mark.asyncio
+    async def test_exact_match_passes(self):
+        from src.finout_mcp_server.server import _validate_filter_values
+
+        client = Mock()
+        client.get_filter_values = AsyncMock(return_value=["AmazonEC2", "AmazonS3", "AmazonRDS"])
+
+        filters = [
+            {"key": "service", "costCenter": "amazon-cur", "type": "col", "value": "AmazonEC2"}
+        ]
+        corrected, warnings = await _validate_filter_values(client, filters)
+        assert corrected[0]["value"] == "AmazonEC2"
+        assert warnings == []
+
+    @pytest.mark.asyncio
+    async def test_case_correction(self):
+        from src.finout_mcp_server.server import _validate_filter_values
+
+        client = Mock()
+        client.get_filter_values = AsyncMock(return_value=["AmazonEC2", "AmazonS3"])
+
+        filters = [
+            {"key": "service", "costCenter": "amazon-cur", "type": "col", "value": "amazonec2"}
+        ]
+        corrected, warnings = await _validate_filter_values(client, filters)
+        assert corrected[0]["value"] == "AmazonEC2"
+        assert len(warnings) == 1
+        assert "auto-corrected" in warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_fabricated_value_raises(self):
+        from src.finout_mcp_server.server import _validate_filter_values
+
+        client = Mock()
+        client.get_filter_values = AsyncMock(return_value=["AmazonEC2", "AmazonS3", "AmazonRDS"])
+
+        filters = [{"key": "service", "costCenter": "amazon-cur", "type": "col", "value": "ec2"}]
+        with pytest.raises(ValueError, match="value 'ec2' not found"):
+            await _validate_filter_values(client, filters)
+
+    @pytest.mark.asyncio
+    async def test_oneof_validates_each(self):
+        from src.finout_mcp_server.server import _validate_filter_values
+
+        client = Mock()
+        client.get_filter_values = AsyncMock(return_value=["AmazonEC2", "AmazonS3", "AmazonRDS"])
+
+        filters = [
+            {
+                "key": "service",
+                "costCenter": "amazon-cur",
+                "type": "col",
+                "operator": "oneOf",
+                "value": ["AmazonEC2", "amazons3"],
+            }
+        ]
+        corrected, warnings = await _validate_filter_values(client, filters)
+        assert corrected[0]["value"] == ["AmazonEC2", "AmazonS3"]
+        assert len(warnings) == 1
+
+    @pytest.mark.asyncio
+    async def test_api_error_skips_validation(self):
+        from src.finout_mcp_server.server import _validate_filter_values
+
+        client = Mock()
+        client.get_filter_values = AsyncMock(side_effect=Exception("API error"))
+
+        filters = [
+            {"key": "service", "costCenter": "amazon-cur", "type": "col", "value": "anything"}
+        ]
+        corrected, warnings = await _validate_filter_values(client, filters)
+        assert corrected[0]["value"] == "anything"
+        assert len(warnings) == 1
+        assert "validation skipped" in warnings[0]
+
+
+class TestFormatSearchResultsWithSamples:
+    """Tests for format_search_results with sample values."""
+
+    def test_renders_sample_values(self):
+        from src.finout_mcp_server.filter_utils import format_search_results
+
+        results = [
+            {
+                "key": "service",
+                "type": "col",
+                "costCenter": "amazon-cur",
+                "path": "AWS/Services",
+                "relevance": 100,
+                "value_count": 45,
+            }
+        ]
+        sample_values = {"amazon-cur:col:service": ["AmazonEC2", "AmazonS3", "AmazonRDS"]}
+        formatted = format_search_results(results, sample_values=sample_values)
+        assert "AmazonEC2" in formatted
+        assert "AmazonS3" in formatted
+        assert "Values:" in formatted
+
+    def test_no_samples_still_works(self):
+        from src.finout_mcp_server.filter_utils import format_search_results
+
+        results = [
+            {
+                "key": "region",
+                "type": "col",
+                "costCenter": "amazon-cur",
+                "path": "AWS/Regions",
+                "relevance": 80,
+                "value_count": 20,
+            }
+        ]
+        formatted = format_search_results(results)
+        assert "region" in formatted
+        assert "Values:" not in formatted
+
+    def test_groups_by_cost_center_and_type(self):
+        from src.finout_mcp_server.filter_utils import format_search_results
+
+        results = [
+            {
+                "key": "service",
+                "type": "col",
+                "costCenter": "amazon-cur",
+                "path": "AWS/Services",
+                "relevance": 100,
+                "value_count": 45,
+            },
+            {
+                "key": "env",
+                "type": "tag",
+                "costCenter": "amazon-cur",
+                "path": "AWS/Tags/env",
+                "relevance": 80,
+                "value_count": 3,
+            },
+            {
+                "key": "project",
+                "type": "col",
+                "costCenter": "GCP",
+                "path": "GCP/Projects",
+                "relevance": 60,
+                "value_count": 10,
+            },
+        ]
+        formatted = format_search_results(results)
+        assert "## amazon-cur" in formatted
+        assert "## GCP" in formatted
+        assert "### col" in formatted
+        assert "### tag" in formatted
+
+
+SAMPLE_METADATA = {
+    "amazon-cur": {
+        "col": [
+            {"key": "service", "path": "AMAZON-CUR/Service", "values": {}},
+            {"key": "region", "path": "AMAZON-CUR/Region", "values": {}},
+        ],
+        "finrichment": [
+            {"key": "finrichment_product_name", "path": "AWS/Product Name", "values": {}},
+        ],
+        "tag": [
+            {"key": "environment", "path": "AWS/Tags/environment", "values": {}},
+        ],
+    },
+    "GCP": {
+        "col": [
+            {"key": "service", "path": "GCP/Service", "values": {}},
+        ],
+    },
+}
+
+
+class TestValidateFilterMetadata:
+    """Tests for _validate_filter_metadata."""
+
+    @pytest.mark.asyncio
+    async def test_exact_metadata_passes(self):
+        from src.finout_mcp_server.server import _validate_filter_metadata
+
+        client = Mock()
+        client.get_filters_metadata = AsyncMock(return_value=SAMPLE_METADATA)
+
+        filters = [
+            {
+                "key": "finrichment_product_name",
+                "costCenter": "amazon-cur",
+                "type": "finrichment",
+                "path": "AWS/Product Name",
+                "value": "Amazon Elastic Compute Cloud",
+            }
+        ]
+        corrected, warnings = await _validate_filter_metadata(client, filters)
+        assert corrected[0]["type"] == "finrichment"
+        assert corrected[0]["path"] == "AWS/Product Name"
+        assert warnings == []
+
+    @pytest.mark.asyncio
+    async def test_wrong_type_auto_corrected(self):
+        """The exact bug: Claude sends type='col' when it should be 'finrichment'."""
+        from src.finout_mcp_server.server import _validate_filter_metadata
+
+        client = Mock()
+        client.get_filters_metadata = AsyncMock(return_value=SAMPLE_METADATA)
+
+        filters = [
+            {
+                "key": "finrichment_product_name",
+                "costCenter": "amazon-cur",
+                "type": "col",
+                "path": "AMAZON-CUR/Product",
+                "value": "Amazon Elastic Compute Cloud",
+            }
+        ]
+        corrected, warnings = await _validate_filter_metadata(client, filters)
+        assert corrected[0]["type"] == "finrichment"
+        assert corrected[0]["path"] == "AWS/Product Name"
+        assert len(warnings) == 1
+        assert "auto-corrected" in warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_wrong_path_auto_corrected(self):
+        from src.finout_mcp_server.server import _validate_filter_metadata
+
+        client = Mock()
+        client.get_filters_metadata = AsyncMock(return_value=SAMPLE_METADATA)
+
+        filters = [
+            {
+                "key": "service",
+                "costCenter": "amazon-cur",
+                "type": "col",
+                "path": "wrong/path",
+                "value": "AmazonEC2",
+            }
+        ]
+        corrected, warnings = await _validate_filter_metadata(client, filters)
+        assert corrected[0]["path"] == "AMAZON-CUR/Service"
+        assert len(warnings) == 1
+
+    @pytest.mark.asyncio
+    async def test_key_not_in_cost_center_but_exists_elsewhere(self):
+        from src.finout_mcp_server.server import _validate_filter_metadata
+
+        client = Mock()
+        client.get_filters_metadata = AsyncMock(return_value=SAMPLE_METADATA)
+
+        filters = [
+            {
+                "key": "environment",
+                "costCenter": "GCP",
+                "type": "tag",
+                "path": "GCP/Tags/environment",
+                "value": "production",
+            }
+        ]
+        with pytest.raises(ValueError, match="not found in cost center 'GCP'"):
+            await _validate_filter_metadata(client, filters)
+
+    @pytest.mark.asyncio
+    async def test_key_not_found_anywhere(self):
+        from src.finout_mcp_server.server import _validate_filter_metadata
+
+        client = Mock()
+        client.get_filters_metadata = AsyncMock(return_value=SAMPLE_METADATA)
+
+        filters = [
+            {
+                "key": "nonexistent_filter",
+                "costCenter": "amazon-cur",
+                "type": "col",
+                "path": "whatever",
+                "value": "x",
+            }
+        ]
+        with pytest.raises(ValueError, match="not found"):
+            await _validate_filter_metadata(client, filters)
+
+    @pytest.mark.asyncio
+    async def test_metadata_api_error_skips_validation(self):
+        from src.finout_mcp_server.server import _validate_filter_metadata
+
+        client = Mock()
+        client.get_filters_metadata = AsyncMock(side_effect=Exception("API error"))
+
+        filters = [
+            {
+                "key": "service",
+                "costCenter": "amazon-cur",
+                "type": "col",
+                "path": "whatever",
+                "value": "x",
+            }
+        ]
+        corrected, warnings = await _validate_filter_metadata(client, filters)
+        # Should pass through unchanged but with a warning
+        assert corrected[0]["type"] == "col"
+        assert len(warnings) == 1
+        assert "validation skipped" in warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_ambiguous_key_raises(self):
+        """When a key exists under multiple types, should fail instead of guessing."""
+        from src.finout_mcp_server.server import _validate_filter_metadata
+
+        ambiguous_metadata = {
+            "amazon-cur": {
+                "col": [
+                    {"key": "product_name", "path": "AMAZON-CUR/Product", "values": {}},
+                ],
+                "finrichment": [
+                    {"key": "product_name", "path": "AWS/Product Name", "values": {}},
+                ],
+            },
+        }
+        client = Mock()
+        client.get_filters_metadata = AsyncMock(return_value=ambiguous_metadata)
+
+        filters = [
+            {
+                "key": "product_name",
+                "costCenter": "amazon-cur",
+                "type": "tag",
+                "path": "wrong",
+                "value": "x",
+            }
+        ]
+        with pytest.raises(ValueError, match="matches multiple filters"):
+            await _validate_filter_metadata(client, filters)

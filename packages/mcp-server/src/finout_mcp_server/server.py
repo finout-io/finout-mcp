@@ -9,7 +9,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ruff: noqa: E402
+import asyncio
 import json
+import logging
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
@@ -119,6 +121,237 @@ def _auto_granularity(time_period: str) -> str:
     return "daily"
 
 
+logger = logging.getLogger(__name__)
+
+
+def _find_closest_values(target: str, known_values: list[str], top_n: int = 5) -> list[str]:
+    """Find the closest matching values using substring and character overlap."""
+    target_lower = target.lower()
+    scored: list[tuple[float, str]] = []
+
+    for val in known_values:
+        val_lower = val.lower()
+        score = 0.0
+
+        # Exact case-insensitive match
+        if val_lower == target_lower:
+            score = 100.0
+        # Target is substring of value
+        elif target_lower in val_lower:
+            score = 70.0 + (len(target_lower) / len(val_lower)) * 20
+        # Value is substring of target
+        elif val_lower in target_lower:
+            score = 50.0 + (len(val_lower) / len(target_lower)) * 20
+        else:
+            # Character overlap ratio
+            target_chars = set(target_lower)
+            val_chars = set(val_lower)
+            if target_chars and val_chars:
+                overlap = len(target_chars & val_chars)
+                score = (overlap / max(len(target_chars), len(val_chars))) * 40
+
+        if score > 5:
+            scored.append((score, val))
+
+    scored.sort(key=lambda x: -x[0])
+    return [val for _, val in scored[:top_n]]
+
+
+async def _validate_filter_values(
+    client: FinoutClient,
+    filters: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Validate filter values against known values and auto-correct case mismatches.
+
+    Returns:
+        Tuple of (corrected_filters, warnings).
+        Raises ValueError if a value is not found.
+    """
+    corrected = [dict(f) for f in filters]
+    warnings: list[str] = []
+
+    for i, f in enumerate(corrected):
+        value = f.get("value")
+        filter_key = f.get("key", "")
+        cost_center = f.get("costCenter")
+        filter_type = f.get("type")
+
+        if value is None:
+            continue
+
+        # Fetch known values for this filter
+        try:
+            limit = 2000
+            known_values = await client.get_filter_values(
+                filter_key, cost_center, filter_type, limit=limit
+            )
+        except Exception:
+            logger.debug("Could not fetch values for filter %s, skipping validation", filter_key)
+            warnings.append(
+                f"Filter '{filter_key}': value validation skipped (could not fetch known values). "
+                f"The value '{value}' was NOT verified."
+            )
+            continue
+
+        if not known_values:
+            continue
+
+        # Build case-insensitive lookup
+        lower_to_actual: dict[str, str] = {}
+        for kv in known_values:
+            kv_str = str(kv)
+            lower_to_actual[kv_str.lower()] = kv_str
+
+        values_to_check = value if isinstance(value, list) else [value]
+        corrected_values: list[str] = []
+
+        for v in values_to_check:
+            v_str = str(v)
+            if v_str in [str(kv) for kv in known_values]:
+                # Exact match
+                corrected_values.append(v_str)
+            elif v_str.lower() in lower_to_actual:
+                # Case mismatch - auto-correct
+                actual = lower_to_actual[v_str.lower()]
+                corrected_values.append(actual)
+                warnings.append(
+                    f"Filter '{filter_key}': auto-corrected '{v_str}' → '{actual}' (case mismatch)"
+                )
+            else:
+                # Value not found
+                suggestions = _find_closest_values(v_str, [str(kv) for kv in known_values])
+                suggestion_text = ", ".join(suggestions) if suggestions else "none"
+                raise ValueError(
+                    f"Filter '{filter_key}': value '{v_str}' not found.\n"
+                    f"Closest matches: {suggestion_text}\n\n"
+                    f"Call get_filter_values(filter_key='{filter_key}', "
+                    f"cost_center='{cost_center}', filter_type='{filter_type}') "
+                    f"to see all valid values."
+                )
+
+        if isinstance(value, list):
+            corrected[i]["value"] = corrected_values
+        else:
+            corrected[i]["value"] = corrected_values[0]
+
+    return corrected, warnings
+
+
+async def _validate_filter_metadata(
+    client: FinoutClient,
+    filters: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Validate filter key/type/path against known filter metadata and auto-correct mismatches.
+
+    Returns:
+        Tuple of (corrected_filters, warnings).
+        Raises ValueError if a filter key is not found.
+    """
+    try:
+        metadata = await client.get_filters_metadata()
+    except Exception:
+        logger.debug("Could not fetch filter metadata, skipping metadata validation")
+        return filters, [
+            "Filter metadata validation skipped (could not fetch filter registry). "
+            "Filter type/path were NOT verified — results may be incorrect."
+        ]
+
+    # Build lookup: (costCenter, key) -> list of {type, path}
+    known: dict[tuple[str, str], list[dict[str, str]]] = {}
+    # Also build key-only lookup for cross-costCenter suggestions
+    key_index: dict[str, list[dict[str, str]]] = {}
+
+    for cc, filter_types in metadata.items():
+        if not isinstance(filter_types, dict):
+            continue
+        for ft, filter_list in filter_types.items():
+            if not isinstance(filter_list, list):
+                continue
+            for f in filter_list:
+                key = f.get("key", "")
+                path = f.get("path", "")
+                entry = {"costCenter": cc, "type": ft, "path": path, "key": key}
+                known.setdefault((cc, key), []).append(entry)
+                key_index.setdefault(key.lower(), []).append(entry)
+
+    corrected = [dict(f) for f in filters]
+    warnings: list[str] = []
+
+    for i, f in enumerate(corrected):
+        filter_key = f.get("key", "")
+        cost_center = f.get("costCenter", "")
+        filter_type = f.get("type", "")
+        filter_path = f.get("path", "")
+
+        # Check if exact (costCenter, key) exists
+        matches = known.get((cost_center, filter_key))
+
+        if matches:
+            # Key exists in this cost center — check type/path
+            exact = [m for m in matches if m["type"] == filter_type and m["path"] == filter_path]
+            if exact:
+                continue  # Perfect match
+
+            # Type or path is wrong
+            if len(matches) == 1:
+                # Unambiguous — auto-correct
+                best = matches[0]
+                old_type = filter_type
+                old_path = filter_path
+                corrected[i]["type"] = best["type"]
+                corrected[i]["path"] = best["path"]
+
+                parts = []
+                if old_type != best["type"]:
+                    parts.append(f"type '{old_type}' → '{best['type']}'")
+                if old_path != best["path"]:
+                    parts.append(f"path '{old_path}' → '{best['path']}'")
+                warnings.append(
+                    f"Filter '{filter_key}': auto-corrected {', '.join(parts)}. "
+                    f"Always copy exact metadata from search_filters results."
+                )
+                continue
+
+            # Ambiguous — multiple type/path candidates, fail with options
+            options = [f"  type='{m['type']}', path='{m['path']}'" for m in matches]
+            raise ValueError(
+                f"Filter key '{filter_key}' in '{cost_center}' matches multiple filters:\n"
+                + "\n".join(options)
+                + "\n\n"
+                f"Call search_filters('{filter_key}') and copy the exact filter object."
+            )
+
+        # Key not found in this cost center — check other cost centers
+        lower_matches = key_index.get(filter_key.lower(), [])
+        if lower_matches:
+            # Found in other cost centers — show where it actually is
+            options = [
+                f"  costCenter='{m['costCenter']}', type='{m['type']}', path='{m['path']}'"
+                for m in lower_matches[:5]
+            ]
+            raise ValueError(
+                f"Filter key '{filter_key}' not found in cost center '{cost_center}'.\n"
+                f"Found in:\n" + "\n".join(options) + "\n\n"
+                f"Call search_filters('{filter_key}') to find the correct filter metadata."
+            )
+
+        # Key not found anywhere — suggest similar keys
+        all_keys = list({entry["key"] for entries in key_index.values() for entry in entries})
+        suggestions = _find_closest_values(filter_key, all_keys)
+        if suggestions:
+            raise ValueError(
+                f"Filter key '{filter_key}' not found.\n"
+                f"Similar filters: {', '.join(suggestions)}\n\n"
+                f"Call search_filters('{filter_key}') to find the correct filter."
+            )
+        raise ValueError(
+            f"Filter key '{filter_key}' not found.\n"
+            f"Call search_filters to discover available filters."
+        )
+
+    return corrected, warnings
+
+
 def _allowed_tools_for_runtime() -> set[str]:
     if runtime_mode == MCPMode.VECTIQOR_INTERNAL.value:
         return VECTIQOR_INTERNAL_TOOLS
@@ -214,10 +447,10 @@ async def list_tools() -> list[Tool]:
                 "WHEN TO USE: When the user asks about spending, costs, bills, expenses, "
                 "or usage for any cloud service or resource.\n\n"
                 "WORKFLOW (follow this order):\n"
-                "1) ALWAYS call search_filters first to find relevant filters (unless you already have filter metadata)\n"
-                "2) Copy the FULL filter object from search results (costCenter, key, path, type)\n"
-                "3) Preserve EXACT capitalization - cost centers are case-sensitive!\n"
-                "4) Add operator ('is' for equals) and value (single string), then query\n\n"
+                "1) ALWAYS call search_filters first — it returns a 'filters' list with ready-to-use objects\n"
+                "2) Copy the EXACT filter object from the 'filters' list (costCenter, key, path, type)\n"
+                "3) Call get_filter_values to discover the correct value (values are unintuitive!)\n"
+                "4) Add operator ('is' or 'oneOf') and the verified value, then query\n\n"
                 "TIME-SERIES: The API always returns time-series data (nested 'data' array per row). "
                 "The server auto-selects the right granularity — omit x_axis_group_by unless the user "
                 "explicitly requests a different one. NEVER manually aggregate or sum numbers — "
@@ -234,10 +467,11 @@ async def list_tools() -> list[Tool]:
                 '- AWS EC2 hours: {"usageType": "usageAmount", "costCenter": "amazon-cur", "units": "Hrs"}\n'
                 '- Azure hours: {"usageType": "usageAmount", "costCenter": "Azure", "units": "1 Hour"}\n'
                 '- GCP hours: {"usageType": "usageAmount", "costCenter": "GCP", "units": "Hour"}\n\n'
-                "FILTER EXAMPLES:\n\n"
-                "Standard column (service):\n"
+                "FILTER EXAMPLES (note: type varies — col, tag, finrichment, namespace_object, etc.):\n\n"
+                "Finrichment column (product name):\n"
                 "filters: [{'costCenter': 'amazon-cur', 'key': 'finrichment_product_name', "
-                "'path': 'AMAZON-CUR/Product', 'type': 'col', 'operator': 'is', 'value': 'ec2'}]\n\n"
+                "'path': 'AWS/Product Name', 'type': 'finrichment', 'operator': 'is', "
+                "'value': 'Amazon Elastic Compute Cloud'}]\n\n"
                 "Kubernetes deployment:\n"
                 "filters: [{'costCenter': 'kubernetes', 'key': 'deployment', "
                 "'path': 'Kubernetes/Resources/deployment', 'type': 'namespace_object', "
@@ -246,10 +480,13 @@ async def list_tools() -> list[Tool]:
                 "filters: [{'costCenter': 'amazon-cur', 'key': 'environment', "
                 "'path': 'AWS/Tags/environment', 'type': 'tag', 'operator': 'is', 'value': 'production'}]\n\n"
                 "CRITICAL RULES:\n"
-                "- NEVER guess the filter type - ALWAYS use search_filters first\n"
-                "- COPY the exact 'type' value from search results\n"
+                "- NEVER construct filters from memory. ALWAYS copy from search_filters 'filters' list.\n"
+                "- The 'type' field is NOT always 'col' — it can be 'finrichment', 'tag', 'namespace_object', etc.\n"
+                "- COPY costCenter, key, path, type EXACTLY from search_filters results. Do NOT modify them.\n"
                 "- operator: 'is' for single value, 'oneOf' for multiple values (OR)\n"
-                "- value: String for 'is', array for 'oneOf'"
+                "- value: String for 'is', array for 'oneOf'\n"
+                "- Filter metadata AND values are VALIDATED server-side. Wrong type/path/value WILL fail.\n"
+                "- Values are often unintuitive (e.g., 'AmazonEC2' not 'ec2'). Always verify with get_filter_values."
             ),
             inputSchema={
                 "type": "object",
@@ -285,10 +522,12 @@ async def list_tools() -> list[Tool]:
                                 "type": {
                                     "type": "string",
                                     "description": (
-                                        "Filter type - MUST copy EXACT value from search_filters! "
-                                        "Common types: 'col' (columns), 'tag' (tags), "
-                                        "'namespace_object' (K8s resources like deployment/pod/service). "
-                                        "DO NOT guess - always use the exact type from search results!"
+                                        "Filter type - MUST copy EXACT value from search_filters 'filters' list! "
+                                        "Types include: 'col' (standard columns), 'tag' (custom tags), "
+                                        "'finrichment' (enriched dimensions like product name), "
+                                        "'namespace_object' (K8s resources). "
+                                        "DO NOT default to 'col' — the correct type depends on the filter. "
+                                        "ALWAYS copy from search_filters results."
                                     ),
                                 },
                                 "operator": {
@@ -429,10 +668,12 @@ async def list_tools() -> list[Tool]:
                                 "type": {
                                     "type": "string",
                                     "description": (
-                                        "Filter type - MUST copy EXACT value from search_filters! "
-                                        "Common types: 'col' (columns), 'tag' (tags), "
-                                        "'namespace_object' (K8s resources like deployment/pod/service). "
-                                        "DO NOT guess - always use the exact type from search results!"
+                                        "Filter type - MUST copy EXACT value from search_filters 'filters' list! "
+                                        "Types include: 'col' (standard columns), 'tag' (custom tags), "
+                                        "'finrichment' (enriched dimensions like product name), "
+                                        "'namespace_object' (K8s resources). "
+                                        "DO NOT default to 'col' — the correct type depends on the filter. "
+                                        "ALWAYS copy from search_filters results."
                                     ),
                                 },
                                 "operator": {
@@ -823,7 +1064,9 @@ async def list_tools() -> list[Tool]:
                 "and search for matching filters.\n\n"
                 "WHEN TO USE: Before ANY call to query_costs or compare_costs. "
                 "This discovers the filter metadata (costCenter, key, path, type) needed for queries.\n\n"
-                "CHAIN: search_filters → get_filter_values (if needed to verify exact values) → query_costs\n\n"
+                "CHAIN: search_filters → get_filter_values (MANDATORY to verify exact values) → query_costs\n\n"
+                "Results include sample values for top matches to help identify correct filter values. "
+                "Values are often unintuitive (e.g., 'AmazonEC2' not 'ec2', 'AmazonS3' not 's3').\n\n"
                 "Searches BOTH columns (service, region, account) AND tags (environment, team, custom labels).\n\n"
                 "Examples:\n"
                 "- search_filters('service') → AWS/GCP services\n"
@@ -1438,6 +1681,14 @@ async def query_costs_impl(args: dict) -> dict:
                     "⚠️ Common mistake: type should be 'col' for standard filters, not 'filter'"
                 )
 
+    # Validate filter metadata (key/type/path) and values
+    validation_warnings: list[str] = []
+    if filters:
+        filters, meta_warnings = await _validate_filter_metadata(finout_client, filters)
+        validation_warnings.extend(meta_warnings)
+        filters, value_warnings = await _validate_filter_values(finout_client, filters)
+        validation_warnings.extend(value_warnings)
+
     # Validate group_by structure
     if group_by:
         for i, g in enumerate(group_by):
@@ -1463,7 +1714,7 @@ async def query_costs_impl(args: dict) -> dict:
     summarized = summarize_cost_data(data, max_items=50)
 
     # Format response
-    return {
+    result: dict[str, Any] = {
         "time_period": time_period,
         "filters": filters,
         "group_by": group_by,
@@ -1474,6 +1725,9 @@ async def query_costs_impl(args: dict) -> dict:
             "No table needed. Call render_chart to visualize key data points."
         ),
     }
+    if validation_warnings:
+        result["_validation_warnings"] = validation_warnings
+    return result
 
 
 async def compare_costs_impl(args: dict) -> dict:
@@ -1494,6 +1748,14 @@ async def compare_costs_impl(args: dict) -> dict:
                 "Set FINOUT_API_URL environment variable."
             ),
         }
+
+    # Validate filter metadata (key/type/path) and values
+    validation_warnings: list[str] = []
+    if filters:
+        filters, meta_warnings = await _validate_filter_metadata(finout_client, filters)
+        validation_warnings.extend(meta_warnings)
+        filters, value_warnings = await _validate_filter_values(finout_client, filters)
+        validation_warnings.extend(value_warnings)
 
     # Query both periods with same filters
     current_data = await finout_client.query_costs_with_filters(
@@ -1589,6 +1851,8 @@ async def compare_costs_impl(args: dict) -> dict:
         "Lead with the trend (up/down), then the delta, then the breakdown. "
         "Always include both percentage and absolute dollar change."
     )
+    if validation_warnings:
+        result["_validation_warnings"] = validation_warnings
 
     return result
 
@@ -1888,15 +2152,55 @@ async def search_filters_impl(args: dict) -> dict:
     # Search filters
     results = await finout_client.search_filters(query, cost_center, limit=50)
 
+    # Fetch sample values for top 5 results in parallel
+    sample_values: dict[str, list[str]] = {}
+    top_results = results[:5]
+    if top_results:
+
+        async def _fetch_samples(r: dict) -> tuple[str, list[str]]:
+            key = f"{r.get('costCenter', '')}:{r.get('type', '')}:{r.get('key', '')}"
+            try:
+                vals = await finout_client.get_filter_values(
+                    r.get("key", ""),
+                    r.get("costCenter"),
+                    r.get("type"),
+                    limit=8,
+                )
+                return key, [str(v) for v in vals]
+            except Exception:
+                return key, []
+
+        fetched = await asyncio.gather(*[_fetch_samples(r) for r in top_results])
+        for sv_key, vals in fetched:
+            if vals:
+                sample_values[sv_key] = vals
+
     # Format for LLM
-    formatted = format_search_results(results, max_results=50)
+    formatted = format_search_results(results, max_results=50, sample_values=sample_values)
+
+    # Build copy-pasteable filter objects for top results
+    copy_paste_filters = [
+        {
+            "costCenter": r["costCenter"],
+            "key": r["key"],
+            "path": r["path"],
+            "type": r["type"],
+        }
+        for r in results[:10]
+    ]
 
     return {
         "query": query,
         "cost_center": cost_center,
         "result_count": len(results),
         "results": formatted,
-        "note": "Use get_filter_values to fetch values for any of these filters",
+        "filters": copy_paste_filters,
+        "instruction": (
+            "To query costs, pick a filter from the 'filters' list above, "
+            "then add 'operator' and 'value'. "
+            "Values are often unintuitive — call get_filter_values first to verify. "
+            "Do NOT modify costCenter, key, path, or type."
+        ),
         "_presentation_hint": ("Don't show raw results to user. Use them to build the next query."),
     }
 
@@ -1975,11 +2279,32 @@ async def get_filter_values_impl(args: dict) -> dict:
         filter_key, cost_center, filter_type, limit=limit
     )
 
+    # Look up path from filter metadata so the LLM has the complete filter object
+    filter_path = None
+    try:
+        metadata = await finout_client.get_filters_metadata()
+        if cost_center and cost_center in metadata:
+            types = metadata[cost_center]
+            for ft, filter_list in types.items():
+                if filter_type and ft != filter_type:
+                    continue
+                if isinstance(filter_list, list):
+                    for f in filter_list:
+                        if f.get("key") == filter_key:
+                            filter_path = f.get("path")
+                            if not filter_type:
+                                filter_type = ft
+                            break
+                if filter_path:
+                    break
+    except Exception:
+        pass
+
     # Truncate and format
     truncated = truncate_filter_values(values, limit=limit, include_stats=True)
     formatted = format_filter_values(filter_key, truncated, cost_center)
 
-    return {
+    result: dict[str, Any] = {
         "filter_key": filter_key,
         "cost_center": cost_center,
         "filter_type": filter_type,
@@ -1990,6 +2315,20 @@ async def get_filter_values_impl(args: dict) -> dict:
             "is_truncated": truncated["is_truncated"],
         },
     }
+
+    # Include ready-to-use filter object for query_costs
+    if filter_path and cost_center and filter_type:
+        result["filter_object"] = {
+            "costCenter": cost_center,
+            "key": filter_key,
+            "path": filter_path,
+            "type": filter_type,
+        }
+        result["instruction"] = (
+            "Copy filter_object into query_costs filters, then add 'operator' and 'value'."
+        )
+
+    return result
 
 
 async def get_usage_unit_types_impl(args: dict) -> dict:
