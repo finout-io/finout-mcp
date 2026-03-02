@@ -1132,7 +1132,7 @@ class FinoutClient:
         self,
         time_period: str = "last_30_days",
         filters: list[dict[str, Any]] | None = None,
-        group_by: list[str] | None = None,
+        group_by: list[dict[str, Any]] | None = None,
         x_axis_group_by: str | None = None,
         cost_type: CostType = CostType.NET_AMORTIZED,
         usage_configuration: dict[str, Any] | None = None,
@@ -1143,7 +1143,7 @@ class FinoutClient:
         Args:
             time_period: Time period string (e.g., 'last_30_days')
             filters: List of filter objects with key, value, operator
-            group_by: List of dimensions to group by
+            group_by: List of group-by dimension objects (costCenter, key, path, type)
             x_axis_group_by: X-axis grouping (e.g., "daily", "monthly")
             cost_type: Type of cost metric to retrieve
             usage_configuration: Usage config for querying usage instead of cost

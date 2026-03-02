@@ -258,6 +258,8 @@ async def _validate_filter_metadata(
 
     # Build lookup: (costCenter, key) -> list of {type, path}
     known: dict[tuple[str, str], list[dict[str, str]]] = {}
+    # Case-insensitive lookup for robust matching of model-provided keys
+    known_lower: dict[tuple[str, str], list[dict[str, str]]] = {}
     # Also build key-only lookup for cross-costCenter suggestions
     key_index: dict[str, list[dict[str, str]]] = {}
 
@@ -272,6 +274,7 @@ async def _validate_filter_metadata(
                 path = f.get("path", "")
                 entry = {"costCenter": cc, "type": ft, "path": path, "key": key}
                 known.setdefault((cc, key), []).append(entry)
+                known_lower.setdefault((cc.lower(), key.lower()), []).append(entry)
                 key_index.setdefault(key.lower(), []).append(entry)
 
     corrected = [dict(f) for f in filters]
@@ -285,6 +288,9 @@ async def _validate_filter_metadata(
 
         # Check if exact (costCenter, key) exists
         matches = known.get((cost_center, filter_key))
+        if not matches:
+            # Fall back to case-insensitive lookup in the same cost center.
+            matches = known_lower.get((cost_center.lower(), filter_key.lower()))
 
         if matches:
             # Key exists in this cost center — check type/path
@@ -561,9 +567,11 @@ async def list_tools() -> list[Tool]:
                                 "path": {"type": "string"},
                                 "type": {
                                     "type": "string",
-                                    "description": "Filter type: 'col' for columns, 'resource' for resources (RDS/SQS/K8s/ECR), 'tag' for tags",
-                                    "default": "col",
-                                    "enum": ["col", "resource", "tag"],
+                                    "description": (
+                                        "Filter type - MUST copy from search_filters 'filters' list. "
+                                        "Same types as filters: 'col', 'tag', 'finrichment', "
+                                        "'namespace_object', etc. DO NOT default to 'col'."
+                                    ),
                                 },
                             },
                             "required": ["costCenter", "key", "path", "type"],
@@ -702,9 +710,11 @@ async def list_tools() -> list[Tool]:
                                 "path": {"type": "string"},
                                 "type": {
                                     "type": "string",
-                                    "description": "Filter type: 'col' for columns, 'resource' for resources (RDS/SQS/K8s/ECR), 'tag' for tags",
-                                    "default": "col",
-                                    "enum": ["col", "resource", "tag"],
+                                    "description": (
+                                        "Filter type - MUST copy from search_filters 'filters' list. "
+                                        "Same types as filters: 'col', 'tag', 'finrichment', "
+                                        "'namespace_object', etc. DO NOT default to 'col'."
+                                    ),
                                 },
                             },
                             "required": ["costCenter", "key", "path", "type"],
@@ -1689,7 +1699,7 @@ async def query_costs_impl(args: dict) -> dict:
         filters, value_warnings = await _validate_filter_values(finout_client, filters)
         validation_warnings.extend(value_warnings)
 
-    # Validate group_by structure
+    # Validate group_by structure and metadata
     if group_by:
         for i, g in enumerate(group_by):
             required_fields = ["costCenter", "key", "path", "type"]
@@ -1700,6 +1710,8 @@ async def query_costs_impl(args: dict) -> dict:
                     "group_by must include: costCenter, key, path, type\n"
                     "Copy these from search_filters results (same as filter structure minus operator/value)"
                 )
+        group_by, gb_warnings = await _validate_filter_metadata(finout_client, group_by)
+        validation_warnings.extend(gb_warnings)
 
     # Query costs using internal API
     data = await finout_client.query_costs_with_filters(
@@ -2179,15 +2191,21 @@ async def search_filters_impl(args: dict) -> dict:
     formatted = format_search_results(results, max_results=50, sample_values=sample_values)
 
     # Build copy-pasteable filter objects for top results
-    copy_paste_filters = [
-        {
-            "costCenter": r["costCenter"],
-            "key": r["key"],
-            "path": r["path"],
-            "type": r["type"],
-        }
-        for r in results[:10]
-    ]
+    copy_paste_filters = []
+    for r in results[:10]:
+        cost_center_value = r.get("costCenter")
+        key_value = r.get("key")
+        path_value = r.get("path")
+        type_value = r.get("type")
+        if all([cost_center_value, key_value, path_value, type_value]):
+            copy_paste_filters.append(
+                {
+                    "costCenter": cost_center_value,
+                    "key": key_value,
+                    "path": path_value,
+                    "type": type_value,
+                }
+            )
 
     return {
         "query": query,
@@ -3174,6 +3192,43 @@ def _subgraph_ids(seed_ids: set[str], edge_counts: dict[tuple[str, str], int]) -
     return bfs(seed_ids, forward) | bfs(seed_ids, backward) | seed_ids
 
 
+_MAX_LIVE_VALUES = 50
+
+
+async def _fetch_virtual_tag_live_values(
+    client: FinoutClient,
+    seed_ids: set[str],
+    tag_map: dict[str, str],
+) -> dict[str, dict[str, Any]]:
+    """Fetch actual values from the filters API for virtual tags.
+
+    Returns dict mapping tag name to {values, truncated}.
+    """
+    results: dict[str, dict[str, Any]] = {}
+
+    async def _fetch_one(tag_name: str) -> tuple[str, list[str]]:
+        try:
+            values = await client.get_filter_values(
+                filter_key=tag_name,
+                cost_center="virtualTag",
+                limit=_MAX_LIVE_VALUES,
+            )
+            return tag_name, [str(v) for v in values]
+        except Exception:
+            return tag_name, []
+
+    tag_names = [tag_map[tid] for tid in seed_ids if tid in tag_map]
+    fetched = await asyncio.gather(*[_fetch_one(name) for name in tag_names])
+    for name, values in fetched:
+        if values:
+            entry: dict[str, Any] = {"values": values}
+            if len(values) >= _MAX_LIVE_VALUES:
+                entry["truncated"] = True
+            results[name] = entry
+
+    return results
+
+
 async def analyze_virtual_tags_impl(args: dict) -> dict:
     assert finout_client is not None
 
@@ -3224,9 +3279,18 @@ async def analyze_virtual_tags_impl(args: dict) -> dict:
     }
 
     if focused:
-        result["focused_tag"] = _focused_tag_detail(
+        focused_detail = _focused_tag_detail(
             seed_ids, edge_counts, tag_map, tag_index, tag_id_to_type
         )
+
+        # Fetch live values from the filters API for seed tags
+        live_values = await _fetch_virtual_tag_live_values(finout_client, seed_ids, tag_map)
+        for entry in focused_detail:
+            tag_name_key = entry["name"]
+            if tag_name_key in live_values:
+                entry["live_values"] = live_values[tag_name_key]
+
+        result["focused_tag"] = focused_detail
         result["subgraph_analysis"] = _subgraph_analysis(
             subgraph_tags, edge_counts, tag_map, tag_id_to_type
         )
@@ -3251,7 +3315,10 @@ async def analyze_virtual_tags_impl(args: dict) -> dict:
                 "Use focused_tag, subgraph_analysis, and tag_details to narrate: "
                 "what the tag does, its position in the chain (source/bridge/output), "
                 "what feeds into it, what it feeds into, the chain depth, "
-                "and which underlying cost dimensions power the whole chain."
+                "and which underlying cost dimensions power the whole chain. "
+                "If live_values is present, mention the actual values the tag produces "
+                "in cost data (these come from the filters API, not rule config). "
+                "Compare live_values with config values to highlight gaps or unexpected mappings."
             )
         else:
             result["_presentation_hint"] = (

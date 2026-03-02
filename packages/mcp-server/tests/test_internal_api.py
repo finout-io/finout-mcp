@@ -1510,3 +1510,121 @@ class TestValidateFilterMetadata:
         ]
         with pytest.raises(ValueError, match="matches multiple filters"):
             await _validate_filter_metadata(client, filters)
+
+    @pytest.mark.asyncio
+    async def test_case_mismatch_in_same_cost_center_auto_corrected(self):
+        from src.finout_mcp_server.server import _validate_filter_metadata
+
+        client = Mock()
+        client.get_filters_metadata = AsyncMock(return_value=SAMPLE_METADATA)
+
+        filters = [
+            {
+                "key": "Service",
+                "costCenter": "amazon-cur",
+                "type": "tag",
+                "path": "wrong/path",
+                "value": "AmazonEC2",
+            }
+        ]
+        corrected, warnings = await _validate_filter_metadata(client, filters)
+        assert corrected[0]["type"] == "col"
+        assert corrected[0]["path"] == "AMAZON-CUR/Service"
+        assert len(warnings) == 1
+        assert "auto-corrected" in warnings[0]
+
+
+class TestSearchFiltersImpl:
+    @pytest.mark.asyncio
+    async def test_skips_incomplete_rows_for_copy_paste_filters(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def search_filters(self, query, cost_center, limit=50):
+                return [
+                    {
+                        "costCenter": "amazon-cur",
+                        "key": "service",
+                        "path": "AMAZON-CUR/Service",
+                        "type": "col",
+                        "value_count": 10,
+                    },
+                    {
+                        "costCenter": "amazon-cur",
+                        "key": "broken",
+                        # missing path/type intentionally
+                    },
+                ]
+
+            async def get_filter_values(self, filter_key, cost_center, filter_type, limit=8):
+                return ["AmazonEC2", "AmazonS3"]
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.search_filters_impl({"query": "service"})
+        finally:
+            server_module.finout_client = original_client
+
+        assert result["result_count"] == 2
+        assert len(result["filters"]) == 1
+        assert result["filters"][0] == {
+            "costCenter": "amazon-cur",
+            "key": "service",
+            "path": "AMAZON-CUR/Service",
+            "type": "col",
+        }
+
+
+class TestFetchVirtualTagLiveValues:
+    """Tests for _fetch_virtual_tag_live_values."""
+
+    @pytest.mark.asyncio
+    async def test_fetches_values_for_seed_tags(self):
+        from src.finout_mcp_server.server import _fetch_virtual_tag_live_values
+
+        client = Mock()
+        client.get_filter_values = AsyncMock(return_value=["TeamA", "TeamB", "TeamC"])
+
+        tag_map = {"id1": "Cost Center Tag", "id2": "Other Tag"}
+        result = await _fetch_virtual_tag_live_values(client, {"id1"}, tag_map)
+
+        assert "Cost Center Tag" in result
+        assert result["Cost Center Tag"]["values"] == ["TeamA", "TeamB", "TeamC"]
+        assert "truncated" not in result["Cost Center Tag"]
+        client.get_filter_values.assert_called_once_with(
+            filter_key="Cost Center Tag", cost_center="virtualTag", limit=50
+        )
+
+    @pytest.mark.asyncio
+    async def test_skips_on_api_error(self):
+        from src.finout_mcp_server.server import _fetch_virtual_tag_live_values
+
+        client = Mock()
+        client.get_filter_values = AsyncMock(side_effect=Exception("API error"))
+
+        tag_map = {"id1": "Broken Tag"}
+        result = await _fetch_virtual_tag_live_values(client, {"id1"}, tag_map)
+
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_multiple_seed_tags_in_parallel(self):
+        from src.finout_mcp_server.server import _fetch_virtual_tag_live_values
+
+        async def mock_values(filter_key: str, **kwargs: object) -> list[str]:
+            return [f"{filter_key}_val1", f"{filter_key}_val2"]
+
+        client = Mock()
+        client.get_filter_values = AsyncMock(side_effect=mock_values)
+
+        tag_map = {"id1": "Tag A", "id2": "Tag B"}
+        result = await _fetch_virtual_tag_live_values(client, {"id1", "id2"}, tag_map)
+
+        assert "Tag A" in result
+        assert "Tag B" in result
+        assert client.get_filter_values.call_count == 2
