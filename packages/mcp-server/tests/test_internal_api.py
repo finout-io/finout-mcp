@@ -1628,3 +1628,105 @@ class TestFetchVirtualTagLiveValues:
         assert "Tag A" in result
         assert "Tag B" in result
         assert client.get_filter_values.call_count == 2
+
+
+class TestContextDiscoveryRefactor:
+    @pytest.mark.asyncio
+    async def test_views_and_data_explorers_do_not_crash(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            account_id = "acct-1"
+
+            async def get_dashboards(self):
+                return []
+
+            async def get_views(self):
+                return [
+                    {"id": "view-1", "name": "Cost Overview", "configuration": {"query": {}}},
+                ]
+
+            async def get_data_explorers(self):
+                return [
+                    {"id": "de-1", "name": "Cost Explorer", "description": "Explore cost data"},
+                ]
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.discover_context_impl(
+                {
+                    "query": "cost",
+                    "include_dashboards": False,
+                    "include_views": True,
+                    "include_data_explorers": True,
+                }
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        assert len(result["views"]) == 1
+        assert len(result["data_explorers"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_summary_example_uses_valid_filter_workflow(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            account_id = "acct-1"
+
+            async def get_dashboards(self):
+                return [
+                    {"id": "dash-1", "name": "Cost Dashboard", "widgets": [{"widgetId": "w-1"}]},
+                ]
+
+            async def get_widget(self, widget_id: str):
+                assert widget_id == "w-1"
+                return {
+                    "name": "By Service",
+                    "configuration": {
+                        "filters": {"key": "service", "value": "AmazonEC2", "operator": "is"},
+                        "groupBy": {"key": "service", "path": "AMAZON-CUR/Service", "type": "col"},
+                    },
+                }
+
+            async def get_views(self):
+                return []
+
+            async def get_data_explorers(self):
+                return []
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.discover_context_impl(
+                {
+                    "query": "cost",
+                    "include_dashboards": True,
+                    "include_views": False,
+                    "include_data_explorers": False,
+                }
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        summary = result["summary"]
+        assert "search_filters('service')" in summary
+        assert "'operator': 'eq'" not in summary
+
+
+class TestPromptTemplates:
+    @pytest.mark.asyncio
+    async def test_monthly_cost_review_uses_existing_tools(self):
+        from src.finout_mcp_server.prompts import get_prompt
+
+        prompt = await get_prompt("monthly_cost_review")
+        content = prompt["messages"][0]["content"]
+        assert "query_costs" in content
+        assert "get_cost_summary" not in content
