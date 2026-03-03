@@ -258,6 +258,100 @@ https://billy.your-company.internal
 kubectl scale deployment billy -n billy --replicas=5
 
 # Scale down
+kubectl scale deployment billy -n billy --replicas=2
+```
+
+## Langfuse Full Stack Deployment
+
+This repository now includes a full in-cluster Langfuse stack in the `billy` namespace:
+
+- `langfuse-web` (UI/API)
+- `langfuse-worker`
+- `langfuse-clickhouse` (StatefulSet + PVC)
+- `langfuse-redis` (StatefulSet + PVC)
+- `langfuse-minio` (StatefulSet + PVC)
+
+### 1. Create Langfuse Secrets
+
+```bash
+cp deployments/kubernetes/langfuse-secret.yaml.example deployments/kubernetes/langfuse-secret.yaml
+# edit with real values
+kubectl apply -f deployments/kubernetes/langfuse-secret.yaml
+```
+
+Required keys are documented in the example file:
+- `database-url` (separate Postgres DB for Langfuse metadata)
+- `nextauth-secret`
+- `salt`
+- `encryption-key`
+- `clickhouse-user` / `clickhouse-password`
+- `redis-auth`
+- `minio-root-user` / `minio-root-password`
+- `langfuse-s3-access-key-id` / `langfuse-s3-secret-access-key`
+
+### 2. Apply Langfuse Core Resources
+
+```bash
+kubectl apply -f deployments/kubernetes/langfuse-configmap.yaml
+kubectl apply -f deployments/kubernetes/langfuse-clickhouse.yaml
+kubectl apply -f deployments/kubernetes/langfuse-redis.yaml
+kubectl apply -f deployments/kubernetes/langfuse-minio.yaml
+kubectl apply -f deployments/kubernetes/langfuse-web.yaml
+kubectl apply -f deployments/kubernetes/langfuse-worker.yaml
+```
+
+### 3. Verify Langfuse
+
+```bash
+kubectl get pods -n billy | grep langfuse
+kubectl logs -n billy deploy/langfuse-web --tail=100
+kubectl logs -n billy deploy/langfuse-worker --tail=100
+```
+
+Quick UI access via port-forward:
+
+```bash
+kubectl port-forward -n billy svc/langfuse-web 3000:3000
+# open http://localhost:3000
+```
+
+### 4. Enable Billy -> Langfuse Tracing
+
+`billy-deployment.yaml` already supports optional env wiring:
+- `LANGFUSE_HOST` from `billy-config`
+- `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` from `billy-secrets`
+
+Set values:
+
+```bash
+kubectl patch configmap billy-config -n billy --type merge -p '{
+  "data": {
+    "langfuse-host": "http://langfuse-web:3000"
+  }
+}'
+
+kubectl patch secret billy-secrets -n billy --type merge -p '{
+  "stringData": {
+    "langfuse-public-key": "pk-lf-...",
+    "langfuse-secret-key": "sk-lf-..."
+  }
+}'
+```
+
+Restart Billy:
+
+```bash
+kubectl rollout restart deployment/billy -n billy
+kubectl rollout status deployment/billy -n billy
+```
+
+### 5. Deploy Everything with Kustomize
+
+If both `billy-secret.yaml` and `langfuse-secret.yaml` are created and uncommented in `kustomization.yaml`:
+
+```bash
+kubectl apply -k deployments/kubernetes/
+```
 kubectl scale deployment billy -n billy --replicas=1
 ```
 

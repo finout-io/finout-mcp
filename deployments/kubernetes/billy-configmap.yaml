@@ -11,3 +11,7 @@ data:
 
   # Optional: Log level
   log-level: "INFO"
+
+  # Optional: Langfuse endpoint for Billy tracing
+  # Keep as in-cluster service URL when Langfuse is deployed in this namespace.
+  langfuse-host: "http://langfuse-web:3000"

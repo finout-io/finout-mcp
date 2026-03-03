@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-worker
+  namespace: billy
+  labels:
+    app: langfuse-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-worker
+  template:
+    metadata:
+      labels:
+        app: langfuse-worker
+    spec:
+      containers:
+      - name: worker
+        image: langfuse/langfuse-worker:3
+        envFrom:
+        - configMapRef:
+            name: langfuse-config
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: database-url
+        - name: NEXTAUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: nextauth-secret
+        - name: SALT
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: salt
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: encryption-key
+        - name: CLICKHOUSE_USER
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: clickhouse-user
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: clickhouse-password
+        - name: REDIS_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: redis-auth
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-s3-access-key-id
+        - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-s3-secret-access-key
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-s3-access-key-id
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-s3-secret-access-key
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"

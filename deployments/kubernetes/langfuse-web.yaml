@@ -1,0 +1,170 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-web
+  namespace: billy
+  labels:
+    app: langfuse-web
+spec:
+  selector:
+    app: langfuse-web
+  ports:
+  - name: http
+    port: 3000
+    targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-web
+  namespace: billy
+  labels:
+    app: langfuse-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-web
+  template:
+    metadata:
+      labels:
+        app: langfuse-web
+    spec:
+      containers:
+      - name: web
+        image: langfuse/langfuse:3
+        ports:
+        - containerPort: 3000
+          name: http
+        envFrom:
+        - configMapRef:
+            name: langfuse-config
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: database-url
+        - name: NEXTAUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: nextauth-secret
+        - name: SALT
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: salt
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: encryption-key
+        - name: CLICKHOUSE_USER
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: clickhouse-user
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: clickhouse-password
+        - name: REDIS_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: redis-auth
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-s3-access-key-id
+        - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-s3-secret-access-key
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-s3-access-key-id
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-s3-secret-access-key
+        - name: LANGFUSE_INIT_ORG_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-init-org-id
+              optional: true
+        - name: LANGFUSE_INIT_ORG_NAME
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-init-org-name
+              optional: true
+        - name: LANGFUSE_INIT_PROJECT_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-init-project-id
+              optional: true
+        - name: LANGFUSE_INIT_PROJECT_NAME
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-init-project-name
+              optional: true
+        - name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-init-project-public-key
+              optional: true
+        - name: LANGFUSE_INIT_PROJECT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-init-project-secret-key
+              optional: true
+        - name: LANGFUSE_INIT_USER_EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-init-user-email
+              optional: true
+        - name: LANGFUSE_INIT_USER_NAME
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-init-user-name
+              optional: true
+        - name: LANGFUSE_INIT_USER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secrets
+              key: langfuse-init-user-password
+              optional: true
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+        livenessProbe:
+          httpGet:
+            path: /api/public/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /api/public/health
+            port: 3000
+          initialDelaySeconds: 20
+          periodSeconds: 10

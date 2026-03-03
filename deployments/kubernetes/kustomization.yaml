@@ -9,7 +9,14 @@ resources:
 - billy-deployment.yaml
 - billy-service.yaml
 - billy-ingress.yaml
+- langfuse-configmap.yaml
+- langfuse-clickhouse.yaml
+- langfuse-redis.yaml
+- langfuse-minio.yaml
+- langfuse-web.yaml
+- langfuse-worker.yaml
 # - billy-secret.yaml  # Uncomment after creating from .example
+# - langfuse-secret.yaml  # Uncomment after creating from .example
 
 # Common labels for all resources
 commonLabels:

@@ -71,6 +71,25 @@ spec:
             secretKeyRef:
               name: billy-secrets
               key: anthropic-api-key
+        # Optional Langfuse configuration for tracing
+        - name: LANGFUSE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: billy-config
+              key: langfuse-host
+              optional: true
+        - name: LANGFUSE_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: billy-secrets
+              key: langfuse-public-key
+              optional: true
+        - name: LANGFUSE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: billy-secrets
+              key: langfuse-secret-key
+              optional: true
         resources:
           requests:
             memory: "512Mi"
