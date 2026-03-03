@@ -6,6 +6,7 @@ export interface SendMessageParams {
   conversation_history: Message[]
   model: string
   account_id?: string
+  user_email?: string
 }
 
 export interface ChatStatusEvent {
@@ -53,6 +54,7 @@ export async function sendMessage(params: SendMessageParams): Promise<ChatRespon
         })),
         model: params.model,
         account_id: params.account_id,
+        user_email: params.user_email,
       }),
     })
   } catch (err) {
@@ -87,6 +89,7 @@ export async function sendMessageStream(
         })),
         model: params.model,
         account_id: params.account_id,
+        user_email: params.user_email,
       }),
     })
 

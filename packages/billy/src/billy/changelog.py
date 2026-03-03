@@ -19,6 +19,23 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.4.0",
+        "date": "2026-03-03",
+        "title": "Frontend user identity capture for trace attribution",
+        "sections": {
+            "external_mcp": [
+                "No public MCP API behavior changes."
+            ],
+            "internal_mcp": [
+                "No internal MCP runtime behavior changes."
+            ],
+            "billy": [
+                "Added local user profile capture (name and email) in the frontend.",
+                "Passed user_email in chat requests for Langfuse user trace attribution."
+            ]
+        }
+    },
+    {
         "version": "0.3.0",
         "date": "2026-03-03",
         "title": "Langfuse observability across MCP and Billy chat",

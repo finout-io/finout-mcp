@@ -3,11 +3,15 @@ import {
   AppShell,
   Box,
   Button,
+  Card,
+  Center,
   Group,
   List,
   Modal,
+  Popover,
   Stack,
   Text,
+  TextInput,
   Title,
   Tooltip,
   useMantineColorScheme,
@@ -17,6 +21,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useSession } from '../../hooks/useSession'
 import { useChat } from '../../hooks/useChat'
 import { useConversations } from '../../hooks/useConversations'
+import { useUser } from '../../hooks/useUser'
 import { getWhatsNew } from '../../api/whatsNew'
 import { Sidebar } from './Sidebar'
 import { ChatArea } from '../chat/ChatArea'
@@ -33,11 +38,55 @@ const CHANGELOG_SECTION_LABELS: Record<keyof WhatsNewEntry['sections'], string> 
   billy: 'Billy',
 }
 
+function LoginScreen({ onLogin }: { onLogin: (name: string, email: string) => void }) {
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [errors, setErrors] = useState<{ name?: string; email?: string }>({})
+
+  const handleSubmit = () => {
+    const newErrors: { name?: string; email?: string } = {}
+    if (!name.trim()) newErrors.name = 'Name is required'
+    if (!email.trim()) newErrors.email = 'Email is required'
+    else if (!email.includes('@')) newErrors.email = 'Enter a valid email'
+    setErrors(newErrors)
+    if (Object.keys(newErrors).length === 0) {
+      onLogin(name.trim(), email.trim())
+    }
+  }
+
+  return (
+    <Center h="100vh">
+      <Card shadow="md" padding="xl" radius="md" w={380}>
+        <Stack gap="md">
+          <Text size="lg" fw={600} ta="center">Welcome to Billy</Text>
+          <TextInput
+            label="Name"
+            placeholder="Your name"
+            value={name}
+            onChange={(e) => setName(e.currentTarget.value)}
+            error={errors.name}
+          />
+          <TextInput
+            label="Email"
+            placeholder="you@company.com"
+            value={email}
+            onChange={(e) => setEmail(e.currentTarget.value)}
+            error={errors.email}
+            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+          />
+          <Button fullWidth onClick={handleSubmit}>Continue</Button>
+        </Stack>
+      </Card>
+    </Center>
+  )
+}
+
 export function AppLayout() {
+  const { user, setUser, clearUser } = useUser()
   const session = useSession()
   const { colorScheme, toggleColorScheme } = useMantineColorScheme()
   const accountId = session.selectedAccount?.accountId ?? null
-  const chat = useChat(accountId)
+  const chat = useChat(accountId, user?.email)
 
   const [model, setModel] = useState<ModelId>(MODEL_OPTIONS[1]!.value)
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>()
@@ -188,6 +237,10 @@ export function AppLayout() {
     setWhatsNewOpen(false)
   }, [whatsNewData])
 
+  if (!user) {
+    return <LoginScreen onLogin={setUser} />
+  }
+
   return (
     <>
       <Modal
@@ -293,6 +346,20 @@ export function AppLayout() {
             >
               Manage
             </Button>
+            <Popover position="bottom-end" shadow="md">
+              <Popover.Target>
+                <Button size="xs" variant="subtle">{user.name}</Button>
+              </Popover.Target>
+              <Popover.Dropdown>
+                <Stack gap="xs">
+                  <Text size="sm" fw={500}>{user.name}</Text>
+                  <Text size="xs" c="dimmed">{user.email}</Text>
+                  <Button size="xs" variant="light" color="red" onClick={clearUser}>
+                    Sign out
+                  </Button>
+                </Stack>
+              </Popover.Dropdown>
+            </Popover>
             <Button
               size="xs"
               variant="subtle"

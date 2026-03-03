@@ -13,7 +13,7 @@ export interface ChatState {
   setMessages: (messages: Message[]) => void
 }
 
-export function useChat(accountId: string | null): ChatState {
+export function useChat(accountId: string | null, userEmail?: string): ChatState {
   const [messages, setMessages] = useState<Message[]>([])
   const [isSending, setIsSending] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -41,6 +41,7 @@ export function useChat(accountId: string | null): ChatState {
           conversation_history: messages,
           model,
           account_id: accountId ?? undefined,
+          user_email: userEmail,
           },
           {
             onStatus: (status) => {
@@ -125,7 +126,7 @@ export function useChat(accountId: string | null): ChatState {
         setIsSending(false)
       }
     },
-    [messages, isSending, accountId],
+    [messages, isSending, accountId, userEmail],
   )
 
   const clearMessages = useCallback(() => {
