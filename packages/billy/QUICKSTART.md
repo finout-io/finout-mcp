@@ -1,8 +1,8 @@
-# VECTIQOR Quick Start Guide
+# BILLY Quick Start Guide
 
-## What is VECTIQOR?
+## What is BILLY?
 
-**VECTIQOR** (Ask the Smart AI of Finout) is a web-based chat interface for your Finout MCP Server.
+**BILLY** (Ask the Smart AI of Finout) is a web-based chat interface for your Finout MCP Server.
 
 - 🌐 **Web-based** - No Claude Desktop installation needed
 - 🤖 **Same AI** - Uses Claude Sonnet 4.5 via Anthropic API
@@ -22,7 +22,7 @@
 ### Step 2: Add API Key
 
 ```bash
-cd /Users/idan.bauer/projects/finout-mcp/vectiqor
+cd /Users/idan.bauer/projects/finout-mcp/billy
 
 # Edit .env file
 nano .env
@@ -39,13 +39,13 @@ nano .env
 pip install -r requirements.txt
 ```
 
-### Step 4: Start VECTIQOR
+### Step 4: Start BILLY
 
 ```bash
 ./start.sh
 
 # Or manually:
-python vectiqor_server.py
+python billy_server.py
 ```
 
 ### Step 5: Open Browser
@@ -56,7 +56,7 @@ That's it! 🎉
 
 ## First Questions to Try
 
-Once VECTIQOR is running, try these:
+Once BILLY is running, try these:
 
 1. **"What were my AWS costs last month?"**
    - Tests filter discovery and cost queries
@@ -73,7 +73,7 @@ Once VECTIQOR is running, try these:
 ## How It Works
 
 ```
-You → Web Browser → VECTIQOR Server → Claude API
+You → Web Browser → BILLY Server → Claude API
                          ↓
                    MCP Server (stdio)
                          ↓
@@ -81,9 +81,9 @@ You → Web Browser → VECTIQOR Server → Claude API
 ```
 
 1. You ask a question in the web UI
-2. VECTIQOR sends it to Claude API
+2. BILLY sends it to Claude API
 3. Claude decides which tools to use
-4. VECTIQOR calls your MCP server (same one you built)
+4. BILLY calls your MCP server (same one you built)
 5. MCP server queries Finout
 6. Results go back through Claude
 7. You get a natural language answer
@@ -97,7 +97,7 @@ You → Web Browser → VECTIQOR Server → Claude API
 ifconfig | grep "inet " | grep -v 127.0.0.1
 
 # Start server
-python vectiqor_server.py
+python billy_server.py
 
 # Share with team
 # http://YOUR_IP:8000
@@ -111,7 +111,7 @@ See `README.md` for Docker deployment instructions.
 
 ### "MCP server not initialized"
 
-**Solution:** Make sure you're running from the `vectiqor` directory and the MCP server can be found at `../finout-mcp-server`
+**Solution:** Make sure you're running from the `billy` directory and the MCP server can be found at `../finout-mcp-server`
 
 ```bash
 # Check path
@@ -145,9 +145,9 @@ uv run finout-mcp
 **Solution:** Use a different port
 
 ```bash
-python vectiqor_server.py
+python billy_server.py
 # Or specify port:
-uvicorn vectiqor_server:app --port 8080
+uvicorn billy_server:app --port 8080
 ```
 
 ## Development Tips
@@ -155,7 +155,7 @@ uvicorn vectiqor_server:app --port 8080
 ### Auto-reload on code changes
 
 ```bash
-uvicorn vectiqor_server:app --reload
+uvicorn billy_server:app --reload
 ```
 
 ### View logs
@@ -188,7 +188,7 @@ Share the URL and gather feedback on:
 
 Make changes to `../finout-mcp-server/src/finout_mcp_server/server.py`
 
-Restart VECTIQOR to see changes.
+Restart BILLY to see changes.
 
 ### 3. Ship to Claude Desktop
 
@@ -209,7 +209,7 @@ Once you're happy with the behavior, everyone can install the same MCP server in
 
 ## Support
 
-- Issues with VECTIQOR: Check `README.md`
+- Issues with BILLY: Check `README.md`
 - Issues with MCP: Check `../finout-mcp-server/README.md`
 - Issues with Finout API: Contact Finout support
 
@@ -223,4 +223,4 @@ Once you're happy with the behavior, everyone can install the same MCP server in
 
 ---
 
-**Enjoy VECTIQOR!** 🤖✨
+**Enjoy BILLY!** 🤖✨

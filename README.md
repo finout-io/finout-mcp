@@ -31,7 +31,7 @@ uv pip install -e .
 }
 ```
 
-### For Developers (Testing with VECTIQOR)
+### For Developers (Testing with BILLY)
 
 ```bash
 # Install workspace
@@ -41,8 +41,8 @@ uv sync
 cp .env.example .env
 # Edit .env with your credentials
 
-# Run VECTIQOR
-uv run --directory packages/vectiqor vectiqor
+# Run BILLY
+uv run --directory packages/billy billy
 
 # Open http://localhost:8000
 ```
@@ -61,19 +61,19 @@ uv sync
 # Install MCP server only
 cd packages/mcp-server && uv sync
 
-# Install VECTIQOR only
-cd packages/vectiqor && uv sync
+# Install BILLY only
+cd packages/billy && uv sync
 ```
 
 ### Running
 
 ```bash
-# Run VECTIQOR (from root)
-uv run --directory packages/vectiqor vectiqor
+# Run BILLY (from root)
+uv run --directory packages/billy billy
 
-# Run VECTIQOR with auto-reload (development)
-cd packages/vectiqor
-uv run uvicorn vectiqor.server:app --reload --host 0.0.0.0 --port 8000
+# Run BILLY with auto-reload (development)
+cd packages/billy
+uv run uvicorn billy.server:app --reload --host 0.0.0.0 --port 8000
 
 # Run MCP server (stdio mode for testing)
 cd packages/mcp-server
@@ -98,14 +98,14 @@ uv build
 # Build all redistributables (public + internal)
 ./scripts/build_mcp_distributions.sh
 
-# Build VECTIQOR Docker image
-docker build -f Dockerfile.vectiqor -t vectiqor:latest .
+# Build BILLY Docker image
+docker build -f Dockerfile.billy -t billy:latest .
 ```
 
 ### Docker
 
 ```bash
-# Run VECTIQOR with Docker Compose
+# Run BILLY with Docker Compose
 docker-compose up -d
 
 # View logs
@@ -118,11 +118,11 @@ docker-compose down
 ### Kubernetes
 
 ```bash
-# Deploy VECTIQOR
+# Deploy BILLY
 kubectl apply -k deployments/kubernetes/
 
 # View logs
-kubectl logs -n finout-tools -l app=vectiqor -f
+kubectl logs -n finout-tools -l app=billy -f
 
 # Delete
 kubectl delete -k deployments/kubernetes/
@@ -140,14 +140,14 @@ finout-mcp/                      # uv workspace root
 │   │   ├── src/finout_mcp_server/
 │   │   ├── tests/
 │   │   └── pyproject.toml
-│   └── vectiqor/                    # 🔧 Internal tool
-│       ├── src/vectiqor/
+│   └── billy/                    # 🔧 Internal tool
+│       ├── src/billy/
 │       │   ├── server.py
 │       │   └── static/index.html
 │       └── pyproject.toml
 ├── deployments/kubernetes/      # K8s manifests
 ├── docker-compose.yml
-├── Dockerfile.vectiqor
+├── Dockerfile.billy
 └── .env.example
 ```
 
@@ -156,9 +156,9 @@ finout-mcp/                      # uv workspace root
 - Public MCP package: `packages/mcp-server` (CLI: `finout-mcp`)
   - Auth mode: API key/secret
   - Intended for external/customer usage
-- Internal MCP package: `packages/vectiqor-mcp-internal` (CLI: `vectiqor-mcp-internal`)
+- Internal MCP package: `packages/billy-mcp-internal` (CLI: `billy-mcp-internal`)
   - Auth mode: internal authorized headers
-  - Intended only for VECTIQOR-hosted/internal usage
+  - Intended only for BILLY-hosted/internal usage
 
 ---
 
@@ -195,7 +195,7 @@ FINOUT_SECRET_KEY=your_secret_key
 # Finout API URL (optional, defaults to https://app.finout.io)
 FINOUT_API_URL=https://app.finout.io
 
-# Anthropic API (for VECTIQOR only)
+# Anthropic API (for BILLY only)
 ANTHROPIC_API_KEY=your_anthropic_api_key
 ```
 
@@ -204,7 +204,7 @@ ANTHROPIC_API_KEY=your_anthropic_api_key
 ## 📚 Documentation
 
 - **[MCP Server](packages/mcp-server/README.md)** - Customer docs
-- **[VECTIQOR](packages/vectiqor/README.md)** - Internal tool
+- **[BILLY](packages/billy/README.md)** - Internal tool
 - **[Distributions](docs/DISTRIBUTIONS.md)** - Public vs internal packaging and install flows
 - **[Kubernetes](deployments/kubernetes/README.md)** - K8s deployment
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history
@@ -217,8 +217,8 @@ ANTHROPIC_API_KEY=your_anthropic_api_key
 # 1. Install
 uv sync
 
-# 2. Run VECTIQOR
-uv run --directory packages/vectiqor vectiqor
+# 2. Run BILLY
+uv run --directory packages/billy billy
 
 # 3. Make changes to MCP server
 # Edit packages/mcp-server/src/...
@@ -227,8 +227,8 @@ uv run --directory packages/vectiqor vectiqor
 cd packages/mcp-server
 uv run pytest tests/ -v
 
-# 5. Test in VECTIQOR
-# VECTIQOR automatically picks up local MCP changes
+# 5. Test in BILLY
+# BILLY automatically picks up local MCP changes
 ```
 
 ---
@@ -246,8 +246,8 @@ docker-compose up -d
 
 ```bash
 # Build and push
-docker build -f Dockerfile.vectiqor -t your-registry/vectiqor:v1.0.0 .
-docker push your-registry/vectiqor:v1.0.0
+docker build -f Dockerfile.billy -t your-registry/billy:v1.0.0 .
+docker push your-registry/billy:v1.0.0
 
 # Deploy
 kubectl apply -k deployments/kubernetes/
@@ -263,12 +263,12 @@ Pipeline: `.circleci/config.yml`
 
 On every PR and push, CI:
 - validates MCP (`ruff`, `mypy`, `pytest`)
-- builds VECTIQOR frontend and Python compile checks
+- builds BILLY frontend and Python compile checks
 - builds Python package artifacts for:
   - `finout-mcp`
-  - `vectiqor`
-  - `vectiqor-mcp-internal` (internal-only, bundled with VECTIQOR workflows)
-- builds VECTIQOR Docker image
+  - `billy`
+  - `billy-mcp-internal` (internal-only, bundled with BILLY workflows)
+- builds BILLY Docker image
 
 Optional publish steps:
 - GHCR image push: when Circle env vars are set:

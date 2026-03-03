@@ -1,8 +1,8 @@
-.PHONY: dev-vectiqor build-mcp-wheel
+.PHONY: dev-billy build-mcp-wheel
 
 # Start FastAPI backend + Vite frontend dev server via uv script runner
-dev-vectiqor:
-	@cd packages/vectiqor && uv run vectiqor-dev
+dev-billy:
+	@cd packages/billy && uv run billy-dev
 
 # Build finout-mcp-server wheel+sdist into packages/mcp-server/dist
 build-mcp-wheel:

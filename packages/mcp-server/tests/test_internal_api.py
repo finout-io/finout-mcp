@@ -711,7 +711,7 @@ class TestToolDescriptions:
         # get_usage_unit_types should mention chaining
         assert "CHAIN" in tool_map["get_usage_unit_types"]
 
-        server_module.runtime_mode = server_module.MCPMode.VECTIQOR_INTERNAL.value
+        server_module.runtime_mode = server_module.MCPMode.BILLY_INTERNAL.value
         internal_tools = await server_module.list_tools()
         internal_tool_map = {t.name: t.description for t in internal_tools}
 
@@ -739,7 +739,7 @@ class TestToolDescriptions:
         assert "get_anomalies" in public_tool_names
         assert len(public_tools) == 9
 
-        server_module.runtime_mode = server_module.MCPMode.VECTIQOR_INTERNAL.value
+        server_module.runtime_mode = server_module.MCPMode.BILLY_INTERNAL.value
         internal_tools = await server_module.list_tools()
         internal_tool_names = {t.name for t in internal_tools}
         assert "get_account_context" in internal_tool_names
@@ -993,10 +993,10 @@ class TestRenderChart:
                 }
             )
 
-    def test_render_chart_in_vectiqor_tools(self):
-        from src.finout_mcp_server.server import VECTIQOR_INTERNAL_EXTRA_TOOLS
+    def test_render_chart_in_billy_tools(self):
+        from src.finout_mcp_server.server import BILLY_INTERNAL_EXTRA_TOOLS
 
-        assert "render_chart" in VECTIQOR_INTERNAL_EXTRA_TOOLS
+        assert "render_chart" in BILLY_INTERNAL_EXTRA_TOOLS
 
     @pytest.mark.asyncio
     async def test_render_chart_not_in_public_tools(self):

@@ -13,7 +13,7 @@ From repo root:
 Artifacts:
 
 - Public wheel: `dist/mcp-server/*.whl`
-- Internal wheel: `dist/vectiqor-mcp-internal/*.whl`
+- Internal wheel: `dist/billy-mcp-internal/*.whl`
 
 ## What to Share
 
@@ -23,14 +23,14 @@ Share only:
 
 - `finout_mcp_server-<version>-py3-none-any.whl`
 
-### Internal VECTIQOR users
+### Internal BILLY users
 
 Share both:
 
 - `finout_mcp_server-<version>-py3-none-any.whl`
-- `vectiqor_mcp_internal-<version>-py3-none-any.whl`
+- `billy_mcp_internal-<version>-py3-none-any.whl`
 
-`vectiqor-mcp-internal` depends on `finout-mcp`, so both wheels are required in a clean environment.
+`billy-mcp-internal` depends on `finout-mcp`, so both wheels are required in a clean environment.
 
 ## Install (Public MCP)
 
@@ -63,8 +63,8 @@ Claude Desktop config:
 ```bash
 python3 -m venv /tmp/internal-mcp-test
 source /tmp/internal-mcp-test/bin/activate
-pip install /path/to/finout_mcp_server-*.whl /path/to/vectiqor_mcp_internal-*.whl
-vectiqor-mcp-internal --help
+pip install /path/to/finout_mcp_server-*.whl /path/to/billy_mcp_internal-*.whl
+billy-mcp-internal --help
 ```
 
 ## Upgrade
@@ -76,5 +76,5 @@ pip install --upgrade /path/to/finout_mcp_server-*.whl
 Internal:
 
 ```bash
-pip install --upgrade /path/to/finout_mcp_server-*.whl /path/to/vectiqor_mcp_internal-*.whl
+pip install --upgrade /path/to/finout_mcp_server-*.whl /path/to/billy_mcp_internal-*.whl
 ```

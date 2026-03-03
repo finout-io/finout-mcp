@@ -10,5 +10,5 @@ members = ["packages/*"]
 [tool.uv.sources]
 finout-mcp = { workspace = true }
 finout-mcp-hosted = { workspace = true }
-vectiqor = { workspace = true }
-vectiqor-mcp-internal = { workspace = true }
+billy = { workspace = true }
+billy-mcp-internal = { workspace = true }

@@ -1,10 +1,10 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: vectiqor
-  namespace: vectiqor
+  name: billy
+  namespace: billy
   labels:
-    app: vectiqor
+    app: billy
   annotations:
     alb.ingress.kubernetes.io/scheme: internal
     alb.ingress.kubernetes.io/target-type: ip
@@ -18,7 +18,7 @@ metadata:
     # Optional: set a dedicated ALB security group to keep SG policy explicit.
     # alb.ingress.kubernetes.io/security-groups: sg-0123456789abcdef0
     alb.ingress.kubernetes.io/security-groups: sg-077ef8fad15f64447
-    external-dns.alpha.kubernetes.io/hostname: vectiqor.internal.finout.io
+    external-dns.alpha.kubernetes.io/hostname: billy.internal.finout.io
     external-dns.alpha.kubernetes.io/zone-type: private
     external-dns.alpha.kubernetes.io/hosted-zone-id: Z067649217K758I13UCY2
     # Set ACM certificate ARN before applying:
@@ -26,13 +26,13 @@ metadata:
 spec:
   ingressClassName: alb
   rules:
-  - host: vectiqor.internal.finout.io
+  - host: billy.internal.finout.io
     http:
       paths:
       - path: /
         pathType: Prefix
         backend:
           service:
-            name: vectiqor
+            name: billy
             port:
               number: 80

@@ -88,3 +88,20 @@ export interface FeedbackStats {
   negative_count: number
   by_query_type: Record<string, number>
 }
+
+export interface WhatsNewEntry {
+  version: string
+  date: string
+  title: string
+  sections: {
+    external_mcp: string[]
+    internal_mcp: string[]
+    billy: string[]
+  }
+}
+
+export interface WhatsNewResponse {
+  app: string
+  current_version: string
+  entries: WhatsNewEntry[]
+}

@@ -444,7 +444,7 @@ export function ManagePage() {
       <Stack gap="lg">
         <Group gap="sm" align="baseline">
           <Text style={{ fontSize: 28 }}>🤖</Text>
-          <Title order={2}>VECTIQOR — Conversation Manager</Title>
+          <Title order={2}>BILLY — Conversation Manager</Title>
         </Group>
 
         <Tabs defaultValue="conversations" keepMounted={false}>

@@ -104,20 +104,20 @@ Optional:
 export FINOUT_API_URL="https://app.finout.io"
 ```
 
-## Internal MCP (VECTIQOR-Only)
+## Internal MCP (BILLY-Only)
 
-- Package: `packages/vectiqor-mcp-internal`
-- CLI: `vectiqor-mcp-internal`
+- Package: `packages/billy-mcp-internal`
+- CLI: `billy-mcp-internal`
 - Auth model: internal authorized headers
-- Intended usage: hosted/internal only, launched by VECTIQOR
+- Intended usage: hosted/internal only, launched by BILLY
 
 ### Install and test locally
 
 ```bash
 python3 -m venv /tmp/internal-mcp
 source /tmp/internal-mcp/bin/activate
-pip install dist/mcp-server/*.whl dist/vectiqor-mcp-internal/*.whl
-vectiqor-mcp-internal --help
+pip install dist/mcp-server/*.whl dist/billy-mcp-internal/*.whl
+billy-mcp-internal --help
 ```
 
 Notes:

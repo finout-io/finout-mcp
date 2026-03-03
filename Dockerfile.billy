@@ -1,4 +1,4 @@
-# VECTIQOR
+# BILLY
 # Docker image for internal deployment
 
 FROM python:3.11-slim
@@ -16,13 +16,13 @@ WORKDIR /app
 
 # Copy both packages
 COPY packages/mcp-server /app/packages/mcp-server
-COPY packages/vectiqor /app/packages/vectiqor
-COPY packages/vectiqor-mcp-internal /app/packages/vectiqor-mcp-internal
+COPY packages/billy /app/packages/billy
+COPY packages/billy-mcp-internal /app/packages/billy-mcp-internal
 
-# Install VECTIQOR (which will also make MCP server available)
-RUN cd /app/packages/vectiqor && uv sync --frozen
+# Install BILLY (which will also make MCP server available)
+RUN cd /app/packages/billy && uv sync --frozen
 RUN cd /app/packages/mcp-server && uv sync --frozen
-RUN cd /app/packages/vectiqor-mcp-internal && uv sync --frozen
+RUN cd /app/packages/billy-mcp-internal && uv sync --frozen
 
 # Expose port
 EXPOSE 8000
@@ -31,6 +31,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Run VECTIQOR
-WORKDIR /app/packages/vectiqor
-CMD ["uv", "run", "vectiqor"]
+# Run BILLY
+WORKDIR /app/packages/billy
+CMD ["uv", "run", "billy"]

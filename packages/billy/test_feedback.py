@@ -1,5 +1,5 @@
 import asyncio
-from vectiqor.db import Database
+from billy.db import Database
 
 async def test():
     db = Database()

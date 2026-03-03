@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: vectiqor-config
-  namespace: vectiqor
+  name: billy-config
+  namespace: billy
   labels:
-    app: vectiqor
+    app: billy
 data:
   # Finout Internal API URL
   finout-internal-api-url: "http://finout-app.prod-mirror.internal.finout.io"

@@ -7,7 +7,7 @@ from datetime import datetime
 import secrets
 
 # Database connection URL
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://fobo:fobo@localhost:5432/vectiqor")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://fobo:fobo@localhost:5432/billy")
 
 
 class Database:

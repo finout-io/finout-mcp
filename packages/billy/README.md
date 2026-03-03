@@ -1,4 +1,4 @@
-# VECTIQOR - Ask the Smart AI of Finout
+# BILLY - Ask the Smart AI of Finout
 
 **⚠️ Internal Diagnostic Tool** - Not distributed to customers
 
@@ -23,20 +23,20 @@ Web-based chat interface for testing the Finout MCP Server with multi-account su
 
 ```bash
 # From repository root
-./scripts/start-vectiqor.sh
+./scripts/start-billy.sh
 ```
 
 ### Option 2: Direct Run (Development)
 
 ```bash
-# From this directory (tools/vectiqor/)
+# From this directory (tools/billy/)
 pip install -r requirements.txt
 
 # Configure environment (use root .env)
 # Edit ../../.env with your credentials
 
 # Start the server
-python vectiqor_server.py
+python billy_server.py
 ```
 
 Navigate to: http://localhost:8000
@@ -45,7 +45,7 @@ Navigate to: http://localhost:8000
 
 ```bash
 # From repository root
-./scripts/deploy-vectiqor-docker.sh
+./scripts/deploy-billy-docker.sh
 
 # Or manually:
 docker-compose -f deployments/docker/docker-compose.yml up -d
@@ -64,24 +64,24 @@ Navigate to: http://localhost:8000
 ```bash
 # Build from repository root
 cd /path/to/finout-mcp
-docker build -f deployments/docker/Dockerfile.vectiqor -t vectiqor:latest .
+docker build -f deployments/docker/Dockerfile.billy -t billy:latest .
 
 # Run with environment file
 docker run -d \
-  --name vectiqor \
+  --name billy \
   -p 8000:8000 \
   --env-file .env \
-  vectiqor:latest
+  billy:latest
 
 # View logs
-docker logs -f vectiqor
+docker logs -f billy
 ```
 
 ## Configuration
 
 ### Required Environment Variables
 
-Create a `.env` file in the `vectiqor/` directory:
+Create a `.env` file in the `billy/` directory:
 
 ```bash
 # Anthropic API Key (get from: https://console.anthropic.com/)
@@ -150,9 +150,9 @@ Perfect for debugging or sharing with the team.
 ```
 User Browser
     ↓
-VECTIQOR Web UI (index.html)
+BILLY Web UI (index.html)
     ↓
-FastAPI Backend (vectiqor_server.py)
+FastAPI Backend (billy_server.py)
     ↓  ↓  ↓
     ↓  ↓  └─→ Finout Internal API (account list)
     ↓  └────→ MCP Server (stdio subprocess)
@@ -180,7 +180,7 @@ FastAPI Backend (vectiqor_server.py)
 ```bash
 # 1. Clone repository
 git clone <repo-url>
-cd finout-mcp/vectiqor
+cd finout-mcp/billy
 
 # 2. Configure environment
 cp .env.example .env
@@ -199,9 +199,9 @@ curl http://localhost:8000/api/health
 
 ```bash
 # Build and push
-docker build -f vectiqor/Dockerfile -t vectiqor:latest .
-docker tag vectiqor:latest <ecr-repo>/vectiqor:latest
-docker push <ecr-repo>/vectiqor:latest
+docker build -f billy/Dockerfile -t billy:latest .
+docker tag billy:latest <ecr-repo>/billy:latest
+docker push <ecr-repo>/billy:latest
 
 # Deploy via ECS console or Terraform
 # Set environment variables in task definition
@@ -211,11 +211,11 @@ docker push <ecr-repo>/vectiqor:latest
 
 ```bash
 # Build and push
-gcloud builds submit --tag gcr.io/<project>/vectiqor
+gcloud builds submit --tag gcr.io/<project>/billy
 
 # Deploy
-gcloud run deploy vectiqor \
-  --image gcr.io/<project>/vectiqor \
+gcloud run deploy billy \
+  --image gcr.io/<project>/billy \
   --platform managed \
   --region us-central1 \
   --set-env-vars ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY,FINOUT_CLIENT_ID=$FINOUT_CLIENT_ID
@@ -224,7 +224,7 @@ gcloud run deploy vectiqor \
 #### Railway / Render
 
 1. Connect your GitHub repository
-2. Select `vectiqor/Dockerfile` as build target
+2. Select `billy/Dockerfile` as build target
 3. Add environment variables in dashboard
 4. Deploy!
 
@@ -252,7 +252,7 @@ Use this for:
 ```nginx
 server {
     listen 80;
-    server_name vectiqor.yourcompany.com;
+    server_name billy.yourcompany.com;
 
     location / {
         proxy_pass http://localhost:8000;
@@ -270,8 +270,8 @@ server {
 ### Project Structure
 
 ```
-vectiqor/
-├── vectiqor_server.py          # FastAPI backend + MCP bridge
+billy/
+├── billy_server.py          # FastAPI backend + MCP bridge
 ├── index.html              # Web UI (chat interface)
 ├── requirements.txt        # Python dependencies
 ├── Dockerfile             # Container image definition
@@ -288,10 +288,10 @@ The MCP server is at: `../finout-mcp-server/`
 
 To add new tools:
 1. Add tool definition to `finout-mcp-server/src/finout_mcp_server/server.py`
-2. Restart VECTIQOR server (or MCP subprocess will auto-restart)
+2. Restart BILLY server (or MCP subprocess will auto-restart)
 3. New tool automatically available in web UI
 
-No changes needed to VECTIQOR code!
+No changes needed to BILLY code!
 
 ### Local Development
 
@@ -300,7 +300,7 @@ No changes needed to VECTIQOR code!
 pip install -r requirements.txt
 
 # Run with auto-reload
-uvicorn vectiqor_server:app --reload --host 0.0.0.0 --port 8000
+uvicorn billy_server:app --reload --host 0.0.0.0 --port 8000
 
 # Test MCP server separately
 cd ../finout-mcp-server
@@ -330,10 +330,10 @@ Before external deployment:
 
 ```bash
 # Docker Compose
-docker-compose logs -f vectiqor
+docker-compose logs -f billy
 
 # Docker
-docker logs -f vectiqor
+docker logs -f billy
 
 # Direct run
 # Logs printed to stdout
@@ -394,7 +394,7 @@ docker-compose build --no-cache
 docker-compose up
 
 # Check context
-docker build -f vectiqor/Dockerfile -t vectiqor:test . --progress=plain
+docker build -f billy/Dockerfile -t billy:test . --progress=plain
 ```
 
 ### Performance Issues

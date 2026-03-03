@@ -1,29 +1,29 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vectiqor
-  namespace: vectiqor
+  name: billy
+  namespace: billy
   labels:
-    app: vectiqor
+    app: billy
     component: diagnostic-tool
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: vectiqor
+      app: billy
   template:
     metadata:
       labels:
-        app: vectiqor
+        app: billy
         component: diagnostic-tool
     spec:
       containers:
-      - name: vectiqor
-        image: 277411487094.dkr.ecr.us-east-1.amazonaws.com/vectiqor:latest
+      - name: billy
+        image: 277411487094.dkr.ecr.us-east-1.amazonaws.com/billy:latest
         imagePullPolicy: Always
         command:
         - uvicorn
-        - vectiqor.server:app
+        - billy.server:app
         - --host
         - 0.0.0.0
         - --port
@@ -41,35 +41,35 @@ spec:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: vectiqor-secrets
+              name: billy-secrets
               key: database-url
         # Finout API Configuration
         # Optional: only needed if MCP tools require direct Finout API auth.
         - name: FINOUT_CLIENT_ID
           valueFrom:
             secretKeyRef:
-              name: vectiqor-secrets
+              name: billy-secrets
               key: finout-client-id
               optional: true
         - name: FINOUT_SECRET_KEY
           valueFrom:
             secretKeyRef:
-              name: vectiqor-secrets
+              name: billy-secrets
               key: finout-secret-key
               optional: true
         - name: FINOUT_API_URL
           valueFrom:
             configMapKeyRef:
-              name: vectiqor-config
+              name: billy-config
               key: finout-internal-api-url
         # 0/-1/none disables timeout. Keep > typical long tool+LLM round-trips.
-        - name: VECTIQOR_CHAT_TIMEOUT_SECONDS
+        - name: BILLY_CHAT_TIMEOUT_SECONDS
           value: "540"
         # Anthropic API Configuration
         - name: ANTHROPIC_API_KEY
           valueFrom:
             secretKeyRef:
-              name: vectiqor-secrets
+              name: billy-secrets
               key: anthropic-api-key
         resources:
           requests:

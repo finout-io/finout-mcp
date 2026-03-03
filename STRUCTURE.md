@@ -6,7 +6,7 @@ This document explains the organization of the Finout MCP monorepo.
 
 This is a monorepo containing:
 1. **Finout MCP Server** (main product for customers)
-2. **VECTIQOR** (internal diagnostic tool, not distributed)
+2. **BILLY** (internal diagnostic tool, not distributed)
 3. **Deployment configurations**
 4. **Utility scripts**
 5. **Documentation**
@@ -34,30 +34,30 @@ finout-mcp/                         # Repository root
 │   └── .env                        # Environment variables (gitignored)
 │
 ├── tools/                          # 🔧 INTERNAL TOOLS (not distributed)
-│   └── vectiqor/                       # Web-based diagnostic tool
-│       ├── vectiqor_server.py          # FastAPI backend
+│   └── billy/                       # Web-based diagnostic tool
+│       ├── billy_server.py          # FastAPI backend
 │       ├── index.html              # Web UI
 │       ├── requirements.txt        # Python dependencies
-│       ├── README.md               # VECTIQOR documentation
+│       ├── README.md               # BILLY documentation
 │       ├── QUICKSTART.md
 │       ├── MULTI_ACCOUNT.md
-│       └── .env                    # VECTIQOR config (gitignored)
+│       └── .env                    # BILLY config (gitignored)
 │
 ├── deployments/                    # 🚀 DEPLOYMENT CONFIGURATIONS
 │   └── docker/
-│       ├── Dockerfile.vectiqor         # VECTIQOR container definition
-│       ├── docker-compose.yml      # Orchestration for VECTIQOR
+│       ├── Dockerfile.billy         # BILLY container definition
+│       ├── docker-compose.yml      # Orchestration for BILLY
 │       └── .dockerignore           # Docker build exclusions
 │
 ├── scripts/                        # 🛠️ UTILITY SCRIPTS
-│   ├── start-vectiqor.sh              # Start VECTIQOR locally
+│   ├── start-billy.sh              # Start BILLY locally
 │   ├── build-mcp.sh               # Build MCP package
 │   ├── test-all.sh                # Run all tests
-│   └── deploy-vectiqor-docker.sh      # Deploy VECTIQOR with Docker
+│   └── deploy-billy-docker.sh      # Deploy BILLY with Docker
 │
 ├── docs/                           # 📚 DOCUMENTATION
 │   └── internal/
-│       └── vectiqor-deployment.md      # VECTIQOR deployment guide
+│       └── billy-deployment.md      # BILLY deployment guide
 │
 ├── .env.example                    # Environment template
 ├── .gitignore                      # Git exclusions
@@ -79,10 +79,10 @@ finout-mcp/                         # Repository root
 
 ### 🏢 Deployed Internally (Within Organization)
 
-- `tools/vectiqor/` - Web diagnostic tool (Docker/Kubernetes)
+- `tools/billy/` - Web diagnostic tool (Docker/Kubernetes)
 - `deployments/` - Docker and Kubernetes configurations
-- `scripts/build-vectiqor.sh` - Build VECTIQOR container
-- `scripts/deploy-vectiqor-k8s.sh` - Deploy to Kubernetes
+- `scripts/build-billy.sh` - Build BILLY container
+- `scripts/deploy-billy-k8s.sh` - Deploy to Kubernetes
 
 ### ❌ Never Distributed
 
@@ -113,15 +113,15 @@ finout-mcp/                         # Repository root
 | `.env` | Environment variables (gitignored) |
 | `src/finout_mcp_server/server.py` | Main MCP server implementation |
 
-### VECTIQOR (tools/vectiqor/)
+### BILLY (tools/billy/)
 
 | File | Purpose |
 |------|---------|
-| `vectiqor_server.py` | FastAPI backend server |
+| `billy_server.py` | FastAPI backend server |
 | `index.html` | Web UI (single-page app) |
 | `requirements.txt` | Python dependencies |
-| `README.md` | VECTIQOR-specific documentation |
-| `.env` | VECTIQOR configuration (gitignored) |
+| `README.md` | BILLY-specific documentation |
+| `.env` | BILLY configuration (gitignored) |
 
 ---
 
@@ -138,11 +138,11 @@ FINOUT_SECRET_KEY=...
 FINOUT_API_URL=...
 FINOUT_ACCOUNT_ID=...
 
-# Required for VECTIQOR only
+# Required for BILLY only
 ANTHROPIC_API_KEY=...
 ```
 
-Both the MCP server and VECTIQOR read from this file.
+Both the MCP server and BILLY read from this file.
 
 ---
 
@@ -166,8 +166,8 @@ cp .env.example .env
 # Option A: Test with Claude Desktop
 # Configure claude_desktop_config.json and restart Claude
 
-# Option B: Test with VECTIQOR
-./scripts/start-vectiqor.sh
+# Option B: Test with BILLY
+./scripts/start-billy.sh
 # Open http://localhost:8000
 ```
 
@@ -176,8 +176,8 @@ cp .env.example .env
 ```bash
 # Edit MCP server code in finout-mcp-server/src/
 
-# Test immediately with VECTIQOR (auto-reloads)
-./scripts/start-vectiqor.sh
+# Test immediately with BILLY (auto-reloads)
+./scripts/start-billy.sh
 
 # Run tests
 ./scripts/test-all.sh
@@ -186,14 +186,14 @@ cp .env.example .env
 ./scripts/build-mcp.sh
 ```
 
-### 4. Deploying VECTIQOR
+### 4. Deploying BILLY
 
 ```bash
 # Local deployment
-./scripts/start-vectiqor.sh
+./scripts/start-billy.sh
 
 # Docker deployment
-./scripts/deploy-vectiqor-docker.sh
+./scripts/deploy-billy-docker.sh
 ```
 
 ---
@@ -261,10 +261,10 @@ pip install finout-mcp-server
 
 ## Common Tasks
 
-### Start VECTIQOR for Testing
+### Start BILLY for Testing
 
 ```bash
-./scripts/start-vectiqor.sh
+./scripts/start-billy.sh
 ```
 
 ### Build MCP Package
@@ -279,18 +279,18 @@ pip install finout-mcp-server
 ./scripts/test-all.sh
 ```
 
-### Deploy VECTIQOR Internally
+### Deploy BILLY Internally
 
 ```bash
 # Local (development)
-./scripts/start-vectiqor.sh
+./scripts/start-billy.sh
 
 # Docker Compose (single server)
-./scripts/deploy-vectiqor-docker.sh
+./scripts/deploy-billy-docker.sh
 
 # Kubernetes (production)
-./scripts/build-vectiqor.sh v1.0.0      # Build and push image
-./scripts/deploy-vectiqor-k8s.sh         # Deploy to cluster
+./scripts/build-billy.sh v1.0.0      # Build and push image
+./scripts/deploy-billy-k8s.sh         # Deploy to cluster
 
 # See full guide
 cat deployments/kubernetes/README.md
@@ -307,10 +307,10 @@ cat deployments/kubernetes/README.md
 
 ## FAQs
 
-**Q: Why is VECTIQOR in tools/ and not in a top-level directory?**
-A: VECTIQOR is an internal diagnostic tool, not part of the product. Placing it in `tools/` makes it clear it's not distributed to customers.
+**Q: Why is BILLY in tools/ and not in a top-level directory?**
+A: BILLY is an internal diagnostic tool, not part of the product. Placing it in `tools/` makes it clear it's not distributed to customers.
 
-**Q: Can I delete tools/vectiqor/ before publishing?**
+**Q: Can I delete tools/billy/ before publishing?**
 A: No need! The MCP server package (`finout-mcp-server/`) is published independently. `tools/` is never included in the package.
 
 **Q: Where should I add new internal tools?**
@@ -342,7 +342,7 @@ A: **NEVER!** They contain secrets. Use `.env.example` as a template.
 1. ✅ Repository is structured and ready for git
 2. 📝 Review `.gitignore` to ensure no secrets are committed
 3. 🔍 Test the setup:
-   - `./scripts/start-vectiqor.sh`
+   - `./scripts/start-billy.sh`
    - `./scripts/build-mcp.sh`
    - `./scripts/test-all.sh`
 4. 🚀 Commit and push:

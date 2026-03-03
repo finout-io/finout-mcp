@@ -1,4 +1,4 @@
-# VECTIQOR - Ask the Smart AI of Finout
+# BILLY - Ask the Smart AI of Finout
 # Web interface for Finout MCP Server
 
 fastapi>=0.104.0

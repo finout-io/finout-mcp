@@ -4,21 +4,34 @@ import {
   Box,
   Button,
   Group,
+  List,
+  Modal,
   Stack,
   Text,
+  Title,
   Tooltip,
   useMantineColorScheme,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
+import { useQuery } from '@tanstack/react-query'
 import { useSession } from '../../hooks/useSession'
 import { useChat } from '../../hooks/useChat'
 import { useConversations } from '../../hooks/useConversations'
+import { getWhatsNew } from '../../api/whatsNew'
 import { Sidebar } from './Sidebar'
 import { ChatArea } from '../chat/ChatArea'
 import { ChatInput } from '../chat/ChatInput'
-import type { ConversationSummary, ModelId } from '../../types'
+import type { ConversationSummary, ModelId, WhatsNewEntry } from '../../types'
 import { MODEL_OPTIONS } from '../../types'
 import { Link } from 'react-router-dom'
+
+const LAST_SEEN_CHANGELOG_VERSION_KEY = 'billy_last_seen_changelog_version'
+
+const CHANGELOG_SECTION_LABELS: Record<keyof WhatsNewEntry['sections'], string> = {
+  external_mcp: 'External MCP',
+  internal_mcp: 'Internal MCP',
+  billy: 'Billy',
+}
 
 export function AppLayout() {
   const session = useSession()
@@ -29,11 +42,19 @@ export function AppLayout() {
   const [model, setModel] = useState<ModelId>(MODEL_OPTIONS[1]!.value)
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>()
   const [shareToken, setShareToken] = useState<string | undefined>()
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false)
+  const [unseenEntries, setUnseenEntries] = useState<WhatsNewEntry[]>([])
   // Ref so the auto-save effect always reads the latest ID without becoming a dep
   const activeConversationIdRef = useRef<string | undefined>(undefined)
   const lastAccountIdRef = useRef<string | null>(null)
+  const initializedWhatsNewRef = useRef(false)
 
   const { save, isSaving, loadConversation } = useConversations(accountId)
+  const { data: whatsNewData } = useQuery({
+    queryKey: ['whats-new'],
+    queryFn: getWhatsNew,
+    staleTime: 10 * 60 * 1000,
+  })
 
   // Keep ref in sync with state
   useEffect(() => { activeConversationIdRef.current = activeConversationId }, [activeConversationId])
@@ -73,6 +94,31 @@ export function AppLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat.messages])
 
+  useEffect(() => {
+    if (!whatsNewData || initializedWhatsNewRef.current) return
+    initializedWhatsNewRef.current = true
+
+    const lastSeenVersion = localStorage.getItem(LAST_SEEN_CHANGELOG_VERSION_KEY)
+    if (!lastSeenVersion) {
+      if (whatsNewData.entries.length > 0) {
+        setUnseenEntries(whatsNewData.entries)
+        setWhatsNewOpen(true)
+      }
+      return
+    }
+
+    const lastSeenIndex = whatsNewData.entries.findIndex((e) => e.version === lastSeenVersion)
+    const nextUnseen =
+      lastSeenIndex === -1
+        ? whatsNewData.entries
+        : whatsNewData.entries.slice(0, lastSeenIndex)
+
+    if (nextUnseen.length > 0) {
+      setUnseenEntries(nextUnseen)
+      setWhatsNewOpen(true)
+    }
+  }, [whatsNewData])
+
   const handleSelectConversation = useCallback(
     async (summary: ConversationSummary) => {
       try {
@@ -109,7 +155,7 @@ export function AppLayout() {
 
   const handleExport = useCallback(() => {
     if (chat.messages.length === 0) return
-    let md = `# VECTIQOR Conversation Export\n`
+    let md = `# BILLY Conversation Export\n`
     md += `Date: ${new Date().toISOString()}\n`
     md += `Account: ${session.selectedAccount?.name ?? 'Unknown'}\n\n---\n\n`
 
@@ -136,11 +182,52 @@ export function AppLayout() {
     )
   }, [chat.messages, session.selectedAccount])
 
+  const markWhatsNewSeen = useCallback(() => {
+    if (!whatsNewData?.current_version) return
+    localStorage.setItem(LAST_SEEN_CHANGELOG_VERSION_KEY, whatsNewData.current_version)
+    setWhatsNewOpen(false)
+  }, [whatsNewData])
+
   return (
-    <AppShell
-      navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: false } }}
-      padding={0}
-    >
+    <>
+      <Modal
+        opened={whatsNewOpen}
+        onClose={markWhatsNewSeen}
+        title={`What's New in Billy (${whatsNewData?.current_version ?? ''})`}
+        size="lg"
+        centered
+      >
+        <Stack gap="md">
+          {unseenEntries.map((entry) => (
+            <Stack key={entry.version} gap={6}>
+              <Title order={4}>{entry.title}</Title>
+              <Text size="sm" c="dimmed">
+                v{entry.version} · {entry.date}
+              </Text>
+              {(Object.keys(CHANGELOG_SECTION_LABELS) as (keyof WhatsNewEntry['sections'])[])
+                .map((sectionKey) => ({ key: sectionKey, changes: entry.sections[sectionKey] }))
+                .filter(({ changes }) => changes.length > 0)
+                .map(({ key, changes }) => (
+                  <Stack key={key} gap={4}>
+                    <Text fw={600} size="sm">{CHANGELOG_SECTION_LABELS[key]}</Text>
+                    <List spacing={4} size="sm">
+                      {changes.map((change) => (
+                        <List.Item key={`${entry.version}-${key}-${change}`}>{change}</List.Item>
+                      ))}
+                    </List>
+                  </Stack>
+                ))}
+            </Stack>
+          ))}
+          <Group justify="flex-end">
+            <Button onClick={markWhatsNewSeen}>Got it</Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <AppShell
+        navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: false } }}
+        padding={0}
+      >
       <AppShell.Navbar p="md" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <Sidebar
           accounts={session.accounts}
@@ -172,6 +259,18 @@ export function AppLayout() {
             {session.error && ` · Error: ${session.error}`}
           </Text>
           <Group gap="xs">
+            {whatsNewData && (
+              <Button
+                size="xs"
+                variant="subtle"
+                onClick={() => {
+                  setUnseenEntries(whatsNewData.entries)
+                  setWhatsNewOpen(true)
+                }}
+              >
+                What's new
+              </Button>
+            )}
             {chat.messages.length > 0 && (
               <Tooltip label="Copy chat as Markdown">
                 <Button size="xs" variant="subtle" onClick={handleExport}>
@@ -234,6 +333,7 @@ export function AppLayout() {
           </Stack>
         </Box>
       </AppShell.Main>
-    </AppShell>
+      </AppShell>
+    </>
   )
 }

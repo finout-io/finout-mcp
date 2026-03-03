@@ -10,7 +10,7 @@ interface Props {
 
 export function MarkdownRenderer({ content, size = 'sm' }: Props) {
   const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-  const tableClassName = 'vectiqor-md-table'
+  const tableClassName = 'billy-md-table'
 
   const components: Components = {
     p: ({ children }) => (

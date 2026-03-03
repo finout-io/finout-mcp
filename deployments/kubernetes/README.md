@@ -1,25 +1,25 @@
-# VECTIQOR Kubernetes Deployment
+# BILLY Kubernetes Deployment
 
-Deploy VECTIQOR (Ask the Smart AI of Finout) to Kubernetes for internal use.
+Deploy BILLY (Ask the Smart AI of Finout) to Kubernetes for internal use.
 
 ## Quick Start
 
 ```bash
 # 1. Build and push Docker image
-./scripts/build-vectiqor.sh v1.0.0
+./scripts/build-billy.sh v1.0.0
 
 # 2. Configure secrets
-cp deployments/kubernetes/vectiqor-secret.yaml.example deployments/kubernetes/vectiqor-secret.yaml
-# Edit vectiqor-secret.yaml with your credentials (base64 encoded)
+cp deployments/kubernetes/billy-secret.yaml.example deployments/kubernetes/billy-secret.yaml
+# Edit billy-secret.yaml with your credentials (base64 encoded)
 
 # 3. Update configuration
-nano deployments/kubernetes/vectiqor-configmap.yaml
+nano deployments/kubernetes/billy-configmap.yaml
 
 # 4. Update ingress hostname
-nano deployments/kubernetes/vectiqor-ingress.yaml
+nano deployments/kubernetes/billy-ingress.yaml
 
 # 5. Deploy
-./scripts/deploy-vectiqor-k8s.sh
+./scripts/deploy-billy-k8s.sh
 ```
 
 ## Prerequisites
@@ -39,7 +39,7 @@ nano deployments/kubernetes/vectiqor-ingress.yaml
 export DOCKER_REGISTRY=your-registry.azurecr.io
 
 # Build and push
-./scripts/build-vectiqor.sh v1.0.0
+./scripts/build-billy.sh v1.0.0
 ```
 
 Or manually:
@@ -47,18 +47,18 @@ Or manually:
 ```bash
 # Azure Container Registry
 az acr login --name your-registry
-docker build -f deployments/docker/Dockerfile.vectiqor -t your-registry.azurecr.io/vectiqor:v1.0.0 .
-docker push your-registry.azurecr.io/vectiqor:v1.0.0
+docker build -f deployments/docker/Dockerfile.billy -t your-registry.azurecr.io/billy:v1.0.0 .
+docker push your-registry.azurecr.io/billy:v1.0.0
 
 # AWS ECR
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin your-account.dkr.ecr.us-east-1.amazonaws.com
-docker build -f deployments/docker/Dockerfile.vectiqor -t your-account.dkr.ecr.us-east-1.amazonaws.com/vectiqor:v1.0.0 .
-docker push your-account.dkr.ecr.us-east-1.amazonaws.com/vectiqor:v1.0.0
+docker build -f deployments/docker/Dockerfile.billy -t your-account.dkr.ecr.us-east-1.amazonaws.com/billy:v1.0.0 .
+docker push your-account.dkr.ecr.us-east-1.amazonaws.com/billy:v1.0.0
 
 # Google Container Registry
 gcloud auth configure-docker
-docker build -f deployments/docker/Dockerfile.vectiqor -t gcr.io/your-project/vectiqor:v1.0.0 .
-docker push gcr.io/your-project/vectiqor:v1.0.0
+docker build -f deployments/docker/Dockerfile.billy -t gcr.io/your-project/billy:v1.0.0 .
+docker push gcr.io/your-project/billy:v1.0.0
 ```
 
 ### 2. Configure Secrets
@@ -67,32 +67,32 @@ docker push gcr.io/your-project/vectiqor:v1.0.0
 
 ```bash
 # Create namespace
-kubectl create namespace vectiqor
+kubectl create namespace billy
 
 # Create secret
-kubectl create secret generic vectiqor-secrets \
+kubectl create secret generic billy-secrets \
   --from-literal=finout-client-id="your-client-id" \
   --from-literal=finout-secret-key="your-secret-key" \
   --from-literal=anthropic-api-key="your-anthropic-key" \
-  -n vectiqor
+  -n billy
 ```
 
 **Option B: Using YAML file**
 
 ```bash
 # Copy template
-cp vectiqor-secret.yaml.example vectiqor-secret.yaml
+cp billy-secret.yaml.example billy-secret.yaml
 
 # Encode your credentials
 echo -n "your-finout-client-id" | base64
 echo -n "your-finout-secret-key" | base64
 echo -n "your-anthropic-api-key" | base64
 
-# Edit vectiqor-secret.yaml with encoded values
-nano vectiqor-secret.yaml
+# Edit billy-secret.yaml with encoded values
+nano billy-secret.yaml
 
 # Apply
-kubectl apply -f vectiqor-secret.yaml
+kubectl apply -f billy-secret.yaml
 ```
 
 **Option C: Using External Secrets (Recommended for Production)**
@@ -103,8 +103,8 @@ Azure Key Vault example:
 apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
 metadata:
-  name: vectiqor-secrets-provider
-  namespace: vectiqor
+  name: billy-secrets-provider
+  namespace: billy
 spec:
   provider: azure
   parameters:
@@ -121,7 +121,7 @@ spec:
           objectName: anthropic-api-key
           objectType: secret
   secretObjects:
-  - secretName: vectiqor-secrets
+  - secretName: billy-secrets
     type: Opaque
     data:
     - objectName: finout-client-id
@@ -134,7 +134,7 @@ spec:
 
 ### 3. Update Configuration
 
-Edit `vectiqor-configmap.yaml`:
+Edit `billy-configmap.yaml`:
 
 ```yaml
 data:
@@ -145,7 +145,7 @@ data:
 
 ### 4. Update Deployment
 
-Edit `vectiqor-deployment.yaml`:
+Edit `billy-deployment.yaml`:
 
 ```yaml
 spec:
@@ -153,8 +153,8 @@ spec:
   template:
     spec:
       containers:
-      - name: vectiqor
-        image: your-registry.azurecr.io/vectiqor:v1.0.0  # Update with your image
+      - name: billy
+        image: your-registry.azurecr.io/billy:v1.0.0  # Update with your image
         resources:
           requests:
             memory: "512Mi"
@@ -166,23 +166,23 @@ spec:
 
 ### 5. Configure Ingress
 
-Edit `vectiqor-ingress.yaml`:
+Edit `billy-ingress.yaml`:
 
 ```yaml
 spec:
   tls:
   - hosts:
-    - vectiqor.your-company.internal  # Your hostname
-    secretName: vectiqor-tls-cert     # Your TLS certificate secret
+    - billy.your-company.internal  # Your hostname
+    secretName: billy-tls-cert     # Your TLS certificate secret
   rules:
-  - host: vectiqor.your-company.internal
+  - host: billy.your-company.internal
     http:
       paths:
       - path: /
         pathType: Prefix
         backend:
           service:
-            name: vectiqor
+            name: billy
             port:
               number: 80
 ```
@@ -191,15 +191,15 @@ spec:
 
 ```bash
 # Using deployment script
-./scripts/deploy-vectiqor-k8s.sh
+./scripts/deploy-billy-k8s.sh
 
 # Or manually
 kubectl apply -f deployments/kubernetes/namespace.yaml
-kubectl apply -f deployments/kubernetes/vectiqor-configmap.yaml
-kubectl apply -f deployments/kubernetes/vectiqor-secret.yaml
-kubectl apply -f deployments/kubernetes/vectiqor-deployment.yaml
-kubectl apply -f deployments/kubernetes/vectiqor-service.yaml
-kubectl apply -f deployments/kubernetes/vectiqor-ingress.yaml
+kubectl apply -f deployments/kubernetes/billy-configmap.yaml
+kubectl apply -f deployments/kubernetes/billy-secret.yaml
+kubectl apply -f deployments/kubernetes/billy-deployment.yaml
+kubectl apply -f deployments/kubernetes/billy-service.yaml
+kubectl apply -f deployments/kubernetes/billy-ingress.yaml
 
 # Or using kustomize
 kubectl apply -k deployments/kubernetes/
@@ -211,29 +211,29 @@ kubectl apply -k deployments/kubernetes/
 
 ```bash
 # Get all resources
-kubectl get all -n vectiqor -l app=vectiqor
+kubectl get all -n billy -l app=billy
 
 # Check pods
-kubectl get pods -n vectiqor
+kubectl get pods -n billy
 
 # Check deployment
-kubectl describe deployment vectiqor -n vectiqor
+kubectl describe deployment billy -n billy
 
 # View logs
-kubectl logs -n vectiqor -l app=vectiqor -f
+kubectl logs -n billy -l app=billy -f
 
 # Check service
-kubectl get svc vectiqor -n vectiqor
+kubectl get svc billy -n billy
 
 # Check ingress
-kubectl get ingress vectiqor -n vectiqor
+kubectl get ingress billy -n billy
 ```
 
 ### Health Check
 
 ```bash
 # Port forward for local testing
-kubectl port-forward -n vectiqor svc/vectiqor 8000:80
+kubectl port-forward -n billy svc/billy 8000:80
 
 # Test health endpoint
 curl http://localhost:8000/api/health
@@ -243,10 +243,10 @@ curl http://localhost:8000/api/health
 
 ```bash
 # Get ingress URL
-kubectl get ingress vectiqor -n vectiqor
+kubectl get ingress billy -n billy
 
 # Access via browser
-https://vectiqor.your-company.internal
+https://billy.your-company.internal
 ```
 
 ## Scaling
@@ -255,27 +255,27 @@ https://vectiqor.your-company.internal
 
 ```bash
 # Scale up
-kubectl scale deployment vectiqor -n vectiqor --replicas=5
+kubectl scale deployment billy -n billy --replicas=5
 
 # Scale down
-kubectl scale deployment vectiqor -n vectiqor --replicas=1
+kubectl scale deployment billy -n billy --replicas=1
 ```
 
 ### Auto-scaling (HPA)
 
-Create `vectiqor-hpa.yaml`:
+Create `billy-hpa.yaml`:
 
 ```yaml
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: vectiqor
-  namespace: vectiqor
+  name: billy
+  namespace: billy
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: vectiqor
+    name: billy
   minReplicas: 2
   maxReplicas: 10
   metrics:
@@ -295,7 +295,7 @@ spec:
 
 Apply:
 ```bash
-kubectl apply -f vectiqor-hpa.yaml
+kubectl apply -f billy-hpa.yaml
 ```
 
 ## Updates
@@ -304,26 +304,26 @@ kubectl apply -f vectiqor-hpa.yaml
 
 ```bash
 # Build new version
-./scripts/build-vectiqor.sh v1.1.0
+./scripts/build-billy.sh v1.1.0
 
 # Update deployment image
-kubectl set image deployment/vectiqor vectiqor=your-registry.azurecr.io/vectiqor:v1.1.0 -n vectiqor
+kubectl set image deployment/billy billy=your-registry.azurecr.io/billy:v1.1.0 -n billy
 
 # Watch rollout
-kubectl rollout status deployment/vectiqor -n vectiqor
+kubectl rollout status deployment/billy -n billy
 
 # Rollback if needed
-kubectl rollout undo deployment/vectiqor -n vectiqor
+kubectl rollout undo deployment/billy -n billy
 ```
 
 ### Update Configuration
 
 ```bash
 # Edit configmap
-kubectl edit configmap vectiqor-config -n vectiqor
+kubectl edit configmap billy-config -n billy
 
 # Restart pods to pick up changes
-kubectl rollout restart deployment/vectiqor -n vectiqor
+kubectl rollout restart deployment/billy -n billy
 ```
 
 ## Monitoring
@@ -332,30 +332,30 @@ kubectl rollout restart deployment/vectiqor -n vectiqor
 
 ```bash
 # Stream logs from all pods
-kubectl logs -n vectiqor -l app=vectiqor -f
+kubectl logs -n billy -l app=billy -f
 
 # Logs from specific pod
-kubectl logs -n vectiqor <pod-name> -f
+kubectl logs -n billy <pod-name> -f
 
 # Previous logs (after crash)
-kubectl logs -n vectiqor <pod-name> --previous
+kubectl logs -n billy <pod-name> --previous
 ```
 
 ### Metrics
 
 ```bash
 # Resource usage
-kubectl top pods -n vectiqor -l app=vectiqor
+kubectl top pods -n billy -l app=billy
 
 # Detailed pod info
-kubectl describe pod <pod-name> -n vectiqor
+kubectl describe pod <pod-name> -n billy
 ```
 
 ### Events
 
 ```bash
 # Recent events
-kubectl get events -n vectiqor --sort-by='.lastTimestamp'
+kubectl get events -n billy --sort-by='.lastTimestamp'
 ```
 
 ## Troubleshooting
@@ -364,13 +364,13 @@ kubectl get events -n vectiqor --sort-by='.lastTimestamp'
 
 ```bash
 # Check pod status
-kubectl get pods -n vectiqor
+kubectl get pods -n billy
 
 # Describe pod
-kubectl describe pod <pod-name> -n vectiqor
+kubectl describe pod <pod-name> -n billy
 
 # Check logs
-kubectl logs <pod-name> -n vectiqor
+kubectl logs <pod-name> -n billy
 
 # Common issues:
 # - ImagePullBackOff: Check image name and registry credentials
@@ -382,29 +382,29 @@ kubectl logs <pod-name> -n vectiqor
 
 ```bash
 # Verify secret exists
-kubectl get secret vectiqor-secrets -n vectiqor
+kubectl get secret billy-secrets -n billy
 
 # Check secret contents (base64 encoded)
-kubectl get secret vectiqor-secrets -n vectiqor -o yaml
+kubectl get secret billy-secrets -n billy -o yaml
 
 # Recreate secret
-kubectl delete secret vectiqor-secrets -n vectiqor
-kubectl create secret generic vectiqor-secrets \
+kubectl delete secret billy-secrets -n billy
+kubectl create secret generic billy-secrets \
   --from-literal=finout-client-id="..." \
-  -n vectiqor
+  -n billy
 ```
 
 ### Service Not Accessible
 
 ```bash
 # Check service
-kubectl get svc vectiqor -n vectiqor
+kubectl get svc billy -n billy
 
 # Check endpoints
-kubectl get endpoints vectiqor -n vectiqor
+kubectl get endpoints billy -n billy
 
 # Port forward for testing
-kubectl port-forward svc/vectiqor 8000:80 -n vectiqor
+kubectl port-forward svc/billy 8000:80 -n billy
 curl http://localhost:8000/api/health
 ```
 
@@ -412,13 +412,13 @@ curl http://localhost:8000/api/health
 
 ```bash
 # Check ingress
-kubectl describe ingress vectiqor -n vectiqor
+kubectl describe ingress billy -n billy
 
 # Check ingress controller logs
 kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx -f
 
 # Test with port-forward first
-kubectl port-forward svc/vectiqor 8000:80 -n vectiqor
+kubectl port-forward svc/billy 8000:80 -n billy
 ```
 
 ## Security Best Practices
@@ -432,12 +432,12 @@ kubectl port-forward svc/vectiqor 8000:80 -n vectiqor
    apiVersion: networking.k8s.io/v1
    kind: NetworkPolicy
    metadata:
-     name: vectiqor-network-policy
-     namespace: vectiqor
+     name: billy-network-policy
+     namespace: billy
    spec:
      podSelector:
        matchLabels:
-         app: vectiqor
+         app: billy
      policyTypes:
      - Ingress
      - Egress
@@ -458,7 +458,7 @@ kubectl port-forward svc/vectiqor 8000:80 -n vectiqor
    ```
 
 3. **Use RBAC**
-   - Limit who can deploy/update VECTIQOR
+   - Limit who can deploy/update BILLY
    - Use service accounts with minimal permissions
 
 4. **Enable Pod Security Standards**
@@ -466,7 +466,7 @@ kubectl port-forward svc/vectiqor 8000:80 -n vectiqor
    apiVersion: policy/v1beta1
    kind: PodSecurityPolicy
    metadata:
-     name: vectiqor-psp
+     name: billy-psp
    spec:
      privileged: false
      allowPrivilegeEscalation: false
@@ -489,16 +489,16 @@ kubectl port-forward svc/vectiqor 8000:80 -n vectiqor
 ## Cleanup
 
 ```bash
-# Delete all VECTIQOR resources
+# Delete all BILLY resources
 kubectl delete -k deployments/kubernetes/
 
 # Or manually
-kubectl delete namespace vectiqor
+kubectl delete namespace billy
 
 # Delete specific resources
-kubectl delete deployment vectiqor -n vectiqor
-kubectl delete service vectiqor -n vectiqor
-kubectl delete ingress vectiqor -n vectiqor
+kubectl delete deployment billy -n billy
+kubectl delete service billy -n billy
+kubectl delete ingress billy -n billy
 ```
 
 ## CI/CD Integration
@@ -506,13 +506,13 @@ kubectl delete ingress vectiqor -n vectiqor
 ### GitHub Actions Example
 
 ```yaml
-name: Deploy VECTIQOR to K8s
+name: Deploy BILLY to K8s
 
 on:
   push:
     branches: [main]
     paths:
-      - 'tools/vectiqor/**'
+      - 'tools/billy/**'
       - 'deployments/kubernetes/**'
 
 jobs:
@@ -523,17 +523,17 @@ jobs:
 
     - name: Build and push Docker image
       run: |
-        docker build -f deployments/docker/Dockerfile.vectiqor -t ${{ secrets.REGISTRY }}/vectiqor:${{ github.sha }} .
-        docker push ${{ secrets.REGISTRY }}/vectiqor:${{ github.sha }}
+        docker build -f deployments/docker/Dockerfile.billy -t ${{ secrets.REGISTRY }}/billy:${{ github.sha }} .
+        docker push ${{ secrets.REGISTRY }}/billy:${{ github.sha }}
 
     - name: Deploy to Kubernetes
       run: |
-        kubectl set image deployment/vectiqor vectiqor=${{ secrets.REGISTRY }}/vectiqor:${{ github.sha }} -n vectiqor
+        kubectl set image deployment/billy billy=${{ secrets.REGISTRY }}/billy:${{ github.sha }} -n billy
 ```
 
 ## Support
 
-- Check logs: `kubectl logs -n vectiqor -l app=vectiqor -f`
-- Check health: `kubectl get pods -n vectiqor`
-- Port forward for testing: `kubectl port-forward -n vectiqor svc/vectiqor 8000:80`
-- Describe resources: `kubectl describe deployment vectiqor -n vectiqor`
+- Check logs: `kubectl logs -n billy -l app=billy -f`
+- Check health: `kubectl get pods -n billy`
+- Port forward for testing: `kubectl port-forward -n billy svc/billy 8000:80`
+- Describe resources: `kubectl describe deployment billy -n billy`

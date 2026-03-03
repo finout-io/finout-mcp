@@ -16,7 +16,7 @@ export interface SessionState {
 export function useSession(): SessionState {
   const queryClient = useQueryClient()
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
-    () => localStorage.getItem('vectiqor_last_account'),
+    () => localStorage.getItem('billy_last_account'),
   )
   const [isReady, setIsReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,7 +33,7 @@ export function useSession(): SessionState {
   const initMutation = useMutation({
     mutationFn: (accountId: string) => switchAccount(accountId),
     onSuccess: (_data, accountId) => {
-      localStorage.setItem('vectiqor_last_account', accountId)
+      localStorage.setItem('billy_last_account', accountId)
       setIsReady(true)
       setError(null)
       void queryClient.invalidateQueries({ queryKey: ['conversations'] })

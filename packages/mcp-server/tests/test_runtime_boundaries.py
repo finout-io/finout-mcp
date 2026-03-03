@@ -50,9 +50,7 @@ async def test_public_mode_does_not_include_debug_curl(monkeypatch):
 async def test_internal_mode_includes_debug_curl(monkeypatch):
     client = _DummyClient()
     monkeypatch.setattr(server_module, "finout_client", client)
-    monkeypatch.setattr(
-        server_module, "runtime_mode", server_module.MCPMode.VECTIQOR_INTERNAL.value
-    )
+    monkeypatch.setattr(server_module, "runtime_mode", server_module.MCPMode.BILLY_INTERNAL.value)
 
     async def _fake_query_costs(_: dict) -> dict:
         return {"ok": True}
@@ -84,9 +82,7 @@ async def test_list_tools_internal_is_superset_of_public(monkeypatch):
     public_tools = await server_module.list_tools()
     public_names = {tool.name for tool in public_tools}
 
-    monkeypatch.setattr(
-        server_module, "runtime_mode", server_module.MCPMode.VECTIQOR_INTERNAL.value
-    )
+    monkeypatch.setattr(server_module, "runtime_mode", server_module.MCPMode.BILLY_INTERNAL.value)
     tools = await server_module.list_tools()
     names = {tool.name for tool in tools}
 
@@ -117,9 +113,7 @@ async def test_call_tool_blocks_internal_only_tool_in_public_mode(monkeypatch):
 async def test_call_tool_allows_key_secret_tool_in_internal_mode(monkeypatch):
     client = _DummyClient()
     monkeypatch.setattr(server_module, "finout_client", client)
-    monkeypatch.setattr(
-        server_module, "runtime_mode", server_module.MCPMode.VECTIQOR_INTERNAL.value
-    )
+    monkeypatch.setattr(server_module, "runtime_mode", server_module.MCPMode.BILLY_INTERNAL.value)
 
     # Bypass implementation details and validate runtime gating only.
     async def _fake_waste(_: dict) -> dict:
@@ -157,13 +151,13 @@ def test_public_package_exposes_only_public_script():
     scripts = data["project"]["scripts"]
 
     assert "finout-mcp" in scripts
-    assert "vectiqor-mcp-internal" not in scripts
+    assert "billy-mcp-internal" not in scripts
 
 
 def test_internal_mode_reads_finout_account_id_env(monkeypatch):
     monkeypatch.setenv("FINOUT_ACCOUNT_ID", "11111111-1111-1111-1111-111111111111")
 
-    client = server_module._init_client_for_mode(server_module.MCPMode.VECTIQOR_INTERNAL)
+    client = server_module._init_client_for_mode(server_module.MCPMode.BILLY_INTERNAL)
     try:
         assert client.account_id == "11111111-1111-1111-1111-111111111111"
     finally:

@@ -375,7 +375,7 @@ class FinoutClient:
             raise ValueError("Internal API client not configured.")
 
         headers = self._get_internal_headers()
-        # Internal/VECTIQOR mode requires this explicit permission header.
+        # Internal/BILLY mode requires this explicit permission header.
         # In public key/secret mode, equivalent auth context is applied upstream.
         if self.internal_auth_mode == InternalAuthMode.AUTHORIZED_HEADERS:
             headers["authorized-user-permissions"] = "fin.financial-plans.view.financial-plans"

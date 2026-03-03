@@ -1,8 +1,8 @@
-# Multi-Account Support for VECTIQOR
+# Multi-Account Support for BILLY
 
 ## Overview
 
-VECTIQOR now supports querying multiple Finout accounts! Users can switch between accounts using a dropdown selector in the header.
+BILLY now supports querying multiple Finout accounts! Users can switch between accounts using a dropdown selector in the header.
 
 ## How It Works
 
@@ -27,7 +27,7 @@ VECTIQOR now supports querying multiple Finout accounts! Users can switch betwee
 
 ### Account Selector (Header)
 ```
-🤖 VECTIQOR                                      Account: [Production ▼]
+🤖 BILLY                                      Account: [Production ▼]
    Ask the Smart AI of Finout
 ```
 
@@ -90,7 +90,7 @@ Switches to a different account.
 
 ## Implementation Details
 
-### Backend (vectiqor_server.py)
+### Backend (billy_server.py)
 
 **MCPBridge Changes:**
 ```python
@@ -161,24 +161,24 @@ async function switchAccount() {
 ### Before (Single Account)
 ```
 User: "What were my costs last month?"
-VECTIQOR: [Shows Production account costs]
+BILLY: [Shows Production account costs]
 ```
 
 ### After (Multi-Account)
 ```
 User: [Selects "Development" from dropdown]
-VECTIQOR: "Account switched! Now querying Development."
+BILLY: "Account switched! Now querying Development."
 
 User: "What were my costs last month?"
-VECTIQOR: [Shows Development account costs]
+BILLY: [Shows Development account costs]
 
 User: [Switches back to "Production"]
-VECTIQOR: "Account switched! Now querying Production."
+BILLY: "Account switched! Now querying Production."
 ```
 
 ## Benefits
 
-✅ **Multi-Tenant** - One VECTIQOR instance for all accounts
+✅ **Multi-Tenant** - One BILLY instance for all accounts
 ✅ **No Confusion** - Clear which account you're querying
 ✅ **Fast Switching** - 1-2 second switch time
 ✅ **Clean Context** - Each account starts fresh
@@ -201,7 +201,7 @@ VECTIQOR: "Account switched! Now querying Production."
 
 ### 1. Check Account List
 ```bash
-# Start VECTIQOR
+# Start BILLY
 ./start.sh
 
 # Open browser: http://localhost:8000
@@ -278,4 +278,4 @@ User sees new account's data
 
 **Multi-account support is ready!** 🎉
 
-Now your whole team can use VECTIQOR to query any account they have access to, all from one interface.
+Now your whole team can use BILLY to query any account they have access to, all from one interface.

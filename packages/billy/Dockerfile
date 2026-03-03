@@ -4,9 +4,9 @@ ARG BUILDPLATFORM
 FROM --platform=$BUILDPLATFORM node:20-bookworm-slim AS frontend
 RUN corepack enable
 WORKDIR /app/frontend
-COPY packages/vectiqor/frontend/package.json packages/vectiqor/frontend/pnpm-lock.yaml ./
+COPY packages/billy/frontend/package.json packages/billy/frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
-COPY packages/vectiqor/frontend/ .
+COPY packages/billy/frontend/ .
 RUN pnpm build
 
 # Stage 2: Build Python packages
@@ -23,18 +23,18 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy workspace files
-COPY packages/vectiqor /app/packages/vectiqor
+COPY packages/billy /app/packages/billy
 COPY packages/mcp-server /app/packages/mcp-server
-COPY packages/vectiqor-mcp-internal /app/packages/vectiqor-mcp-internal
+COPY packages/billy-mcp-internal /app/packages/billy-mcp-internal
 
 # Install dependencies for both packages
-WORKDIR /app/packages/vectiqor
+WORKDIR /app/packages/billy
 RUN pip install --no-cache-dir -e .
 
 WORKDIR /app/packages/mcp-server
 RUN pip install --no-cache-dir -e .
 
-WORKDIR /app/packages/vectiqor-mcp-internal
+WORKDIR /app/packages/billy-mcp-internal
 RUN pip install --no-cache-dir -e .
 
 # Final stage
@@ -55,10 +55,10 @@ WORKDIR /app
 COPY --from=builder /app /app
 
 # Copy built frontend into the static directory FastAPI serves
-COPY --from=frontend /app/frontend/dist /app/packages/vectiqor/src/vectiqor/static/
+COPY --from=frontend /app/frontend/dist /app/packages/billy/src/billy/static/
 
-# Set working directory to VECTIQOR
-WORKDIR /app/packages/vectiqor
+# Set working directory to BILLY
+WORKDIR /app/packages/billy
 
 # Expose port
 EXPOSE 8000
@@ -74,5 +74,5 @@ ENV FINOUT_API_URL=""
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Run VECTIQOR server
-CMD ["uvicorn", "vectiqor.server:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+# Run BILLY server
+CMD ["uvicorn", "billy.server:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

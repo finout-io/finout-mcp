@@ -42,6 +42,11 @@ venv.bak/
 
 # Claude Code
 .claude/
+!.claude/
+.claude/*
+!.claude/commands/
+.claude/commands/*
+!.claude/commands/release-whats-new.md
 
 # Testing
 .pytest_cache/

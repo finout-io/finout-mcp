@@ -1,1 +1,1 @@
-"""Internal MCP launcher package for VECTIQOR."""
+"""Internal MCP launcher package for BILLY."""

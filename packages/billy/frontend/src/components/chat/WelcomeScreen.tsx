@@ -1,4 +1,4 @@
-import { Box, Button, Stack, Text, Title } from '@mantine/core'
+import { Box, Button, Image, Stack, Text, Title } from '@mantine/core'
 
 const SUGGESTED_QUESTIONS = [
   'What are my top 5 most expensive services this month?',
@@ -28,8 +28,14 @@ export function WelcomeScreen({ onQuestion, disabled }: Props) {
       }}
     >
       <Stack align="center" gap="xs">
+        <Image
+          src="/billy-welcome.png"
+          alt="Billy mascot"
+          maw={260}
+          radius="md"
+        />
         <Title order={2} ta="center">
-          Ask Finout AI
+          Ask Billy
         </Title>
         <Text c="dimmed" ta="center" size="sm">
           Get instant insights into your cloud spending

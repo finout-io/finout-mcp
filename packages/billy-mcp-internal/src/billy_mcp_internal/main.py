@@ -1,10 +1,10 @@
-"""Entrypoint for VECTIQOR internal MCP runtime."""
+"""Entrypoint for BILLY internal MCP runtime."""
 
-from finout_mcp_server.server import main_vectiqor_internal
+from finout_mcp_server.server import main_billy_internal
 
 
 def main() -> None:
-    main_vectiqor_internal()
+    main_billy_internal()
 
 
 if __name__ == "__main__":

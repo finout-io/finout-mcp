@@ -1,4 +1,4 @@
-"""Development runner for VECTIQOR backend + frontend."""
+"""Development runner for BILLY backend + frontend."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def main() -> None:
                 sys.executable,
                 "-m",
                 "uvicorn",
-                "vectiqor.server:app",
+                "billy.server:app",
                 "--host",
                 "0.0.0.0",
                 "--port",

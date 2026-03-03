@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: vectiqor
+  name: billy
   labels:
-    name: vectiqor
+    name: billy
     purpose: internal-diagnostic-tools

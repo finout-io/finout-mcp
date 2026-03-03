@@ -1,32 +1,32 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: vectiqor
+namespace: billy
 
 resources:
 - namespace.yaml
-- vectiqor-configmap.yaml
-- vectiqor-deployment.yaml
-- vectiqor-service.yaml
-- vectiqor-ingress.yaml
-# - vectiqor-secret.yaml  # Uncomment after creating from .example
+- billy-configmap.yaml
+- billy-deployment.yaml
+- billy-service.yaml
+- billy-ingress.yaml
+# - billy-secret.yaml  # Uncomment after creating from .example
 
 # Common labels for all resources
 commonLabels:
-  app.kubernetes.io/name: vectiqor
+  app.kubernetes.io/name: billy
   app.kubernetes.io/component: diagnostic-tool
   app.kubernetes.io/part-of: finout-mcp
   app.kubernetes.io/managed-by: kustomize
 
 # Image configuration
 images:
-- name: 277411487094.dkr.ecr.us-east-1.amazonaws.com/vectiqor
-  newName: 277411487094.dkr.ecr.us-east-1.amazonaws.com/vectiqor
+- name: 277411487094.dkr.ecr.us-east-1.amazonaws.com/billy
+  newName: 277411487094.dkr.ecr.us-east-1.amazonaws.com/billy
   newTag: latest
 
 # ConfigMap generator (alternative to separate file)
 # configMapGenerator:
-# - name: vectiqor-config
+# - name: billy-config
 #   literals:
 #   - finout-internal-api-url=http://finout-app.internal
 #   - finout-default-account-id=your-account-id

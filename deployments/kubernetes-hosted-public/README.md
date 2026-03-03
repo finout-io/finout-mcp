@@ -1,6 +1,6 @@
 # Hosted Public MCP on Kubernetes
 
-Deploys the standalone hosted public MCP service (separate from VECTIQOR).
+Deploys the standalone hosted public MCP service (separate from BILLY).
 
 ## Apply
 

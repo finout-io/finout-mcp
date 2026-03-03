@@ -2,7 +2,7 @@
 Hosted public MCP service (Streamable HTTP transport).
 
 This service runs the same MCP tool core in fixed PUBLIC mode and is intentionally
-separate from VECTIQOR.
+separate from BILLY.
 """
 
 from __future__ import annotations
