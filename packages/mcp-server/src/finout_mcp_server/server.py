@@ -47,7 +47,7 @@ class MCPMode(StrEnum):
     """Runtime mode for MCP deployment."""
 
     PUBLIC = "public"
-    VECTIQOR_INTERNAL = "vectiqor-internal"
+    BILLY_INTERNAL = "billy-internal"
 
 
 PUBLIC_TOOLS: set[str] = {
@@ -62,7 +62,7 @@ PUBLIC_TOOLS: set[str] = {
     "get_financial_plans",
 }
 
-VECTIQOR_INTERNAL_EXTRA_TOOLS: set[str] = {
+BILLY_INTERNAL_EXTRA_TOOLS: set[str] = {
     "create_view",
     "debug_filters",
     "discover_context",
@@ -73,7 +73,7 @@ VECTIQOR_INTERNAL_EXTRA_TOOLS: set[str] = {
     "analyze_virtual_tags",
 }
 
-VECTIQOR_INTERNAL_TOOLS: set[str] = PUBLIC_TOOLS | VECTIQOR_INTERNAL_EXTRA_TOOLS
+BILLY_INTERNAL_TOOLS: set[str] = PUBLIC_TOOLS | BILLY_INTERNAL_EXTRA_TOOLS
 
 INTERNAL_API_TOOLS: set[str] = {
     "query_costs",
@@ -131,8 +131,8 @@ logger = logging.getLogger(__name__)
 
 def _allowed_tools_for_runtime() -> set[str]:
     """Used by call_tool to check access. Also re-exported in tool_schemas."""
-    if runtime_mode == MCPMode.VECTIQOR_INTERNAL.value:
-        return VECTIQOR_INTERNAL_TOOLS
+    if runtime_mode == MCPMode.BILLY_INTERNAL.value:
+        return BILLY_INTERNAL_TOOLS
     return PUBLIC_TOOLS
 
 
@@ -209,7 +209,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             internal_api_url=finout_client.internal_api_url,
             account_id=finout_client.account_id,
             internal_auth_mode=finout_client.internal_auth_mode,
-            allow_missing_credentials=(runtime_mode == MCPMode.VECTIQOR_INTERNAL.value),
+            allow_missing_credentials=(runtime_mode == MCPMode.BILLY_INTERNAL.value),
         )
 
     assert finout_client is not None  # Type checker hint
@@ -246,94 +246,110 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             )
         ]
 
-    try:
-        # Clear stale curls before each tool call
-        finout_client.collect_curls()
+    from .observability import trace_tool
 
-        if name == "query_costs":
-            result = await query_costs_impl(arguments)
-        elif name == "compare_costs":
-            result = await compare_costs_impl(arguments)
-        elif name == "get_anomalies":
-            result = await get_anomalies_impl(arguments)
-        elif name == "get_financial_plans":
-            result = await get_financial_plans_impl(arguments)
-        elif name == "get_waste_recommendations":
-            result = await get_waste_recommendations_impl(arguments)
-        elif name == "list_available_filters":
-            result = await list_available_filters_impl(arguments)
-        elif name == "search_filters":
-            result = await search_filters_impl(arguments)
-        elif name == "get_filter_values":
-            result = await get_filter_values_impl(arguments)
-        elif name == "get_usage_unit_types":
-            result = await get_usage_unit_types_impl(arguments)
-        elif name == "debug_filters":
-            result = await debug_filters_impl(arguments)
-        elif name == "discover_context":
-            result = await discover_context_impl(arguments or {})
-        elif name == "get_account_context":
-            result = await get_account_context_impl()
-        elif name == "submit_feedback":
-            result = await submit_feedback_impl(arguments)
-        elif name == "create_view":
-            result = await create_view_impl(arguments)
-        elif name == "create_dashboard":
-            result = await create_dashboard_impl(arguments)
-        elif name == "render_chart":
-            result = await render_chart_impl(arguments)
-        elif name == "analyze_virtual_tags":
-            result = await analyze_virtual_tags_impl(arguments or {})
-        else:
-            return [TextContent(type="text", text=f"Unknown tool: {name}")]
+    async with trace_tool(
+        name, arguments or {}, user_id=getattr(finout_client, "account_id", None)
+    ) as trace_ctx:
+        try:
+            # Clear stale curls before each tool call
+            finout_client.collect_curls()
 
-        # Attach debug curl commands only for internal VECTIQOR mode.
-        curls = finout_client.collect_curls()
-        if runtime_mode == MCPMode.VECTIQOR_INTERNAL.value and curls and isinstance(result, dict):
-            result["_debug_curl"] = curls
+            if name == "query_costs":
+                result = await query_costs_impl(arguments)
+            elif name == "compare_costs":
+                result = await compare_costs_impl(arguments)
+            elif name == "get_anomalies":
+                result = await get_anomalies_impl(arguments)
+            elif name == "get_financial_plans":
+                result = await get_financial_plans_impl(arguments)
+            elif name == "get_waste_recommendations":
+                result = await get_waste_recommendations_impl(arguments)
+            elif name == "list_available_filters":
+                result = await list_available_filters_impl(arguments)
+            elif name == "search_filters":
+                result = await search_filters_impl(arguments)
+            elif name == "get_filter_values":
+                result = await get_filter_values_impl(arguments)
+            elif name == "get_usage_unit_types":
+                result = await get_usage_unit_types_impl(arguments)
+            elif name == "debug_filters":
+                result = await debug_filters_impl(arguments)
+            elif name == "discover_context":
+                result = await discover_context_impl(arguments or {})
+            elif name == "get_account_context":
+                result = await get_account_context_impl()
+            elif name == "submit_feedback":
+                result = await submit_feedback_impl(arguments)
+            elif name == "create_view":
+                result = await create_view_impl(arguments)
+            elif name == "create_dashboard":
+                result = await create_dashboard_impl(arguments)
+            elif name == "render_chart":
+                result = await render_chart_impl(arguments)
+            elif name == "analyze_virtual_tags":
+                result = await analyze_virtual_tags_impl(arguments or {})
+            else:
+                return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+            # Attach debug curl commands only for internal BILLY mode.
+            curls = finout_client.collect_curls()
+            if runtime_mode == MCPMode.BILLY_INTERNAL.value and curls and isinstance(result, dict):
+                result["_debug_curl"] = curls
 
-    except ValueError as e:
-        # User-friendly error for validation issues
-        error_msg = str(e)
-        if "authentication failed" in error_msg.lower() or "credentials" in error_msg.lower():
-            return [TextContent(type="text", text="Unauthorized.")]
-        if "Internal API URL not configured" in error_msg:
+            trace_ctx["output"] = {"status": "success"}
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except ValueError as e:
+            # User-friendly error for validation issues
+            error_msg = str(e)
+            trace_ctx["output"] = {
+                "status": "error",
+                "error": error_msg,
+                "error_type": "ValueError",
+            }
+            if "authentication failed" in error_msg.lower() or "credentials" in error_msg.lower():
+                return [TextContent(type="text", text="Unauthorized.")]
+            if "Internal API URL not configured" in error_msg:
+                return [
+                    TextContent(
+                        type="text",
+                        text=(
+                            "❌ Internal API not configured\n\n"
+                            "To use this tool, set the following environment variable:\n"
+                            "  FINOUT_API_URL=https://app.finout.io\n\n"
+                            f"Original error: {error_msg}"
+                        ),
+                    )
+                ]
+            else:
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"❌ Validation Error: {error_msg}\n\nPlease check your parameters and try again.",
+                    )
+                ]
+        except Exception as e:
+            # Include exception type and traceback for debugging
+            import traceback
+
+            error_trace = traceback.format_exc()
+            trace_ctx["output"] = {
+                "status": "error",
+                "error": str(e),
+                "error_type": type(e).__name__,
+            }
             return [
                 TextContent(
                     type="text",
                     text=(
-                        "❌ Internal API not configured\n\n"
-                        "To use this tool, set the following environment variable:\n"
-                        "  FINOUT_API_URL=https://app.finout.io\n\n"
-                        f"Original error: {error_msg}"
+                        f"❌ Error executing {name}: {str(e)}\n\n"
+                        f"Exception type: {type(e).__name__}\n\n"
+                        "Debug info:\n"
+                        f"{error_trace[-1000:]}"  # Last 1000 chars of trace
                     ),
                 )
             ]
-        else:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"❌ Validation Error: {error_msg}\n\nPlease check your parameters and try again.",
-                )
-            ]
-    except Exception as e:
-        # Include exception type and traceback for debugging
-        import traceback
-
-        error_trace = traceback.format_exc()
-        return [
-            TextContent(
-                type="text",
-                text=(
-                    f"❌ Error executing {name}: {str(e)}\n\n"
-                    f"Exception type: {type(e).__name__}\n\n"
-                    "Debug info:\n"
-                    f"{error_trace[-1000:]}"  # Last 1000 chars of trace
-                ),
-            )
-        ]
 
 
 # Tool implementations live in tools/ subpackage.
@@ -460,10 +476,15 @@ def _main_with_mode(mode: MCPMode) -> None:
     # Run the server
     import asyncio
 
+    from .observability import shutdown as observability_shutdown
+
     async def run_server():
         """Run the MCP server using stdio transport"""
-        async with stdio_server() as (read_stream, write_stream):
-            await server.run(read_stream, write_stream, server.create_initialization_options())
+        try:
+            async with stdio_server() as (read_stream, write_stream):
+                await server.run(read_stream, write_stream, server.create_initialization_options())
+        finally:
+            observability_shutdown()
 
     asyncio.run(run_server())
 
@@ -484,9 +505,9 @@ def main() -> None:
     _main_with_mode(MCPMode.PUBLIC)
 
 
-def main_vectiqor_internal() -> None:
-    """Internal MCP entry point used by VECTIQOR only."""
-    _main_with_mode(MCPMode.VECTIQOR_INTERNAL)
+def main_billy_internal() -> None:
+    """Internal MCP entry point used by BILLY only."""
+    _main_with_mode(MCPMode.BILLY_INTERNAL)
 
 
 if __name__ == "__main__":

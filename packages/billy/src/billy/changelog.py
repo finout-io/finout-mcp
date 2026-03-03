@@ -19,6 +19,25 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.3.0",
+        "date": "2026-03-03",
+        "title": "Langfuse observability across MCP and Billy chat",
+        "sections": {
+            "external_mcp": [
+                "Added optional Langfuse tracing hooks for MCP tool calls.",
+                "Added docker-compose Langfuse stack for local observability."
+            ],
+            "internal_mcp": [
+                "Instrumented Billy chat pipeline spans and feedback scoring in Langfuse.",
+                "Added optional observability dependency group for mcp-server package."
+            ],
+            "billy": [
+                "Added Langfuse and Anthropic OpenTelemetry instrumentation dependencies.",
+                "Added evaluation runner utilities for seeded Langfuse dataset experiments."
+            ]
+        }
+    },
+    {
         "version": "0.2.0",
         "date": "2026-03-03",
         "title": "Billy rename and categorized What's New",

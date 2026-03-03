@@ -1,6 +1,6 @@
 [project]
 name = "billy"
-version = "0.2.0"
+version = "0.3.0"
 description = "BILLY (Internal Diagnostic Tool)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,6 +13,8 @@ dependencies = [
     "httpx>=0.25.0",
     "asyncpg>=0.29.0",
     "PyJWT[crypto]>=2.8.0",
+    "langfuse>=2.0.0",
+    "opentelemetry-instrumentation-anthropic>=0.50.0",
 ]
 
 [project.scripts]

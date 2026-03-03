@@ -4,10 +4,10 @@ from mcp.types import Tool
 
 
 def _allowed_tools_for_runtime() -> set[str]:
-    from .server import PUBLIC_TOOLS, VECTIQOR_INTERNAL_TOOLS, MCPMode, runtime_mode
+    from .server import BILLY_INTERNAL_TOOLS, PUBLIC_TOOLS, MCPMode, runtime_mode
 
-    if runtime_mode == MCPMode.VECTIQOR_INTERNAL.value:
-        return VECTIQOR_INTERNAL_TOOLS
+    if runtime_mode == MCPMode.BILLY_INTERNAL.value:
+        return BILLY_INTERNAL_TOOLS
     return PUBLIC_TOOLS
 
 

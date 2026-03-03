@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-VECTIQOR
+BILLY
 Web server that provides chat interface to Finout MCP Server.
 """
 import asyncio
@@ -10,6 +10,7 @@ import subprocess
 import secrets
 import shutil
 import sys
+from importlib.metadata import PackageNotFoundError, version as package_version
 from uuid import UUID, uuid4
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 from contextlib import asynccontextmanager
@@ -25,6 +26,7 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 from pathlib import Path
 from urllib.parse import quote
+from .changelog import CHANGELOG_ENTRIES
 from .db import db
 from .auth import get_jwt_user
 
@@ -34,6 +36,20 @@ load_dotenv(package_root / ".env")
 
 # Repository root for finding MCP server
 repo_root = package_root.parent.parent
+
+# Langfuse observability — auto-instrument Anthropic SDK calls.
+_langfuse: Any = None
+if os.getenv("LANGFUSE_SECRET_KEY"):
+    try:
+        from langfuse import Langfuse as _Langfuse
+
+        _langfuse = _Langfuse()  # Registers OTel TracerProvider
+
+        from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
+
+        AnthropicInstrumentor().instrument()
+    except Exception:
+        pass  # Langfuse/OTel not available — continue without tracing
 
 # Models
 class ChatMessage(BaseModel):
@@ -45,6 +61,7 @@ class ChatRequest(BaseModel):
     conversation_history: List[ChatMessage] = []
     account_id: Optional[str] = None
     model: Optional[str] = "claude-sonnet-4-5-20250929"  # Model to use for this request
+    user_email: Optional[str] = None
 
 
 class MCPBridge:
@@ -67,10 +84,19 @@ class MCPBridge:
         env["FINOUT_ACCOUNT_ID"] = self.current_account_id
 
         # Start internal MCP runtime using the dedicated launcher when available.
-        # Fallback to direct module startup (no uv requirement) for local/dev environments.
+        # Fallback to uv-run launcher so mcp-server dependencies are resolved automatically.
+        # Last-resort fallback keeps direct module startup for environments without uv.
         mcp_server_path = repo_root
-        if shutil.which("vectiqor-mcp-internal"):
-            mcp_cmd = ["vectiqor-mcp-internal"]
+        if shutil.which("billy-mcp-internal"):
+            mcp_cmd = ["billy-mcp-internal"]
+        elif shutil.which("uv"):
+            mcp_cmd = [
+                "uv",
+                "run",
+                "--directory",
+                str(repo_root / "packages" / "billy-mcp-internal"),
+                "billy-mcp-internal",
+            ]
         else:
             mcp_src_path = repo_root / "packages" / "mcp-server" / "src"
             existing_pythonpath = env.get("PYTHONPATH", "")
@@ -82,7 +108,7 @@ class MCPBridge:
             mcp_cmd = [
                 sys.executable,
                 "-c",
-                "from finout_mcp_server.server import main_vectiqor_internal; main_vectiqor_internal()",
+                "from finout_mcp_server.server import main_billy_internal; main_billy_internal()",
             ]
         print(f"Starting MCP command: {' '.join(mcp_cmd)}")
 
@@ -122,7 +148,7 @@ class MCPBridge:
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
                 "clientInfo": {
-                    "name": "vectiqor",
+                    "name": "billy",
                     "version": "1.0.0"
                 }
             }
@@ -242,10 +268,10 @@ def _read_timeout_seconds(env_var: str, default: float) -> Optional[float]:
     return parsed
 
 
-CHAT_REQUEST_TIMEOUT_SECONDS = _read_timeout_seconds("VECTIQOR_CHAT_TIMEOUT_SECONDS", 540.0)
-SESSION_COOKIE_NAME = "vectiqor_session_id"
-PUBLIC_MODE = os.getenv("VECTIQOR_PUBLIC_MODE", "").lower() in ("1", "true", "yes")
-ACCOUNT_COOKIE_NAME = "vectiqor_account_id"
+CHAT_REQUEST_TIMEOUT_SECONDS = _read_timeout_seconds("BILLY_CHAT_TIMEOUT_SECONDS", 540.0)
+SESSION_COOKIE_NAME = "billy_session_id"
+PUBLIC_MODE = os.getenv("BILLY_PUBLIC_MODE", "").lower() in ("1", "true", "yes")
+ACCOUNT_COOKIE_NAME = "billy_account_id"
 
 def get_or_create_session_id(request: Request, response: Response) -> str:
     """Get session ID from cookie or create new one"""
@@ -425,7 +451,17 @@ async def lifespan(app: FastAPI):
     print("Database disconnected")
 
 # Create FastAPI app
-app = FastAPI(title="VECTIQOR", lifespan=lifespan)
+app = FastAPI(title="BILLY", lifespan=lifespan)
+
+
+def _get_app_version() -> str:
+    if CHANGELOG_ENTRIES:
+        return CHANGELOG_ENTRIES[0]["version"]
+
+    try:
+        return package_version("billy")
+    except PackageNotFoundError:
+        return os.getenv("BILLY_VERSION", "0.0.0-dev")
 
 # CORS middleware for development
 app.add_middleware(
@@ -566,6 +602,16 @@ async def health():
     }
 
 
+@app.get("/api/whats-new")
+async def whats_new():
+    """Return versioned changelog entries for the frontend what's-new modal."""
+    return {
+        "app": "billy",
+        "current_version": _get_app_version(),
+        "entries": CHANGELOG_ENTRIES,
+    }
+
+
 @app.get("/api/me")
 async def get_me(http_request: Request):
     """Return authenticated user info (public mode only)."""
@@ -655,6 +701,53 @@ def _tool_calls_metadata(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any
 
 
 async def _run_chat_pipeline(
+    request: ChatRequest,
+    session_mcp: MCPBridge,
+    session_id: str,
+    status_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    token_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+) -> Dict[str, Any]:
+    """Execute chat + MCP tool loop, optionally emitting progress status events."""
+    if _langfuse:
+        return await _run_chat_pipeline_traced(
+            request, session_mcp, session_id, status_callback, token_callback
+        )
+    return await _run_chat_pipeline_inner(
+        request, session_mcp, session_id, status_callback, token_callback
+    )
+
+
+async def _run_chat_pipeline_traced(
+    request: ChatRequest,
+    session_mcp: MCPBridge,
+    session_id: str,
+    status_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    token_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+) -> Dict[str, Any]:
+    with _langfuse.start_as_current_span(
+        name="chat_pipeline",
+        input={"message": request.message, "model": request.model, "session_id": session_id},
+    ) as span:
+        _langfuse.update_current_trace(
+            session_id=session_id,
+            user_id=request.user_email or session_mcp.current_account_id,
+            tags=[request.model],
+            metadata={"conversation_length": len(request.conversation_history)},
+        )
+        result = await _run_chat_pipeline_inner(
+            request, session_mcp, session_id, status_callback, token_callback
+        )
+        span.update(
+            output={
+                "tool_count": len(result.get("tool_calls", [])),
+                "tool_time": result.get("tool_time"),
+                "usage": result.get("usage"),
+            },
+        )
+        return result
+
+
+async def _run_chat_pipeline_inner(
     request: ChatRequest,
     session_mcp: MCPBridge,
     session_id: str,
@@ -782,6 +875,21 @@ async def _run_chat_pipeline(
                         )
                     except Exception as e:
                         print(f"Failed to save feedback to database: {e}")
+                    if _langfuse:
+                        try:
+                            _langfuse.score_current_trace(
+                                name="user_rating",
+                                value=tool_input.get("rating", 0),
+                                data_type="NUMERIC",
+                                comment="; ".join(tool_input.get("friction_points", [])),
+                            )
+                            _langfuse.score_current_trace(
+                                name="query_type",
+                                value=tool_input.get("query_type", "unknown"),
+                                data_type="CATEGORICAL",
+                            )
+                        except Exception as e:
+                            print(f"Failed to score Langfuse trace: {e}")
 
                 tool_results.append(
                     {"type": "tool_result", "tool_use_id": tool_id, "content": result}
@@ -1059,14 +1167,12 @@ async def get_accounts(http_request: Request, response: Response):
 
         import httpx
 
-        # Get Finout API URL from environment
-        internal_api_url = os.getenv("FINOUT_API_URL")
-
-        if not internal_api_url:
-            raise HTTPException(
-                status_code=500,
-                detail="FINOUT_API_URL not configured"
-            )
+        # Resolve Finout API URL (support both env names during migration).
+        internal_api_url = (
+            os.getenv("FINOUT_API_URL")
+            or os.getenv("FINOUT_INTERNAL_API_URL")
+            or "https://app.finout.io"
+        )
 
         print(f"Fetching accounts from: {internal_api_url}/account-service/account?isActive=true")
 
@@ -1344,7 +1450,7 @@ if _frontend_assets_dir is not None:
 
 
 def main():
-    """Main entry point for VECTIQOR server"""
+    """Main entry point for BILLY server"""
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, access_log=False)
 

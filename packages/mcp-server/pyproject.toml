@@ -16,6 +16,9 @@ dependencies = [
 [project.scripts]
 finout-mcp = "finout_mcp_server.server:main"
 
+[project.optional-dependencies]
+observability = ["langfuse>=2.0.0"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
