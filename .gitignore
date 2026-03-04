@@ -103,8 +103,8 @@ docker-compose.override.yml
 
 # Sensitive or local-only files
 finout-mcp-server/claude_desktop_config.json
-tools/vectiqor/.env
-packages/vectiqor/.last_account
+tools/billy/.env
+packages/billy/.last_account
 
 # Local TLS certs for dev testing
 packages/mcp-server-hosted/*.pem
