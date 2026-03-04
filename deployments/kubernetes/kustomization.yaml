@@ -12,7 +12,7 @@ resources:
 - langfuse-configmap.yaml
 - langfuse-clickhouse.yaml
 - langfuse-redis.yaml
-- langfuse-minio.yaml
+# - langfuse-minio.yaml  # Optional: local/dev S3-compatible storage
 - langfuse-web.yaml
 - langfuse-worker.yaml
 - langfuse-ingress.yaml

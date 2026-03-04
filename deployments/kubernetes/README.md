@@ -269,7 +269,9 @@ This repository now includes a full in-cluster Langfuse stack in the `billy` nam
 - `langfuse-worker`
 - `langfuse-clickhouse` (StatefulSet + PVC)
 - `langfuse-redis` (StatefulSet + PVC)
-- `langfuse-minio` (StatefulSet + PVC)
+- `langfuse-ingress`
+
+S3 storage default is AWS S3 (`billy-langfuse` bucket). `langfuse-minio` is optional/dev-only.
 
 ### 1. Create Langfuse Secrets
 
@@ -286,8 +288,13 @@ Required keys are documented in the example file:
 - `encryption-key`
 - `clickhouse-user` / `clickhouse-password`
 - `redis-auth`
-- `minio-root-user` / `minio-root-password`
 - `langfuse-s3-access-key-id` / `langfuse-s3-secret-access-key`
+
+Create the S3 bucket before rollout:
+
+```bash
+aws s3api create-bucket --bucket billy-langfuse --region us-east-1
+```
 
 ### 2. Apply Langfuse Core Resources
 
@@ -295,10 +302,15 @@ Required keys are documented in the example file:
 kubectl apply -f deployments/kubernetes/langfuse-configmap.yaml
 kubectl apply -f deployments/kubernetes/langfuse-clickhouse.yaml
 kubectl apply -f deployments/kubernetes/langfuse-redis.yaml
-kubectl apply -f deployments/kubernetes/langfuse-minio.yaml
 kubectl apply -f deployments/kubernetes/langfuse-web.yaml
 kubectl apply -f deployments/kubernetes/langfuse-worker.yaml
 kubectl apply -f deployments/kubernetes/langfuse-ingress.yaml
+```
+
+Optional dev-only MinIO:
+
+```bash
+kubectl apply -f deployments/kubernetes/langfuse-minio.yaml
 ```
 
 Before applying ingress, set values in `deployments/kubernetes/langfuse-ingress.yaml`:
