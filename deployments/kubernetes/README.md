@@ -298,7 +298,14 @@ kubectl apply -f deployments/kubernetes/langfuse-redis.yaml
 kubectl apply -f deployments/kubernetes/langfuse-minio.yaml
 kubectl apply -f deployments/kubernetes/langfuse-web.yaml
 kubectl apply -f deployments/kubernetes/langfuse-worker.yaml
+kubectl apply -f deployments/kubernetes/langfuse-ingress.yaml
 ```
+
+Before applying ingress, set values in `deployments/kubernetes/langfuse-ingress.yaml`:
+- `spec.rules[0].host`
+- `alb.ingress.kubernetes.io/certificate-arn`
+- `alb.ingress.kubernetes.io/security-groups` (if needed)
+- `external-dns` annotations (if used)
 
 ### 3. Verify Langfuse
 

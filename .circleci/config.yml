@@ -39,7 +39,7 @@ jobs:
             cd packages/mcp-server
             pytest -q
 
-  vectiqor_quality:
+  billy_quality:
     executor: node/default
     steps:
       - checkout
@@ -47,19 +47,19 @@ jobs:
           name: Python compile check
           command: |
             python3 -m py_compile \
-              packages/vectiqor/src/vectiqor/server.py \
-              packages/vectiqor/src/vectiqor/db.py \
-              packages/vectiqor/src/vectiqor/dev.py
+              packages/billy/src/billy/server.py \
+              packages/billy/src/billy/db.py \
+              packages/billy/src/billy/dev.py
       - run:
           name: Install pnpm
           command: corepack prepare pnpm@latest --activate
       - node/install-packages:
           pkg-manager: pnpm
-          app-dir: packages/vectiqor/frontend
+          app-dir: packages/billy/frontend
       - run:
           name: Build frontend
           command: |
-            cd packages/vectiqor/frontend
+            cd packages/billy/frontend
             pnpm build
 
   build_python_packages:
@@ -70,10 +70,10 @@ jobs:
           name: Build package distributions
           command: |
             python -m pip install --upgrade pip build
-            mkdir -p dist/mcp-server dist/vectiqor dist/vectiqor-mcp-internal
+            mkdir -p dist/mcp-server dist/billy dist/billy-mcp-internal
             python -m build packages/mcp-server --outdir dist/mcp-server
-            python -m build packages/vectiqor --outdir dist/vectiqor
-            python -m build packages/vectiqor-mcp-internal --outdir dist/vectiqor-mcp-internal
+            python -m build packages/billy --outdir dist/billy
+            python -m build packages/billy-mcp-internal --outdir dist/billy-mcp-internal
       - persist_to_workspace:
           root: .
           paths:
@@ -98,10 +98,10 @@ jobs:
           command: |
             python -m venv /tmp/internal-mcp
             /tmp/internal-mcp/bin/pip install --upgrade pip
-            /tmp/internal-mcp/bin/pip install dist/mcp-server/*.whl dist/vectiqor-mcp-internal/*.whl
-            /tmp/internal-mcp/bin/vectiqor-mcp-internal --help
+            /tmp/internal-mcp/bin/pip install dist/mcp-server/*.whl dist/billy-mcp-internal/*.whl
+            /tmp/internal-mcp/bin/billy-mcp-internal --help
 
-  build_and_push_vectiqor_image:
+  build_and_push_billy_image:
     machine:
       image: ubuntu-2004:2024.05.1
     steps:
@@ -110,8 +110,8 @@ jobs:
           account_id: ${AWS_ACCOUNT_ID}
           checkout: false
           create_repo: true
-          dockerfile: packages/vectiqor/Dockerfile
-          repo: vectiqor
+          dockerfile: packages/billy/Dockerfile
+          repo: billy
           skip_when_tags_exist: false
           tag: '${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}'
           extra_build_args: "--platform=linux/amd64"
@@ -137,7 +137,7 @@ jobs:
             - aws-cli/setup:
                 region: ${AWS_DEFAULT_REGION}
 
-  tag_vectiqor_latest:
+  tag_billy_latest:
     docker:
       - image: cimg/aws:2022.06.1
     steps:
@@ -145,7 +145,7 @@ jobs:
           region: ${AWS_DEFAULT_REGION}
       - aws-ecr/ecr_login
       - aws-ecr/tag_image:
-          repo: vectiqor
+          repo: billy
           source_tag: "${CIRCLE_SHA1:0:7}"
           target_tag: "latest"
 
@@ -187,15 +187,15 @@ workflows:
   ci_cd:
     jobs:
       - mcp_quality
-      - vectiqor_quality
+      - billy_quality
       - build_python_packages:
           requires:
             - mcp_quality
-            - vectiqor_quality
+            - billy_quality
       - smoke_test_python_packages:
           requires:
             - build_python_packages
-      - build_and_push_vectiqor_image:
+      - build_and_push_billy_image:
           context: finout
           requires:
             - smoke_test_python_packages
@@ -203,10 +203,10 @@ workflows:
           context: finout
           requires:
             - smoke_test_python_packages
-      - tag_vectiqor_latest:
+      - tag_billy_latest:
           context: finout
           requires:
-            - build_and_push_vectiqor_image
+            - build_and_push_billy_image
           filters:
             branches:
               only: main

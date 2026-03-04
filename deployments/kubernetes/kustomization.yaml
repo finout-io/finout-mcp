@@ -15,6 +15,7 @@ resources:
 - langfuse-minio.yaml
 - langfuse-web.yaml
 - langfuse-worker.yaml
+- langfuse-ingress.yaml
 # - billy-secret.yaml  # Uncomment after creating from .example
 # - langfuse-secret.yaml  # Uncomment after creating from .example
 

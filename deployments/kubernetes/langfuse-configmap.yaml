@@ -6,7 +6,7 @@ metadata:
   labels:
     app: langfuse
 data:
-  NEXTAUTH_URL: "https://langfuse.internal.finout.io"
+  NEXTAUTH_URL: "https://billy-langfuse.internal.finout.io"
   TELEMETRY_ENABLED: "false"
   CLICKHOUSE_MIGRATION_URL: "clickhouse://langfuse-clickhouse:9000"
   CLICKHOUSE_URL: "http://langfuse-clickhouse:8123"

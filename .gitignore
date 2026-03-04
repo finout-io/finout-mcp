@@ -109,6 +109,10 @@ packages/vectiqor/.last_account
 # Local TLS certs for dev testing
 packages/mcp-server-hosted/*.pem
 
+# Local Kubernetes secrets (do not commit)
+deployments/kubernetes/billy-secret.yaml
+deployments/kubernetes/langfuse-secret.yaml
+
 # Frontend dependencies/build artifacts
 **/frontend/node_modules/
 **/frontend/dist/
