@@ -6,7 +6,9 @@ import argparse
 import asyncio
 import os
 import sys
-from typing import Any
+from typing import Any, Dict, List, Optional, Union
+
+from langfuse.experiment import Evaluation
 
 DATASET_NAME = "finout-eval"
 
@@ -57,20 +59,11 @@ def seed_dataset() -> None:
     print(f"Seeded {len(EVAL_ITEMS)} items into '{DATASET_NAME}'")
 
 
-def score_tool_correctness(tool_calls: list[dict[str, Any]], expected_tools: list[str]) -> float:
-    if not expected_tools:
-        return 1.0
-    called = {tc["name"] for tc in tool_calls}
-    hits = sum(1 for tool_name in expected_tools if tool_name in called)
-    return hits / len(expected_tools)
+# ---------------------------------------------------------------------------
+# Task: run a single eval item through the Billy chat pipeline
+# ---------------------------------------------------------------------------
 
-
-def score_no_fabrication(tool_calls: list[dict[str, Any]], response_text: str) -> bool:
-    _ = response_text
-    return len(tool_calls) > 0
-
-
-async def _run_single_item(item_input: dict[str, Any]) -> dict[str, Any]:
+async def _run_pipeline(message: str) -> dict[str, Any]:
     from .server import ChatRequest, MCPBridge, _run_chat_pipeline_inner
 
     account_id = os.getenv("FINOUT_ACCOUNT_ID", "eval")
@@ -78,8 +71,8 @@ async def _run_single_item(item_input: dict[str, Any]) -> dict[str, Any]:
     await session_mcp.start(account_id)
 
     request = ChatRequest(
-        message=item_input["message"],
-        model=os.getenv("EVAL_MODEL", "claude-sonnet-4-20250514"),
+        message=message,
+        model=os.getenv("EVAL_MODEL", "claude-sonnet-4-6"),
         conversation_history=[],
     )
     try:
@@ -88,42 +81,119 @@ async def _run_single_item(item_input: dict[str, Any]) -> dict[str, Any]:
         await session_mcp.stop()
 
 
+async def task(*, item: Any, **kwargs: Any) -> dict[str, Any]:
+    """Langfuse experiment task — runs one query through the chat pipeline."""
+    input_data = item["input"] if isinstance(item, dict) else item.input
+    result = await _run_pipeline(input_data["message"])
+    tool_calls = result.get("tool_calls", [])
+    return {
+        "response": result.get("response", ""),
+        "tool_names": [tc["name"] for tc in tool_calls],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Evaluators
+# ---------------------------------------------------------------------------
+
+def eval_tool_correctness(
+    *,
+    output: Any,
+    expected_output: Any,
+    input: Any = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Evaluation:
+    """Did the model call the expected tool(s)?"""
+    expected_tools: List[str] = (expected_output or {}).get("tools", [])
+    if not expected_tools:
+        score = 1.0
+    else:
+        called = set(output.get("tool_names", []))
+        hits = sum(1 for t in expected_tools if t in called)
+        score = hits / len(expected_tools)
+    return Evaluation(name="tool_correctness", value=score)
+
+
+def eval_no_fabrication(
+    *,
+    output: Any,
+    expected_output: Any = None,
+    input: Any = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Evaluation:
+    """Did the model call at least one tool before responding?"""
+    used_tools = len(output.get("tool_names", [])) > 0
+    return Evaluation(
+        name="no_fabrication",
+        value=1.0 if used_tools else 0.0,
+        comment="Called tools" if used_tools else "No tools called",
+    )
+
+
+def eval_response_quality(
+    *,
+    input: Any,
+    output: Any,
+    expected_output: Any = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Evaluation:
+    """LLM-as-judge: rate the response 1-5 for a cloud cost analyst."""
+    from anthropic import Anthropic
+
+    question = input["message"] if isinstance(input, dict) else input
+    response_text = output.get("response", "") if isinstance(output, dict) else str(output)
+    tool_names = output.get("tool_names", []) if isinstance(output, dict) else []
+
+    client = Anthropic()
+    judge_prompt = (
+        "You are evaluating an AI assistant that helps cloud cost analysts.\n"
+        "The user asked a question and the assistant replied (after calling tools).\n\n"
+        f"Question: {question}\n"
+        f"Tools called: {', '.join(tool_names) or 'none'}\n"
+        f"Response:\n{response_text}\n\n"
+        "Rate the response from 1 to 5:\n"
+        "1 = Unusable (wrong, irrelevant, or empty)\n"
+        "2 = Poor (partially relevant but missing key info)\n"
+        "3 = Acceptable (answers the question but could be clearer)\n"
+        "4 = Good (clear, accurate, actionable)\n"
+        "5 = Excellent (insightful, well-structured, goes above expectations)\n\n"
+        "Reply with ONLY a single digit (1-5), nothing else."
+    )
+    msg = client.messages.create(
+        model=os.getenv("EVAL_JUDGE_MODEL", "claude-haiku-4-5-20251001"),
+        max_tokens=4,
+        messages=[{"role": "user", "content": judge_prompt}],
+    )
+    text = msg.content[0].text.strip() if msg.content else ""
+    try:
+        score = int(text[0])
+        score = max(1, min(5, score))
+    except (ValueError, IndexError):
+        score = 3
+    return Evaluation(name="response_quality", value=float(score))
+
+
+# ---------------------------------------------------------------------------
+# Experiment runner
+# ---------------------------------------------------------------------------
+
 def run_experiment(name: str) -> None:
     lf = _get_langfuse()
     dataset = lf.get_dataset(DATASET_NAME)
 
-    for item in dataset.items:
-        print(f"Running: {item.input['message']}")
-        result = asyncio.run(_run_single_item(item.input))
-        tool_calls = result.get("tool_calls", [])
-        response_text = result.get("response", "")
-        expected = item.expected_output or {}
+    result = lf.run_experiment(
+        name=DATASET_NAME,
+        run_name=name,
+        data=dataset.items,
+        task=task,
+        evaluators=[eval_tool_correctness, eval_no_fabrication, eval_response_quality],
+    )
 
-        correctness = score_tool_correctness(tool_calls, expected.get("tools", []))
-        fabrication_ok = score_no_fabrication(tool_calls, response_text)
-
-        trace = lf.trace(
-            name=f"eval:{item.input['message'][:50]}",
-            input=item.input,
-            output={"response": response_text, "tool_calls": [tc["name"] for tc in tool_calls]},
-            metadata={"run_name": name, "response_length": len(response_text)},
-        )
-        item.link(trace, run_name=name)
-        trace.score(name="tool_correctness", value=correctness, data_type="NUMERIC")
-        trace.score(
-            name="no_fabrication",
-            value=1.0 if fabrication_ok else 0.0,
-            data_type="NUMERIC",
-        )
-
-        print(
-            f"  tool_correctness={correctness:.1f}  "
-            f"no_fabrication={fabrication_ok}  "
-            f"tools={[tc['name'] for tc in tool_calls]}"
-        )
-
-    lf.flush()
-    print(f"\nExperiment '{name}' complete — check Langfuse Datasets tab")
+    print(f"\nExperiment '{name}' complete — {len(result.item_results)} items")
+    print("Check the Langfuse Datasets tab for scores.")
 
 
 def main() -> None:

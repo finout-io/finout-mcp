@@ -1,25 +1,31 @@
-# release-whats-new
+---
+description: Create a Billy release commit — bumps the minor version and prepends a categorized changelog entry (External MCP, Internal MCP, Billy).
+---
 
-Create a Billy release by bumping the Billy minor version and prepending a categorized changelog entry.
+# Release What's New
 
-Required categories:
-- External MCP
-- Internal MCP
-- Billy
+Use this skill when packaging a new Billy version with changelog updates.
 
-Run:
+## Workflow
+
+1. Look at `git diff --stat HEAD` and recent commits to understand what changed.
+2. Draft a release title and bullets for each category (use `"No changes"` if nothing changed):
+   - External MCP
+   - Internal MCP
+   - Billy
+3. Run:
 
 ```bash
 uv run python scripts/release_minor_with_changelog.py \
-  --title "$TITLE" \
-  --external "$EXTERNAL_1" \
-  --internal "$INTERNAL_1" \
-  --billy "$BILLY_1" \
+  --title "<release title>" \
+  --external "<bullet>" \
+  --internal "<bullet>" \
+  --billy "<bullet>" \
   --commit
 ```
 
-Repeat `--external`, `--internal`, `--billy` as needed.
+Repeat `--external`, `--internal`, `--billy` for multiple bullets per category.
 
-Verify after running:
-- `packages/billy/pyproject.toml` has a minor bump (`x.y.z` -> `x.(y+1).0`)
-- `packages/billy/src/billy/changelog.py` has the new entry first
+4. Verify:
+   - `packages/billy/pyproject.toml` minor version incremented (`x.y.z` → `x.(y+1).0`)
+   - `packages/billy/src/billy/changelog.py` has the new entry at index 0
