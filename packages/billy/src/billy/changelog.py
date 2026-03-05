@@ -19,6 +19,23 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.5.0",
+        "date": "2026-03-05",
+        "title": "Langfuse evaluation pipeline",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Add evaluation dataset seeder and experiment runner with tool_correctness, no_fabrication, and response_quality (LLM-as-judge) scores",
+                "Fix evaluation runner to use Langfuse v3 run_experiment API with async task support"
+            ]
+        }
+    },
+    {
         "version": "0.4.0",
         "date": "2026-03-03",
         "title": "Frontend user identity capture for trace attribution",
