@@ -186,4 +186,25 @@ If pre-commit fails, fix issues and commit again.
 
 ---
 
+## Changelog
+
+**Every commit must include a changelog entry.**
+
+Use the `/release-whats-new` command (`.claude/commands/release-whats-new.md`) before committing:
+
+```bash
+uv run python scripts/release_minor_with_changelog.py \
+  --title "$TITLE" \
+  --external "$EXTERNAL_CHANGE" \
+  --internal "$INTERNAL_CHANGE" \
+  --billy "$BILLY_CHANGE" \
+  --commit
+```
+
+- Repeat `--external`, `--internal`, `--billy` flags as needed for multiple items
+- Use `"No changes"` for categories with no updates
+- The script bumps the Billy minor version and prepends the entry to `changelog.py`
+
+---
+
 **Remember:** Users care about what the code does now, not its history.
