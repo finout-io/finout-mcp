@@ -19,6 +19,22 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.7.0",
+        "date": "2026-03-05",
+        "title": "Release script improvement",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Stage all tracked changes in one release commit instead of splitting into two"
+            ]
+        }
+    },
+    {
         "version": "0.6.0",
         "date": "2026-03-05",
         "title": "Evaluation pipeline and release workflow",

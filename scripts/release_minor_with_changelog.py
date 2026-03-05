@@ -80,11 +80,14 @@ def render_changelog(entries: list[dict[str, Any]]) -> str:
 
 
 def run_git_commit(new_version: str, message: str) -> None:
-    files = [
-        str(BILLY_PYPROJECT.relative_to(ROOT)),
-        str(BILLY_CHANGELOG.relative_to(ROOT)),
-    ]
-    subprocess.run(["git", "add", *files], check=True, cwd=ROOT)
+    # Stage all tracked modified files, then add the release files on top.
+    subprocess.run(["git", "add", "-u"], check=True, cwd=ROOT)
+    subprocess.run(
+        ["git", "add",
+         str(BILLY_PYPROJECT.relative_to(ROOT)),
+         str(BILLY_CHANGELOG.relative_to(ROOT))],
+        check=True, cwd=ROOT,
+    )
     subprocess.run(["git", "commit", "-m", message], check=True, cwd=ROOT)
     print(f"Committed release for Billy {new_version}")
 
