@@ -19,6 +19,23 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.6.0",
+        "date": "2026-03-05",
+        "title": "Evaluation pipeline and release workflow",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Add Langfuse evaluation runner with tool_correctness, no_fabrication, and response_quality (LLM-as-judge) scores",
+                "Upgrade release-whats-new command to skill with description frontmatter"
+            ]
+        }
+    },
+    {
         "version": "0.5.0",
         "date": "2026-03-05",
         "title": "Langfuse evaluation pipeline",
