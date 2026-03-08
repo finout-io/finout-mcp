@@ -29,6 +29,14 @@ from urllib.parse import quote
 from .changelog import CHANGELOG_ENTRIES
 from .db import db
 from .auth import get_jwt_user
+from .oauth import (
+    oauth_authorize_get,
+    oauth_authorize_post,
+    oauth_token,
+    oauth_register,
+    oauth_protected_resource,
+    oauth_authorization_server,
+)
 
 # Load .env from package directory
 package_root = Path(__file__).parent.parent.parent
@@ -1442,6 +1450,39 @@ async def get_feedback_stats(account_id: Optional[str] = None):
     except Exception as e:
         print(f"Error getting feedback stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── OAuth endpoints for MCP client authentication ────────────────────────────
+
+
+@app.get("/authorize")
+async def authorize_get(request: Request):
+    return await oauth_authorize_get(request)
+
+
+@app.post("/authorize")
+async def authorize_post(request: Request):
+    return await oauth_authorize_post(request)
+
+
+@app.post("/token")
+async def token(request: Request):
+    return await oauth_token(request)
+
+
+@app.post("/register")
+async def register(request: Request):
+    return await oauth_register(request)
+
+
+@app.get("/.well-known/oauth-protected-resource")
+async def well_known_protected_resource(request: Request):
+    return await oauth_protected_resource(request)
+
+
+@app.get("/.well-known/oauth-authorization-server")
+async def well_known_auth_server(request: Request):
+    return await oauth_authorization_server(request)
+
 
 # Serve frontend SPA assets (must be last — API routes above take priority)
 _frontend_assets_dir = _frontend_dir()

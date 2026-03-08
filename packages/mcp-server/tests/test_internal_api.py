@@ -737,7 +737,7 @@ class TestToolDescriptions:
         assert "get_account_context" not in public_tool_names
         assert "submit_feedback" not in public_tool_names
         assert "get_anomalies" in public_tool_names
-        assert len(public_tools) == 9
+        assert len(public_tools) == 11
 
         server_module.runtime_mode = server_module.MCPMode.BILLY_INTERNAL.value
         internal_tools = await server_module.list_tools()
@@ -747,7 +747,7 @@ class TestToolDescriptions:
         assert "get_waste_recommendations" in internal_tool_names
         assert "render_chart" in internal_tool_names
         assert "analyze_virtual_tags" in internal_tool_names
-        assert len(internal_tools) == 17
+        assert len(internal_tools) == 19
 
     @pytest.mark.asyncio
     async def test_create_dashboard_impl_formats_presentation_hint(self):

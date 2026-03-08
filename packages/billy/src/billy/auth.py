@@ -48,6 +48,10 @@ def verify_login_jwt(token: str) -> dict:
     return payload
 
 
+# Alias used by oauth.py for MCP client token validation
+verify_jwt = verify_login_jwt
+
+
 async def get_jwt_user(request: Request) -> dict:
     """FastAPI dependency — raises 401 if cookie missing or invalid."""
     token = request.cookies.get(FINOUT_LOGIN_COOKIE)

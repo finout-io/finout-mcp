@@ -4,6 +4,7 @@ from .anomalies import get_anomalies_impl, get_financial_plans_impl
 from .charts import render_chart_impl
 from .context import discover_context_impl, get_account_context_impl
 from .cost import compare_costs_impl, query_costs_impl, summarize_cost_data
+from .dependency_graph import check_delete_safety_impl, get_object_usages_impl
 from .feedback import submit_feedback_impl
 from .filters import (
     debug_filters_impl,
@@ -25,6 +26,8 @@ from .waste import get_waste_recommendations_impl
 
 __all__ = [
     "analyze_virtual_tags_impl",
+    "check_delete_safety_impl",
+    "get_object_usages_impl",
     "compare_costs_impl",
     "create_dashboard_impl",
     "create_view_impl",

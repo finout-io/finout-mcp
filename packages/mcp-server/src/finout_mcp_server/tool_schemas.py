@@ -1034,6 +1034,71 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="get_object_usages",
+            description=(
+                "Find all places where a named Finout object is used.\n\n"
+                "WHEN TO USE: When the user asks 'where is X used', 'what uses my virtual tag Y',\n"
+                "'show me dependencies of Z'.\n\n"
+                "Returns a list of entities that reference the object, with context showing how\n"
+                "(e.g., as a filter, groupBy dimension, or allocation rule)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Name of the object to look up (e.g. 'My Virtual Tag')",
+                    },
+                    "entity_type": {
+                        "type": "string",
+                        "enum": [
+                            "virtual_tag",
+                            "view",
+                            "dashboard",
+                            "widget",
+                            "explorer",
+                            "alert",
+                            "financial_plan",
+                        ],
+                        "description": "Optional: narrow search to a specific entity type",
+                    },
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="check_delete_safety",
+            description=(
+                "Check if a Finout object is safe to delete (not referenced anywhere).\n\n"
+                "WHEN TO USE: When the user asks 'can I delete X', 'is X still in use', "
+                "'is it safe to remove Y'.\n\n"
+                "Returns safe_to_delete: true/false, and if false, lists what is blocking deletion."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Name of the object to check",
+                    },
+                    "entity_type": {
+                        "type": "string",
+                        "enum": [
+                            "virtual_tag",
+                            "view",
+                            "dashboard",
+                            "widget",
+                            "explorer",
+                            "alert",
+                            "financial_plan",
+                        ],
+                        "description": "Optional: narrow search to a specific entity type",
+                    },
+                },
+                "required": ["name"],
+            },
+        ),
     ]
     allowed = _allowed_tools_for_runtime()
     return [tool for tool in all_tools if tool.name in allowed]

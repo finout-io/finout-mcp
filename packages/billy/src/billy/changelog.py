@@ -19,6 +19,23 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.8.0",
+        "date": "2026-03-08",
+        "title": "Object usage tracing + Billy OAuth endpoints",
+        "sections": {
+            "external_mcp": [
+                "New `get_object_usages` tool \u2014 find all places where a named Finout object (virtual tag, view, dashboard, etc.) is referenced",
+                "New `check_delete_safety` tool \u2014 check if an object is safe to delete by scanning all entity dependencies"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Add OAuth endpoints for MCP client authentication (authorize, token, register, well-known discovery)"
+            ]
+        }
+    },
+    {
         "version": "0.7.0",
         "date": "2026-03-05",
         "title": "Release script improvement",

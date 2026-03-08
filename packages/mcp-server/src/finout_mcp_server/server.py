@@ -60,6 +60,8 @@ PUBLIC_TOOLS: set[str] = {
     "get_waste_recommendations",
     "get_anomalies",
     "get_financial_plans",
+    "get_object_usages",
+    "check_delete_safety",
 }
 
 BILLY_INTERNAL_EXTRA_TOOLS: set[str] = {
@@ -289,6 +291,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 result = await render_chart_impl(arguments)
             elif name == "analyze_virtual_tags":
                 result = await analyze_virtual_tags_impl(arguments or {})
+            elif name == "get_object_usages":
+                result = await get_object_usages_impl(arguments)
+            elif name == "check_delete_safety":
+                result = await check_delete_safety_impl(arguments)
             else:
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -373,6 +379,9 @@ from .tools import (
     analyze_virtual_tags_impl as analyze_virtual_tags_impl,
 )
 from .tools import (
+    check_delete_safety_impl as check_delete_safety_impl,
+)
+from .tools import (
     compare_costs_impl as compare_costs_impl,
 )
 from .tools import (
@@ -398,6 +407,9 @@ from .tools import (
 )
 from .tools import (
     get_financial_plans_impl as get_financial_plans_impl,
+)
+from .tools import (
+    get_object_usages_impl as get_object_usages_impl,
 )
 from .tools import (
     get_usage_unit_types_impl as get_usage_unit_types_impl,

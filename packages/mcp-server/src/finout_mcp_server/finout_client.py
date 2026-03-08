@@ -1771,3 +1771,51 @@ class FinoutClient:
         )
         response.raise_for_status()
         return response.json()
+
+    async def get_widgets(self) -> list[dict[str, Any]]:
+        """
+        Fetch all widgets for the account.
+
+        Returns:
+            List of widget objects with id, name, query configuration, etc.
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured")
+
+        headers = self._get_internal_headers()
+        params: dict[str, Any] = {"isActive": "true"}
+        if self.account_id:
+            params["accountId"] = self.account_id
+
+        response = await self.internal_client.get(
+            "/dashboard-service/widget",
+            headers=headers,
+            params=params,
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result if isinstance(result, list) else []
+
+    async def get_alerts(self) -> list[dict[str, Any]]:
+        """
+        Fetch all alerts for the account.
+
+        Returns:
+            List of alert objects with id, name, conditions, etc.
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured")
+
+        headers = self._get_internal_headers()
+        params: dict[str, Any] = {}
+        if self.account_id:
+            params["accountId"] = self.account_id
+
+        response = await self.internal_client.get(
+            "/alerts-service/alert",
+            headers=headers,
+            params=params,
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result if isinstance(result, list) else []
