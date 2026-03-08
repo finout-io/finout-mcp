@@ -19,6 +19,22 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.13.0",
+        "date": "2026-03-08",
+        "title": "Usage diagram tests",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Add unit and integration tests for summary/detail usage diagrams"
+            ]
+        }
+    },
+    {
         "version": "0.12.0",
         "date": "2026-03-08",
         "title": "Cross-provider filter gap detection",
