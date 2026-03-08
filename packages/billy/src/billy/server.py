@@ -1388,68 +1388,216 @@ async def delete_memory(memory_id: str):
 
 # ── Suggested Queries Endpoint ───────────────────────────────────────────────
 
-# Templates for context-aware suggested queries.
-# {cost_center} is replaced with actual cost center names from the account.
-_COST_CENTER_QUERY_TEMPLATES = [
-    "What are my top 5 most expensive {cost_center} services this month?",
-    "Show me {cost_center} cost trends for the last 30 days",
-    "Are there any anomalies in my {cost_center} spending?",
-    "What waste can I eliminate in {cost_center}?",
+_FALLBACK_QUERIES = [
+    "What are my top 5 most expensive services this month?",
+    "Show me unusual spending spikes from the past week",
+    "What are my biggest cost optimization opportunities?",
+    "How am I tracking against my budgets this month?",
+    "What dashboards and views are set up for this account?",
+    "How much did I spend on compute vs storage last month?",
 ]
 
-_GENERIC_QUERY_TEMPLATES = [
-    "Which teams are spending the most on infrastructure?",
-    "What is my estimated end-of-month spend?",
-    "How much did I spend on compute vs storage last month?",
-    "Show me cost anomalies from the past week",
-    "What are my biggest cost optimization opportunities?",
-    "Break down my costs by environment (prod vs staging vs dev)",
+# Per-account cache: account_id → (queries, timestamp)
+_suggested_queries_cache: Dict[str, tuple] = {}
+_SUGGESTIONS_CACHE_TTL = timedelta(minutes=10)
+
+# Each template targets a different tool so users discover the full surface area.
+# "{tag}" and "{cc}" are replaced with account-specific values.
+_TOOL_QUERY_POOL = [
+    # query_costs — cost breakdowns
+    {"q": "Break down my costs by {tag} for the last 30 days", "needs": "tag"},
+    {"q": "What are my top 5 most expensive {cc} services this month?", "needs": "cc"},
+    {"q": "How much did I spend on {cc} last month vs this month?", "needs": "cc"},
+    # compare_costs — period comparisons
+    {"q": "Compare my {cc} spending this week vs last week", "needs": "cc"},
+    {"q": "How has my {tag} cost distribution changed month over month?", "needs": "tag"},
+    # get_anomalies — anomaly detection
+    {"q": "Are there any cost anomalies in my {cc} spending?", "needs": "cc"},
+    {"q": "Show me unusual spending spikes from the past week", "needs": None},
+    # get_waste_recommendations — optimization
+    {"q": "What waste can I eliminate in {cc}?", "needs": "cc"},
+    {"q": "What are my biggest cost optimization opportunities?", "needs": None},
+    # analyze_virtual_tags — tag exploration
+    {"q": "Show me how my {tag} allocation works", "needs": "tag"},
+    {"q": "Which {tag} values are driving the most spend?", "needs": "tag"},
+    # get_financial_plans — budgets
+    {"q": "How am I tracking against my budgets this month?", "needs": None},
+    # discover_context — dashboards/views
+    {"q": "What dashboards and views are set up for this account?", "needs": None},
+    # compare across providers
+    {"q": "Compare my {cc1} vs {cc2} spending this month", "needs": "multi_cc"},
 ]
+
+
+def _extract_virtual_tags(filters_md: str) -> List[Dict[str, Any]]:
+    """Extract virtual tag names and value counts from filter markdown."""
+    import re
+
+    tags: List[Dict[str, Any]] = []
+    in_virtualtag_section = False
+
+    for line in filters_md.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            in_virtualtag_section = "VIRTUALTAG" in stripped.upper()
+            continue
+        if stripped.startswith("### ") or stripped.startswith("Total filters"):
+            continue
+        if not in_virtualtag_section:
+            continue
+
+        # Extract path and value_count from: - **uuid** (path: `Virtual Tags/Team`, 42 values)
+        path_match = re.search(r"path:\s*`([^`]+)`", line)
+        count_match = re.search(r"(\d+)\s+values", line)
+        if not path_match:
+            continue
+
+        raw_path = path_match.group(1).strip()
+
+        # Skip UUIDs
+        if re.match(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            raw_path,
+            re.IGNORECASE,
+        ):
+            continue
+
+        # Use only the last segment of hierarchical paths like "Virtual Tags/FinOps/Team"
+        name = raw_path.rsplit("/", 1)[-1].strip()
+        if not name:
+            continue
+
+        value_count = int(count_match.group(1)) if count_match else 0
+        tags.append({"name": name, "value_count": value_count})
+
+    return tags
+
+
+def _build_queries_from_context(context_text: str, filters_text: str) -> List[str]:
+    """Build personalized queries from MCP tool results, rotating across tools."""
+    import random
+
+    # Parse the JSON returned by MCP tools
+    try:
+        context_data = json.loads(context_text) if context_text else {}
+    except (json.JSONDecodeError, TypeError):
+        context_data = {}
+
+    try:
+        filters_data = json.loads(filters_text) if filters_text else {}
+    except (json.JSONDecodeError, TypeError):
+        filters_data = {}
+
+    # Extract cost centers (skip virtualTag)
+    cost_centers: List[str] = [
+        cc for cc in context_data.get("cost_centers", {})
+        if cc.lower() != "virtualtag"
+    ]
+
+    # Extract virtual tags, sorted by value_count descending (higher = more useful)
+    filters_md = filters_data.get("filters", "")
+    raw_tags = _extract_virtual_tags(filters_md)
+    raw_tags.sort(key=lambda t: t["value_count"], reverse=True)
+    # Take top tags by value count (most meaningful for cost breakdowns)
+    top_tags = [t["name"] for t in raw_tags[:8]]
+
+    # Build candidate queries by filling templates with account data
+    candidates: List[str] = []
+
+    # Shuffle to rotate across tools on each cache refresh
+    pool = list(_TOOL_QUERY_POOL)
+    random.shuffle(pool)
+
+    for tmpl in pool:
+        needs = tmpl["needs"]
+        q = tmpl["q"]
+
+        if needs == "tag" and top_tags:
+            tag = top_tags[len([c for c in candidates if "{tag}" not in c and needs == "tag"]) % len(top_tags)]
+            candidates.append(q.replace("{tag}", tag))
+        elif needs == "cc" and cost_centers:
+            cc = cost_centers[len(candidates) % len(cost_centers)]
+            candidates.append(q.replace("{cc}", cc))
+        elif needs == "multi_cc" and len(cost_centers) >= 2:
+            candidates.append(q.replace("{cc1}", cost_centers[0]).replace("{cc2}", cost_centers[1]))
+        elif needs is None:
+            candidates.append(q)
+
+    # Deduplicate while preserving order
+    seen: set = set()
+    unique: List[str] = []
+    for q in candidates:
+        if q not in seen:
+            seen.add(q)
+            unique.append(q)
+
+    # Select 6, ensuring tool diversity: pick from different "needs" types
+    result: List[str] = []
+    # First pass: one from each needs type
+    by_type: Dict[Optional[str], List[str]] = {}
+    for tmpl, q in zip(pool, candidates):
+        by_type.setdefault(tmpl["needs"], []).append(q)
+
+    for needs_type in ["tag", "cc", None, "multi_cc"]:
+        available = by_type.get(needs_type, [])
+        for q in available:
+            if q not in result:
+                result.append(q)
+                break
+        if len(result) >= 6:
+            break
+
+    # Second pass: fill remaining slots from unused candidates
+    for q in unique:
+        if len(result) >= 6:
+            break
+        if q not in result:
+            result.append(q)
+
+    return result[:6]
 
 
 @app.get("/api/suggested-queries")
 async def get_suggested_queries(account_id: Optional[str] = None):
-    """Generate context-aware suggested queries based on account cost centers."""
+    """Generate context-aware suggested queries based on account data."""
     if not _is_valid_account_id(account_id):
-        return {"queries": _GENERIC_QUERY_TEMPLATES[:6]}
+        return {"queries": _FALLBACK_QUERIES[:6]}
+
+    # Check cache first
+    cached = _suggested_queries_cache.get(account_id)
+    if cached:
+        cached_queries, cached_at = cached
+        if datetime.now() - cached_at < _SUGGESTIONS_CACHE_TTL:
+            return {"queries": cached_queries}
 
     try:
-        mcp = mcp_pool.get(account_id)
-        if not mcp or not mcp.mcp_bridge.process or mcp.mcp_bridge.process.poll() is not None:
-            return {"queries": _GENERIC_QUERY_TEMPLATES[:6]}
+        mcp_bridge = await get_or_create_account_mcp(account_id)
+        if not mcp_bridge or not mcp_bridge.process or mcp_bridge.process.poll() is not None:
+            return {"queries": _FALLBACK_QUERIES[:6]}
 
-        # Call get_account_context via MCP to learn about cost centers
-        context_result = await mcp.mcp_bridge.call_tool("get_account_context", {})
-        import re
+        # Fetch account context and virtual tag filters in parallel
+        context_result, filters_result = await asyncio.gather(
+            mcp_bridge.call_tool("get_account_context", {}),
+            mcp_bridge.call_tool("list_available_filters", {}),
+            return_exceptions=True,
+        )
 
-        # Extract cost center names from the response
-        cost_centers: List[str] = []
-        for line in context_result.split("\n"):
-            # Lines like "  - AWS (42 filters)" or "  - Kubernetes (15 filters)"
-            match = re.match(r"\s*-\s+(.+?)\s*\(", line)
-            if match:
-                cost_centers.append(match.group(1).strip())
+        # Gracefully handle failures
+        context_str = context_result if isinstance(context_result, str) else ""
+        filters_str = filters_result if isinstance(filters_result, str) else ""
 
-        if not cost_centers:
-            return {"queries": _GENERIC_QUERY_TEMPLATES[:6]}
+        queries = _build_queries_from_context(context_str, filters_str)
+        print(f"[suggested-queries] account={account_id[:8]}, "
+              f"generated {len(queries)} queries (context={len(context_str)}b, filters={len(filters_str)}b)")
 
-        # Build personalized queries from cost center templates
-        queries: List[str] = []
-        for cc in cost_centers[:3]:  # Use top 3 cost centers
-            template = _COST_CENTER_QUERY_TEMPLATES[len(queries) % len(_COST_CENTER_QUERY_TEMPLATES)]
-            queries.append(template.replace("{cost_center}", cc))
-
-        # Fill remaining slots with generic queries
-        for q in _GENERIC_QUERY_TEMPLATES:
-            if len(queries) >= 6:
-                break
-            queries.append(q)
+        # Cache the result
+        _suggested_queries_cache[account_id] = (queries, datetime.now())
 
         return {"queries": queries}
 
     except Exception as e:
         print(f"Error generating suggested queries: {e}")
-        return {"queries": _GENERIC_QUERY_TEMPLATES[:6]}
+        return {"queries": _FALLBACK_QUERIES[:6]}
 
 
 # ── OAuth endpoints for MCP client authentication ────────────────────────────

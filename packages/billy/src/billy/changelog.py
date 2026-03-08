@@ -19,6 +19,25 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.15.0",
+        "date": "2026-03-08",
+        "title": "Personalized welcome screen and user memories",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "Fix virtual tag type inference for multiKeyReallocation tags"
+            ],
+            "billy": [
+                "Add personalized welcome greeting with user name and time of day",
+                "Add context-aware suggested queries based on account virtual tags and cost centers",
+                "Add user memory system \u2014 Billy remembers personal facts across conversations",
+                "Suggested queries rotate across tools (anomalies, waste, budgets, comparisons) to encourage exploration"
+            ]
+        }
+    },
+    {
         "version": "0.14.0",
         "date": "2026-03-08",
         "title": "AI disclaimer",

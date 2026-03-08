@@ -64,22 +64,22 @@ def _extract_virtual_tag_references(tag: dict, tag_map: dict[str, str]) -> list[
 
 def _infer_tag_type(tag: dict, tag_map: dict[str, str]) -> str:
     """
-    Infer tag type from structure. The API type field is always 'default' and
-    not useful — type must be derived from what the tag actually does.
+    Derive tag type. The API type field is almost always 'default' and not useful,
+    with the exception of 'multiKeyReallocation' which means relational.
 
+    For 'default' tags, type is inferred structurally:
     - reallocation: has allocations (metric/telemetry-based cost splits)
-    - relational:   rules reference other virtual tags
+    - relational:   rules reference other virtual tags via costCenter == 'virtualTag'
     - custom:       has rules but no cross-tag references
     - base:         no rules, no allocations
     """
+    if (tag.get("type") or "") == "multiKeyReallocation":
+        return "relational"
     if tag.get("allocations"):
         return "reallocation"
     for rule in tag.get("rules") or []:
         if not isinstance(rule, dict):
             continue
-        to = rule.get("to")
-        if isinstance(to, dict) and to.get("key") in tag_map:
-            return "relational"
         filters = rule.get("filters") or {}
         if not isinstance(filters, dict):
             continue

@@ -61,6 +61,8 @@ interface Props {
   onSuggestedQuestion: (question: string, model: ModelId) => void
   model: ModelId
   sessionReady: boolean
+  accountId?: string | null
+  userName?: string
 }
 
 export function ChatArea({
@@ -71,6 +73,8 @@ export function ChatArea({
   onSuggestedQuestion,
   model,
   sessionReady,
+  accountId,
+  userName,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -132,6 +136,8 @@ export function ChatArea({
         <WelcomeScreen
           onQuestion={(q) => onSuggestedQuestion(q, model)}
           disabled={!sessionReady}
+          accountId={accountId}
+          userName={userName}
         />
       ) : (
         <>
