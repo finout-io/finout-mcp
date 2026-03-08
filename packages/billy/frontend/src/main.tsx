@@ -21,8 +21,8 @@ const queryClient = new QueryClient({
 const root = document.getElementById('root')!
 createRoot(root).render(
   <StrictMode>
-    <ColorSchemeScript defaultColorScheme="dark" />
-    <MantineProvider theme={theme} defaultColorScheme="dark">
+    <ColorSchemeScript defaultColorScheme="light" />
+    <MantineProvider theme={theme} defaultColorScheme="light">
       <Notifications position="top-right" />
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>

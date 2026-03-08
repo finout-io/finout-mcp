@@ -74,7 +74,7 @@ export function ChatInput({ onSend, model, disabled, loading }: Props) {
           <ActionIcon
             size="lg"
             variant="filled"
-            color="finoutTeal"
+            color="finoutBlue"
             onClick={handleSend}
             disabled={disabled || loading || !value.trim()}
             loading={loading}

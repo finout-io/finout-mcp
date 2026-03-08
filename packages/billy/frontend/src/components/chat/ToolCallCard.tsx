@@ -36,10 +36,11 @@ export function ToolCallCard({ toolCall, index }: Props) {
   return (
     <Box
       style={(theme) => ({
-        border: `1px solid ${hasError ? theme.colors.red[7] : theme.colors.dark[4]}`,
+        border: `1px solid ${hasError ? theme.colors.red[5] : theme.colors.gray[3]}`,
         borderRadius: theme.radius.md,
         overflow: 'hidden',
         marginTop: theme.spacing.xs,
+        backgroundColor: '#ffffff',
       })}
     >
       <Accordion variant="default" chevronPosition="right">

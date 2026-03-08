@@ -39,13 +39,21 @@ export function ConversationList({ accountId, activeId, onSelect }: Props) {
         value={search}
         onChange={(e) => setSearch(e.currentTarget.value)}
         radius="md"
+        styles={{
+          input: {
+            backgroundColor: 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(255,255,255,0.15)',
+            color: '#ffffff',
+            '&::placeholder': { color: 'rgba(255,255,255,0.4)' },
+          },
+        }}
       />
 
       <Box style={{ flex: 1, overflowY: 'auto' }}>
         {isLoading ? (
-          <Loader size="xs" color="finoutTeal" mt="sm" />
+          <Loader size="xs" color="finoutBlue" mt="sm" />
         ) : conversations.length === 0 ? (
-          <Text size="xs" c="dimmed" ta="center" mt="md">
+          <Text size="xs" ta="center" mt="md" style={{ color: 'rgba(255,255,255,0.4)' }}>
             {search ? 'No results' : 'No saved conversations'}
           </Text>
         ) : (
@@ -57,6 +65,15 @@ export function ConversationList({ accountId, activeId, onSelect }: Props) {
               active={c.id === activeId}
               onClick={() => onSelect(c)}
               style={{ borderRadius: 6 }}
+              styles={{
+                root: {
+                  color: 'rgba(255,255,255,0.8)',
+                  '&:hover': { backgroundColor: 'rgba(255,255,255,0.05)' },
+                  '&[dataActive]': { backgroundColor: 'rgba(255,255,255,0.1)' },
+                },
+                label: { color: 'rgba(255,255,255,0.85)' },
+                description: { color: 'rgba(255,255,255,0.4)' },
+              }}
             />
           ))
         )}

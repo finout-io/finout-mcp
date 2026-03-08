@@ -132,6 +132,25 @@ async def query_costs_impl(args: dict) -> dict:
         group_by, gb_warnings = await _validate_filter_metadata(finout_client, group_by)
         validation_warnings.extend(gb_warnings)
 
+    # Cross-provider exclusion coverage warning
+    if filters:
+        exclusion_operators = {"not", "notOneOf", "isNot"}
+        exclusion_cost_centers = {
+            f.get("costCenter", "").lower()
+            for f in filters
+            if f.get("operator") in exclusion_operators
+        }
+        if exclusion_cost_centers:
+            all_cost_centers = {f.get("costCenter", "").lower() for f in filters}
+            unprotected = all_cost_centers - exclusion_cost_centers
+            if unprotected:
+                validation_warnings.append(
+                    f"Exclusion filters only target [{', '.join(sorted(exclusion_cost_centers))}]. "
+                    f"Other cost centers in this query ([{', '.join(sorted(unprotected))}]) "
+                    f"have no equivalent exclusions. "
+                    f"Use search_filters to find equivalent filters for those providers."
+                )
+
     # Query costs using internal API
     data = await finout_client.query_costs_with_filters(
         time_period=time_period,

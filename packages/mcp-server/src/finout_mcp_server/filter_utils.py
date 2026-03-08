@@ -86,6 +86,7 @@ def search_filters_by_keyword(
 
                 # Calculate relevance score
                 relevance = 0
+                matched_values: list[str] = []
 
                 # Exact match in key (highest priority)
                 if query_lower == key.lower():
@@ -96,28 +97,53 @@ def search_filters_by_keyword(
                 # Query in key
                 elif query_lower in key.lower():
                     relevance = 60
+                # Fuzzy match (word boundary) in key
+                elif re.search(rf"\b{re.escape(query_lower)}", key.lower()):
+                    relevance = 50
                 # Query in path
                 elif query_lower in path.lower():
                     relevance = 40
-                # Fuzzy match (word boundary)
-                elif re.search(rf"\b{re.escape(query_lower)}", key.lower()):
-                    relevance = 50
+                # Fuzzy match (word boundary) in path
                 elif re.search(rf"\b{re.escape(query_lower)}", path.lower()):
                     relevance = 30
 
+                # Search in values (lower priority, but catches concept mismatches)
+                if relevance == 0:
+                    raw_values = filter_item.get("values", {})
+                    if isinstance(raw_values, dict):
+                        value_names = list(raw_values.keys())
+                    elif isinstance(raw_values, list):
+                        value_names = [str(v) for v in raw_values]
+                    else:
+                        value_names = []
+
+                    for vn in value_names:
+                        if query_lower in vn.lower():
+                            matched_values.append(vn)
+
+                    if matched_values:
+                        # Exact value match scores higher than substring
+                        if any(query_lower == mv.lower() for mv in matched_values):
+                            relevance = 25
+                        else:
+                            relevance = 20
+                        # Cap to 5 matched values to avoid noise
+                        matched_values = matched_values[:5]
+
                 if relevance > 0:
-                    results.append(
-                        {
-                            "key": key,
-                            "type": filter_type,
-                            "costCenter": cc,  # Use camelCase to match API format
-                            "path": path,
-                            "relevance": relevance,
-                            "value_count": len(filter_item.get("values", []))
-                            if "values" in filter_item
-                            else 0,
-                        }
-                    )
+                    result_item: dict[str, Any] = {
+                        "key": key,
+                        "type": filter_type,
+                        "costCenter": cc,  # Use camelCase to match API format
+                        "path": path,
+                        "relevance": relevance,
+                        "value_count": len(filter_item.get("values", []))
+                        if "values" in filter_item
+                        else 0,
+                    }
+                    if matched_values:
+                        result_item["matched_values"] = matched_values
+                    results.append(result_item)
 
     # Sort by relevance (highest first), then by key
     results.sort(key=lambda x: (-x["relevance"], x["key"]))
@@ -232,6 +258,11 @@ def format_search_results(
                 value_count = result.get("value_count", 0)
 
                 lines.append(f"{i}. **{key}** - path: `{path}` ({value_count} values)")
+
+                # Show matched values (from value-based search)
+                if result.get("matched_values"):
+                    mvs = result["matched_values"][:5]
+                    lines.append(f"   Matched values: {', '.join(mvs)}")
 
                 # Show sample values if available
                 sv_key = f"{cc}:{ft}:{key}"

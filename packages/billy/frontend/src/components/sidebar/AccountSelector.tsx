@@ -22,6 +22,14 @@ export function AccountSelector({ accounts, value, onChange, disabled }: Props) 
       searchable
       radius="md"
       size="sm"
+      styles={{
+        label: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' },
+        input: {
+          backgroundColor: 'rgba(255,255,255,0.08)',
+          border: '1px solid rgba(255,255,255,0.15)',
+          color: '#ffffff',
+        },
+      }}
     />
   )
 }

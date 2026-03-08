@@ -46,14 +46,15 @@ export function WelcomeScreen({ onQuestion, disabled }: Props) {
         {SUGGESTED_QUESTIONS.map((q) => (
           <Button
             key={q}
-            variant="default"
+            variant="light"
+            color="finoutBlue"
             size="sm"
             fullWidth
             onClick={() => onQuestion(q)}
             disabled={disabled}
-            style={{ textAlign: 'left', height: 'auto', padding: '8px 16px' }}
+            style={{ textAlign: 'left', height: 'auto', padding: '8px 16px', backgroundColor: '#ffffff', border: '1px solid #e9ecef', color: '#1a1f2e' }}
           >
-            <Text size="sm" style={{ whiteSpace: 'normal' }}>
+            <Text size="sm" style={{ whiteSpace: 'normal', color: '#1a1f2e' }}>
               {q}
             </Text>
           </Button>

@@ -34,7 +34,7 @@ export function ChatMessage({ message }: Props) {
         borderRadius: '50%',
         fontSize: 18,
         flexShrink: 0,
-        backgroundColor: isUser ? theme.colors.finoutTeal[6] : '#FFD632',
+        backgroundColor: isUser ? theme.colors.finoutBlue[6] : '#f1f3f5',
       })}
     >
       {isUser ? '👤' : modelEmoji(message.model)}
@@ -54,13 +54,15 @@ export function ChatMessage({ message }: Props) {
           minWidth: 60,
           padding: `${theme.spacing.sm} ${theme.spacing.md}`,
           borderRadius: theme.radius.lg,
-          backgroundColor: isUser ? theme.colors.finoutTeal[6] : theme.colors.dark[6],
-          color: theme.white,
+          backgroundColor: isUser ? theme.colors.finoutBlue[6] : '#ffffff',
+          color: isUser ? '#ffffff' : '#1a1f2e',
+          border: isUser ? 'none' : '1px solid #e9ecef',
+          boxShadow: isUser ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
         })}
       >
         <Stack gap="xs">
           {isUser ? (
-            <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#ffffff' }}>
               {message.content}
             </Text>
           ) : (
@@ -72,8 +74,8 @@ export function ChatMessage({ message }: Props) {
               component="details"
               style={(theme) => ({
                 fontSize: theme.fontSizes.xs,
-                color: theme.colors.gray[4],
-                border: `1px solid ${theme.colors.dark[4]}`,
+                color: theme.colors.gray[6],
+                border: `1px solid ${theme.colors.gray[3]}`,
                 borderRadius: theme.radius.sm,
                 padding: `${theme.spacing.xs} ${theme.spacing.sm}`,
               })}
@@ -97,7 +99,7 @@ export function ChatMessage({ message }: Props) {
                   wordBreak: 'break-word',
                   fontSize: theme.fontSizes.xs,
                   lineHeight: 1.35,
-                  color: theme.colors.gray[3],
+                  color: theme.colors.gray[7],
                   maxHeight: 260,
                   overflowY: 'auto',
                 })}
@@ -133,9 +135,10 @@ export function ChatMessage({ message }: Props) {
               mt={4}
               p="xs"
               style={(theme) => ({
-                background: 'rgba(0,0,0,0.15)',
+                background: theme.colors.gray[0],
                 borderRadius: theme.radius.sm,
                 flexWrap: 'wrap',
+                border: `1px solid ${theme.colors.gray[2]}`,
               })}
             >
               <Text size="xs" fw={600} c="dimmed">
@@ -152,13 +155,13 @@ export function ChatMessage({ message }: Props) {
               )}
 
               {message.usage?.total_tokens != null && (
-                <Text size="xs" c="teal.4">
+                <Text size="xs" c="teal.6">
                   🧮 {message.usage.total_tokens.toLocaleString()} tokens
                 </Text>
               )}
 
               {message.usage?.estimated_cost_usd != null && (
-                <Text size="xs" fw={700} c="teal.3">
+                <Text size="xs" fw={700} c="teal.7">
                   ~${message.usage.estimated_cost_usd.toFixed(4)}
                 </Text>
               )}

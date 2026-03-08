@@ -18,7 +18,6 @@ import {
   TextInput,
   Title,
   Tooltip,
-  useMantineColorScheme,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
@@ -89,7 +88,6 @@ function LoginScreen({ onLogin }: { onLogin: (name: string, email: string) => vo
 export function AppLayout() {
   const { user, setUser, clearUser } = useUser()
   const session = useSession()
-  const { colorScheme, toggleColorScheme } = useMantineColorScheme()
   const accountId = session.selectedAccount?.accountId ?? null
   const chat = useChat(accountId, user?.email)
 
@@ -263,8 +261,8 @@ export function AppLayout() {
     admin: 'Admin',
   }
 
-  const toolCategories = toolsData
-    ? ['all', ...Array.from(new Set(toolsData.tools.map((t) => t.category)))]
+  const toolCategories: string[] = toolsData
+    ? ['all', ...Array.from(new Set(toolsData.tools.map((t: ToolEntry) => t.category)))]
     : []
 
   const filteredTools = toolsData
@@ -287,7 +285,7 @@ export function AppLayout() {
                 key={cat}
                 size="xs"
                 variant={toolsCategory === cat ? 'filled' : 'light'}
-                color="finoutTeal"
+                color="finoutBlue"
                 onClick={() => setToolsCategory(cat)}
               >
                 {CATEGORY_LABELS[cat] ?? cat}
@@ -397,7 +395,7 @@ export function AppLayout() {
         navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: false } }}
         padding={0}
       >
-      <AppShell.Navbar p="md" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <AppShell.Navbar p="md" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1f2e', borderRight: '1px solid rgba(255,255,255,0.1)' }}>
         <Sidebar
           accounts={session.accounts}
           selectedAccountId={session.selectedAccount?.accountId ?? null}
@@ -411,16 +409,17 @@ export function AppLayout() {
         />
       </AppShell.Navbar>
 
-      <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#f8f9fa' }}>
         {/* Header */}
         <Group
           px="md"
           py="sm"
           justify="space-between"
-          style={(theme) => ({
-            borderBottom: `1px solid ${theme.colors.dark[5]}`,
+          style={{
+            borderBottom: '1px solid #e9ecef',
             flexShrink: 0,
-          })}
+            backgroundColor: '#ffffff',
+          }}
         >
           <Text size="sm" c="dimmed">
             {session.selectedAccount?.name ?? 'No account selected'}
@@ -488,13 +487,6 @@ export function AppLayout() {
                 </Stack>
               </Popover.Dropdown>
             </Popover>
-            <Button
-              size="xs"
-              variant="subtle"
-              onClick={() => toggleColorScheme()}
-            >
-              {colorScheme === 'dark' ? '☀️' : '🌙'}
-            </Button>
           </Group>
         </Group>
 
@@ -514,10 +506,11 @@ export function AppLayout() {
             px="md"
             py="sm"
             gap="xs"
-            style={(theme) => ({
-              borderTop: `1px solid ${theme.colors.dark[5]}`,
+            style={{
+              borderTop: '1px solid #e9ecef',
               flexShrink: 0,
-            })}
+              backgroundColor: '#ffffff',
+            }}
           >
             <ChatInput
               onSend={chat.sendMessage}

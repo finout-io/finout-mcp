@@ -123,7 +123,7 @@ async def search_filters_impl(args: dict) -> dict:
                 }
             )
 
-    return {
+    response: dict[str, Any] = {
         "query": query,
         "cost_center": cost_center,
         "result_count": len(results),
@@ -137,6 +137,35 @@ async def search_filters_impl(args: dict) -> dict:
         ),
         "_presentation_hint": ("Don't show raw results to user. Use them to build the next query."),
     }
+
+    # Cross-provider gap detection (only for broad searches without cost_center)
+    if not cost_center and results:
+        primary_providers = {"amazon-cur", "gcp", "azure"}
+        matched_providers = {r.get("costCenter", "").lower() for r in results}
+        matched_primary = matched_providers & primary_providers
+
+        if matched_primary and len(matched_primary) < len(primary_providers):
+            try:
+                metadata = await finout_client.get_filters_metadata()
+                known_providers = {cc.lower() for cc in metadata}
+                known_primary = known_providers & primary_providers
+                missing = known_primary - matched_primary
+                if missing:
+                    matched_list = sorted(matched_primary)
+                    missing_list = sorted(missing)
+                    suggestions = ", ".join(
+                        f"search_filters('{query}', cost_center='{p}')" for p in missing_list
+                    )
+                    response["cross_provider_note"] = (
+                        f"Found '{query}' in [{', '.join(matched_list)}] "
+                        f"but NOT in [{', '.join(missing_list)}]. "
+                        f"Each provider uses different filter names. "
+                        f"Try: {suggestions} to find equivalent filters."
+                    )
+            except Exception:
+                pass
+
+    return response
 
 
 async def debug_filters_impl(args: dict) -> dict:

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import os
 import sys
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from langfuse.experiment import Evaluation
 

@@ -33,7 +33,7 @@ function StreamingAssistantMessage({
           borderRadius: '50%',
           fontSize: 18,
           flexShrink: 0,
-          backgroundColor: '#FFD632',
+          backgroundColor: '#f1f3f5',
         }}
       >
         {emoji}
@@ -44,7 +44,10 @@ function StreamingAssistantMessage({
           minWidth: 60,
           padding: `${theme.spacing.sm} ${theme.spacing.md}`,
           borderRadius: theme.radius.lg,
-          backgroundColor: theme.colors.dark[6],
+          backgroundColor: '#ffffff',
+          color: '#1a1f2e',
+          border: '1px solid #e9ecef',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
         })}
       >
         <MarkdownRenderer content={text} size="sm" />

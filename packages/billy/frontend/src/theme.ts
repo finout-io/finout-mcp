@@ -1,5 +1,18 @@
 import { createTheme, MantineColorsTuple } from '@mantine/core'
 
+const finoutBlue: MantineColorsTuple = [
+  '#eff6ff',
+  '#dbeafe',
+  '#bfdbfe',
+  '#93c5fd',
+  '#60a5fa',
+  '#3b82f6',
+  '#2563eb',
+  '#1d4ed8',
+  '#1e40af',
+  '#1e3a8a',
+]
+
 const finoutTeal: MantineColorsTuple = [
   '#e6f7f3',
   '#ccefe7',
@@ -14,8 +27,9 @@ const finoutTeal: MantineColorsTuple = [
 ]
 
 export const theme = createTheme({
-  primaryColor: 'finoutTeal',
+  primaryColor: 'finoutBlue',
   colors: {
+    finoutBlue,
     finoutTeal,
   },
   defaultRadius: 'md',
@@ -34,6 +48,18 @@ export const theme = createTheme({
     Select: {
       defaultProps: {
         radius: 'md',
+      },
+    },
+    Card: {
+      defaultProps: {
+        withBorder: false,
+      },
+      styles: {
+        root: {
+          backgroundColor: '#ffffff',
+          border: '1px solid #e9ecef',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        },
       },
     },
   },

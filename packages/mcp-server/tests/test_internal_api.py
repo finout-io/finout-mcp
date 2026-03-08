@@ -1258,6 +1258,128 @@ class TestValidateFilterValues:
         assert "validation skipped" in warnings[0]
 
 
+class TestValueBasedSearch:
+    """Tests for value-based search in search_filters_by_keyword."""
+
+    def test_finds_filter_by_value_match(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        metadata = {
+            "virtualTag": {
+                "col": [
+                    {
+                        "key": "396533f6-uuid",
+                        "path": "Virtual Tags/Cloud Provider - Reporting",
+                        "values": {"GCP Marketplace": {}, "AWS Marketplace": {}, "AWS": {}},
+                    },
+                ]
+            },
+        }
+        results = search_filters_by_keyword(metadata, "marketplace")
+        assert len(results) == 1
+        assert results[0]["key"] == "396533f6-uuid"
+        assert "matched_values" in results[0]
+        assert "GCP Marketplace" in results[0]["matched_values"]
+        assert "AWS Marketplace" in results[0]["matched_values"]
+
+    def test_value_match_lower_priority_than_key_match(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        metadata = {
+            "amazon-cur": {
+                "col": [
+                    {
+                        "key": "marketplace_flag",
+                        "path": "AWS/Marketplace Flag",
+                        "values": {},
+                    },
+                ]
+            },
+            "virtualTag": {
+                "col": [
+                    {
+                        "key": "some-uuid",
+                        "path": "Virtual Tags/Provider",
+                        "values": {"AWS Marketplace": {}, "GCP Marketplace": {}},
+                    },
+                ]
+            },
+        }
+        results = search_filters_by_keyword(metadata, "marketplace")
+        assert len(results) == 2
+        # Key match should rank higher than value match
+        assert results[0]["key"] == "marketplace_flag"
+        assert results[1]["key"] == "some-uuid"
+
+    def test_no_value_match_returns_empty(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        metadata = {
+            "amazon-cur": {
+                "col": [
+                    {"key": "service", "path": "AWS/Service", "values": {"AmazonEC2": {}}},
+                ]
+            },
+        }
+        results = search_filters_by_keyword(metadata, "nonexistent")
+        assert len(results) == 0
+
+    def test_value_match_with_list_values(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        metadata = {
+            "amazon-cur": {
+                "col": [
+                    {
+                        "key": "billing_entity",
+                        "path": "AWS/Billing Entity",
+                        "values": ["AWS", "AWS Marketplace"],
+                    },
+                ]
+            },
+        }
+        results = search_filters_by_keyword(metadata, "marketplace")
+        assert len(results) == 1
+        assert "AWS Marketplace" in results[0]["matched_values"]
+
+    def test_matched_values_capped_at_5(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        metadata = {
+            "virtualTag": {
+                "col": [
+                    {
+                        "key": "uuid",
+                        "path": "Virtual Tags/Test",
+                        "values": {f"marketplace-{i}": {} for i in range(20)},
+                    },
+                ]
+            },
+        }
+        results = search_filters_by_keyword(metadata, "marketplace")
+        assert len(results) == 1
+        assert len(results[0]["matched_values"]) == 5
+
+    def test_format_search_results_shows_matched_values(self):
+        from src.finout_mcp_server.filter_utils import format_search_results
+
+        results = [
+            {
+                "key": "some-uuid",
+                "type": "col",
+                "costCenter": "virtualTag",
+                "path": "Virtual Tags/Provider",
+                "relevance": 20,
+                "value_count": 5,
+                "matched_values": ["AWS Marketplace", "GCP Marketplace"],
+            }
+        ]
+        formatted = format_search_results(results)
+        assert "Matched values:" in formatted
+        assert "AWS Marketplace" in formatted
+        assert "GCP Marketplace" in formatted
+
+
 class TestFormatSearchResultsWithSamples:
     """Tests for format_search_results with sample values."""
 
@@ -1578,6 +1700,245 @@ class TestSearchFiltersImpl:
             "path": "AMAZON-CUR/Service",
             "type": "col",
         }
+
+
+class TestCrossProviderGapDetection:
+    """Tests for cross-provider gap detection in search_filters and query_costs."""
+
+    @pytest.mark.asyncio
+    async def test_search_filters_gap_note_when_partial_provider_match(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def search_filters(self, query, cost_center, limit=50):
+                return [
+                    {
+                        "costCenter": "amazon-cur",
+                        "key": "marketplace",
+                        "path": "AMAZON-CUR/Marketplace",
+                        "type": "col",
+                        "value_count": 5,
+                    },
+                ]
+
+            async def get_filter_values(self, filter_key, cost_center, filter_type, limit=8):
+                return ["AWS Marketplace"]
+
+            async def get_filters_metadata(self):
+                return {
+                    "amazon-cur": {
+                        "col": [{"key": "marketplace", "path": "AMAZON-CUR/Marketplace"}]
+                    },
+                    "gcp": {"col": [{"key": "seller_name", "path": "GCP/Seller"}]},
+                }
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.search_filters_impl({"query": "marketplace"})
+        finally:
+            server_module.finout_client = original_client
+
+        assert "cross_provider_note" in result
+        assert "gcp" in result["cross_provider_note"]
+        assert "amazon-cur" in result["cross_provider_note"]
+
+    @pytest.mark.asyncio
+    async def test_search_filters_no_gap_note_when_cost_center_specified(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def search_filters(self, query, cost_center, limit=50):
+                return [
+                    {
+                        "costCenter": "amazon-cur",
+                        "key": "marketplace",
+                        "path": "AMAZON-CUR/Marketplace",
+                        "type": "col",
+                        "value_count": 5,
+                    },
+                ]
+
+            async def get_filter_values(self, filter_key, cost_center, filter_type, limit=8):
+                return ["AWS Marketplace"]
+
+            async def get_filters_metadata(self):
+                return {
+                    "amazon-cur": {"col": []},
+                    "gcp": {"col": []},
+                }
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.search_filters_impl(
+                {"query": "marketplace", "cost_center": "amazon-cur"}
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        assert "cross_provider_note" not in result
+
+    @pytest.mark.asyncio
+    async def test_search_filters_no_gap_note_when_all_providers_match(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def search_filters(self, query, cost_center, limit=50):
+                return [
+                    {
+                        "costCenter": "amazon-cur",
+                        "key": "service",
+                        "path": "AMAZON-CUR/Service",
+                        "type": "col",
+                    },
+                    {
+                        "costCenter": "gcp",
+                        "key": "service",
+                        "path": "GCP/Service",
+                        "type": "col",
+                    },
+                ]
+
+            async def get_filter_values(self, filter_key, cost_center, filter_type, limit=8):
+                return ["SomeService"]
+
+            async def get_filters_metadata(self):
+                return {
+                    "amazon-cur": {"col": []},
+                    "gcp": {"col": []},
+                }
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.search_filters_impl({"query": "service"})
+        finally:
+            server_module.finout_client = original_client
+
+        assert "cross_provider_note" not in result
+
+    @pytest.mark.asyncio
+    async def test_query_costs_exclusion_warning_subset(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {
+                    "amazon-cur": {
+                        "col": [
+                            {"key": "marketplace", "path": "AMAZON-CUR/Marketplace", "type": "col"}
+                        ]
+                    },
+                    "gcp": {"col": [{"key": "service", "path": "GCP/Service", "type": "col"}]},
+                }
+
+            async def get_filter_values(
+                self, filter_key, cost_center=None, filter_type=None, limit=100
+            ):
+                return ["val1", "val2"]
+
+            async def query_costs_with_filters(self, **kwargs):
+                return [{"name": "Total", "totalCost": 1000}]
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.query_costs_impl(
+                {
+                    "time_period": "last_30_days",
+                    "filters": [
+                        {
+                            "costCenter": "amazon-cur",
+                            "key": "marketplace",
+                            "path": "AMAZON-CUR/Marketplace",
+                            "type": "col",
+                            "operator": "not",
+                            "value": "val1",
+                        },
+                        {
+                            "costCenter": "gcp",
+                            "key": "service",
+                            "path": "GCP/Service",
+                            "type": "col",
+                            "operator": "is",
+                            "value": "val2",
+                        },
+                    ],
+                }
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        assert "_validation_warnings" in result
+        warnings_text = " ".join(result["_validation_warnings"])
+        assert "Exclusion filters only target" in warnings_text
+        assert "gcp" in warnings_text
+
+    @pytest.mark.asyncio
+    async def test_query_costs_no_exclusion_warning_when_no_exclusions(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {
+                    "amazon-cur": {
+                        "col": [{"key": "service", "path": "AMAZON-CUR/Service", "type": "col"}]
+                    },
+                }
+
+            async def get_filter_values(
+                self, filter_key, cost_center=None, filter_type=None, limit=100
+            ):
+                return ["AmazonEC2"]
+
+            async def query_costs_with_filters(self, **kwargs):
+                return [{"name": "Total", "totalCost": 500}]
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.query_costs_impl(
+                {
+                    "time_period": "last_30_days",
+                    "filters": [
+                        {
+                            "costCenter": "amazon-cur",
+                            "key": "service",
+                            "path": "AMAZON-CUR/Service",
+                            "type": "col",
+                            "operator": "is",
+                            "value": "AmazonEC2",
+                        },
+                    ],
+                }
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        assert "_validation_warnings" not in result or not any(
+            "Exclusion" in w for w in result.get("_validation_warnings", [])
+        )
 
 
 class TestFetchVirtualTagLiveValues:

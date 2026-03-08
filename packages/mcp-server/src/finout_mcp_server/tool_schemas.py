@@ -651,6 +651,7 @@ async def list_tools() -> list[Tool]:
                 "- search_filters('environment') → Environment tags\n"
                 "- search_filters('pod') → Kubernetes pods\n\n"
                 "DO NOT show raw search results to the user. Use them to build the next query.\n\n"
+                "When results span multiple providers, check the cross_provider_note field for coverage gaps.\n\n"
                 "Returns up to 50 matches sorted by relevance."
             ),
             inputSchema={
