@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActionIcon, Box, Card, Group, Text } from '@mantine/core'
+import { ActionIcon, Box, Card, Group, SegmentedControl, Text } from '@mantine/core'
 import mermaid from 'mermaid'
 
 mermaid.initialize({
@@ -23,20 +23,32 @@ mermaid.initialize({
 
 interface Transform { x: number; y: number; scale: number }
 
-function parseMermaidDiagram(output: unknown): string | null {
+interface DiagramData {
+  summary: string
+  detail: string | null
+}
+
+function parseMermaidDiagram(output: unknown): DiagramData | null {
   let data: unknown = output
   if (typeof data === 'string') {
     try { data = JSON.parse(data) } catch { return null }
   }
   if (data && typeof data === 'object') {
     const o = data as Record<string, unknown>
-    if (typeof o.mermaid_diagram === 'string') return o.mermaid_diagram
+    if (typeof o.mermaid_diagram === 'string') {
+      return {
+        summary: o.mermaid_diagram,
+        detail: typeof o.mermaid_diagram_detail === 'string' ? o.mermaid_diagram_detail : null,
+      }
+    }
   }
   return null
 }
 
 export function MermaidPanel({ output }: { output: unknown }) {
-  const diagram = parseMermaidDiagram(output)
+  const diagramData = parseMermaidDiagram(output)
+  const [view, setView] = useState<'summary' | 'detail'>('summary')
+  const diagram = diagramData ? (view === 'detail' && diagramData.detail ? diagramData.detail : diagramData.summary) : null
   const mermaidRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{ sx: number; sy: number; tx: number; ty: number } | null>(null)
   const [tf, setTf] = useState<Transform>({ x: 0, y: 0, scale: 1 })
@@ -71,7 +83,7 @@ export function MermaidPanel({ output }: { output: unknown }) {
     return () => { cancelled = true }
   }, [diagram])
 
-  if (!diagram) return null
+  if (!diagramData) return null
 
   return (
     <Card
@@ -79,6 +91,17 @@ export function MermaidPanel({ output }: { output: unknown }) {
       style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}
     >
       <Group justify="flex-end" mb={4} gap="xs">
+        {diagramData.detail && (
+          <SegmentedControl
+            size="xs"
+            value={view}
+            onChange={(v) => setView(v as 'summary' | 'detail')}
+            data={[
+              { label: 'Summary', value: 'summary' },
+              { label: 'Detail', value: 'detail' },
+            ]}
+          />
+        )}
         <Text size="xs" c="dimmed" style={{ opacity: 0.5 }}>scroll to zoom · drag to pan</Text>
         <ActionIcon
           size="xs" variant="subtle" title="Reset view"

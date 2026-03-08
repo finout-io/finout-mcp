@@ -117,7 +117,7 @@ export function ChatMessage({ message }: Props) {
             />
           ))}
 
-          {!isUser && message.tool_calls?.filter((tc) => tc.name === 'analyze_virtual_tags').map((tc, idx) => (
+          {!isUser && message.tool_calls?.filter((tc) => ['analyze_virtual_tags', 'get_object_usages', 'check_delete_safety'].includes(tc.name)).map((tc, idx) => (
             <MermaidPanel key={idx} output={tc.output} />
           ))}
 

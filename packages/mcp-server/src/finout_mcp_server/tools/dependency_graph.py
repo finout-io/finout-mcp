@@ -94,6 +94,99 @@ def _find_usages(
     return usages
 
 
+def _safe_id(raw: str) -> str:
+    """Return a Mermaid-safe node ID."""
+    return "".join(c if c.isalnum() else "_" for c in raw)
+
+
+def _safe_label(text: str) -> str:
+    """Escape quotes inside Mermaid labels."""
+    return text.replace('"', "'")
+
+
+def _build_summary_diagram(
+    target_name: str,
+    target_type: str,
+    usages: list[dict],  # type: ignore[type-arg]
+) -> str:
+    """Build a compact Mermaid diagram with one node per entity type and count."""
+    lines = ["graph LR"]
+    tid = "TARGET"
+    lines.append(f'    {tid}["{_safe_label(target_name)}<br/><i>{target_type}</i>"]')
+
+    # Group usages by entity_type
+    groups: dict[str, list[dict]] = {}  # type: ignore[type-arg]
+    for u in usages:
+        etype = u.get("entity_type", "unknown")
+        groups.setdefault(etype, []).append(u)
+
+    for i, (etype, group) in enumerate(sorted(groups.items())):
+        nid = f"G{i}"
+        count = len(group)
+        label = f"{etype}s ({count})" if count > 1 else f"{etype} (1)"
+        lines.append(f'    {nid}["{_safe_label(label)}"]')
+        all_contexts: set[str] = set()
+        for u in group:
+            all_contexts.update(u.get("contexts", ["ref"]))
+        ctx = ", ".join(sorted(all_contexts))
+        lines.append(f'    {tid} -->|"{ctx}"| {nid}')
+
+    lines.append(f"    style {tid} fill:#e0f2fe,stroke:#38B28E,stroke-width:3px")
+    return "\n".join(lines)
+
+
+def _build_detail_diagram(
+    target_name: str,
+    target_type: str,
+    usages: list[dict],  # type: ignore[type-arg]
+) -> str:
+    """Build a detailed Mermaid diagram with subgraphs per entity type."""
+    lines = ["graph LR"]
+    tid = "TARGET"
+    lines.append(f'    {tid}["{_safe_label(target_name)}<br/><i>{target_type}</i>"]')
+
+    # Group usages by entity_type
+    groups: dict[str, list[dict]] = {}  # type: ignore[type-arg]
+    for u in usages:
+        etype = u.get("entity_type", "unknown")
+        groups.setdefault(etype, []).append(u)
+
+    node_idx = 0
+    for etype, group in sorted(groups.items()):
+        sg_id = _safe_id(etype)
+        lines.append(f"    subgraph {sg_id} [{etype}s]")
+        for u in group:
+            nid = f"U{node_idx}"
+            name = _safe_label(u.get("entity_name", "Unknown"))
+            lines.append(f'        {nid}["{name}"]')
+            node_idx += 1
+        lines.append("    end")
+
+    # Add edges outside subgraphs
+    node_idx = 0
+    for _etype, group in sorted(groups.items()):
+        for u in group:
+            nid = f"U{node_idx}"
+            ctx = ", ".join(sorted(u.get("contexts", ["ref"])))
+            lines.append(f'    {tid} -->|"{ctx}"| {nid}')
+            node_idx += 1
+
+    lines.append(f"    style {tid} fill:#e0f2fe,stroke:#38B28E,stroke-width:3px")
+    return "\n".join(lines)
+
+
+def _build_usage_diagrams(
+    target_name: str,
+    target_type: str,
+    usages: list[dict],  # type: ignore[type-arg]
+) -> dict[str, str]:
+    """Build both summary and detail Mermaid diagrams."""
+    return {
+        "summary": _build_summary_diagram(target_name, target_type, usages),
+        "detail": _build_detail_diagram(target_name, target_type, usages),
+    }
+
+
 def _find_by_name(
     name: str,
     entity_type: str | None,
@@ -142,7 +235,7 @@ async def get_object_usages_impl(args: dict) -> dict:  # type: ignore[type-arg]
     target_id, target_type = match
     usages = _find_usages(target_id, all_entities)
 
-    return {
+    result: dict[str, Any] = {
         "found": True,
         "entity_id": target_id,
         "entity_type": target_type,
@@ -150,6 +243,11 @@ async def get_object_usages_impl(args: dict) -> dict:  # type: ignore[type-arg]
         "usage_count": len(usages),
         "usages": usages,
     }
+    if usages:
+        diagrams = _build_usage_diagrams(name, target_type, usages)
+        result["mermaid_diagram"] = diagrams["summary"]
+        result["mermaid_diagram_detail"] = diagrams["detail"]
+    return result
 
 
 async def check_delete_safety_impl(args: dict) -> dict:  # type: ignore[type-arg]
@@ -173,7 +271,7 @@ async def check_delete_safety_impl(args: dict) -> dict:  # type: ignore[type-arg
     usages = _find_usages(target_id, all_entities)
     safe_to_delete = len(usages) == 0
 
-    return {
+    result: dict[str, Any] = {
         "found": True,
         "entity_id": target_id,
         "entity_type": target_type,
@@ -189,3 +287,8 @@ async def check_delete_safety_impl(args: dict) -> dict:  # type: ignore[type-arg
             )
         ),
     }
+    if usages:
+        diagrams = _build_usage_diagrams(name, target_type, usages)
+        result["mermaid_diagram"] = diagrams["summary"]
+        result["mermaid_diagram_detail"] = diagrams["detail"]
+    return result

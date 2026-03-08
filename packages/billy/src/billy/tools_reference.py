@@ -134,10 +134,11 @@ TOOLS_REFERENCE: List[ToolEntry] = [
         "name": "search_filters",
         "category": "filters",
         "availability": "public",
-        "description": "FIRST STEP for any cost query — find filter metadata by keyword.",
+        "description": "FIRST STEP for any cost query — find filter metadata by keyword. Searches filter keys, paths, and values.",
         "when_to_use": [
             "before any cost query or comparison",
             "looking up a service, region, tag, team, or dimension",
+            "finding filters by value (e.g. 'marketplace' finds filters containing that value)",
         ],
         "example_prompts": [
             "(internal — called automatically before cost queries)",

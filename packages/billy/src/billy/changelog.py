@@ -19,6 +19,24 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.12.0",
+        "date": "2026-03-08",
+        "title": "Cross-provider filter gap detection",
+        "sections": {
+            "external_mcp": [
+                "search_filters now searches filter values (not just keys/paths), enabling discovery of filters like 'marketplace' across providers",
+                "search_filters returns cross_provider_note when results match some but not all cloud providers",
+                "query_costs warns when exclusion filters (not/notOneOf) only target a subset of cost centers in the query"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Updated tools reference for search_filters value-based search"
+            ]
+        }
+    },
+    {
         "version": "0.11.0",
         "date": "2026-03-08",
         "title": "Billy UI redesign \u2014 Finout-aligned light theme",

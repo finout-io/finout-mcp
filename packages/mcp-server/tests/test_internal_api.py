@@ -114,7 +114,7 @@ class TestFinoutClientInternalAPI:
 
     @pytest.mark.asyncio
     async def test_fetch_filters_metadata(self, mock_internal_response, sample_filters):
-        """Test fetching filter metadata without values"""
+        """Test fetching filter metadata with values for search"""
         mock_internal_response.json.return_value = sample_filters
 
         client = FinoutClient(
@@ -133,14 +133,15 @@ class TestFinoutClientInternalAPI:
             mock_post.assert_called_once()
             call_args = mock_post.call_args
             assert call_args[0][0] == "/cost-service/filters"
-            assert call_args[1]["json"]["includeValues"] is False
+            assert call_args[1]["json"]["includeValues"] is True
 
-            # Verify result - values should be stripped
+            # Verify result structure
             assert "aws" in result
             assert "filter" in result["aws"]
-            # Check that values are not included (metadata only)
+            # Check that value keys are preserved for value-based search
             for filter_item in result["aws"]["filter"]:
-                assert "values" not in filter_item or filter_item.get("values") == []
+                assert "values" in filter_item
+                assert len(filter_item["values"]) > 0
 
         await client.close()
 

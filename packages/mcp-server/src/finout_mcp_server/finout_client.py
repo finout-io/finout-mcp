@@ -713,10 +713,13 @@ class FinoutClient:
         headers = self._get_internal_headers()
 
         try:
-            # Call the filters endpoint with includeValues=false
+            # Call the filters endpoint with includeValues=true
+            # Values are needed for value-based search (e.g., searching "marketplace"
+            # finds filters whose values contain "AWS Marketplace").
+            # We only keep value keys in the cache, not the full nested objects.
             payload = {
                 "date": date,
-                "includeValues": False,  # This prevents the 10MB response
+                "includeValues": True,
             }
 
             response = await self.internal_client.post(
@@ -771,13 +774,20 @@ class FinoutClient:
                     if filter_type not in organized[cost_center]:
                         organized[cost_center][filter_type] = []
 
-                    # Keep all filter metadata (except values)
-                    filter_obj = {
+                    # Keep filter metadata + value keys for search
+                    filter_obj: dict[str, Any] = {
                         "costCenter": cost_center,
                         "key": item.get("key", ""),
                         "path": item.get("path", ""),
-                        "type": filter_type,  # Use actual type from API
+                        "type": filter_type,
                     }
+
+                    # Preserve value keys (not full objects) for value-based search
+                    raw_values = item.get("values")
+                    if isinstance(raw_values, dict) and raw_values:
+                        filter_obj["values"] = {k: {} for k in raw_values}
+                    elif isinstance(raw_values, list) and raw_values:
+                        filter_obj["values"] = raw_values
 
                     organized[cost_center][filter_type].append(filter_obj)
 
@@ -785,7 +795,7 @@ class FinoutClient:
 
             # If it's already a dict, process it
             if isinstance(result, dict):
-                # Strip out values from each filter
+                # Keep value keys for search, strip full value objects
                 cleaned_result: dict[str, Any] = {}
                 for cost_center, filter_types in result.items():
                     if isinstance(filter_types, dict):
@@ -798,6 +808,11 @@ class FinoutClient:
                                         cleaned_filter = {
                                             k: v for k, v in f.items() if k != "values"
                                         }
+                                        raw_vals = f.get("values")
+                                        if isinstance(raw_vals, dict) and raw_vals:
+                                            cleaned_filter["values"] = {k: {} for k in raw_vals}
+                                        elif isinstance(raw_vals, list) and raw_vals:
+                                            cleaned_filter["values"] = raw_vals
                                         cleaned_filters.append(cleaned_filter)
                                 cleaned_result[cost_center][filter_type] = cleaned_filters
                 return cleaned_result
