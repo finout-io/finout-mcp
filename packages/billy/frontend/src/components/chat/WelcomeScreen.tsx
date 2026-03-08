@@ -48,7 +48,7 @@ export function WelcomeScreen({ onQuestion, disabled, accountId, userName }: Pro
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
 
-  const questions = dynamicQueries ?? FALLBACK_QUESTIONS
+  const questions: string[] = dynamicQueries ?? FALLBACK_QUESTIONS
   // Stabilize greeting so it doesn't re-randomize on every render
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const { title, subtitle } = useMemo(() => getGreeting(userName), [userName, accountId])

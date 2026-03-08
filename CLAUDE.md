@@ -217,7 +217,15 @@ If pre-commit fails, fix issues and commit again.
    ```
    All tests must pass.
 
-3. **Prepare changelog** using `/release-whats-new` or the script directly:
+3. **Run Billy frontend build** (`packages/billy/frontend`):
+   ```bash
+   cd packages/billy/frontend && npx tsc -b
+   ```
+   TypeScript build must pass. Use `tsc -b` (not `tsc --noEmit`) — this matches CI.
+
+4. **Stage ALL new files** before committing. Check `git status` for untracked files.
+
+5. **Prepare changelog** using `/release-whats-new` or the script directly:
    ```bash
    uv run python scripts/release_minor_with_changelog.py \
      --title "$TITLE" \
