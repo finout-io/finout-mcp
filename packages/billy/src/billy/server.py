@@ -508,6 +508,27 @@ def _build_usage_summary(model: str, usage_totals: Dict[str, int]) -> Dict[str, 
     }
 
 
+REMEMBER_USER_FACT_TOOL = {
+    "name": "remember_user_fact",
+    "description": (
+        "Save a personal fact about the user for future conversations. "
+        "Use this when the user shares something memorable — their role, team, "
+        "projects they own, preferences, upcoming events, pet peeves about costs, etc. "
+        "Keep facts concise (one sentence). Don't save trivial or overly specific query details."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "fact": {
+                "type": "string",
+                "description": "A concise personal fact about the user (e.g. 'Leads the payments team', 'Hates S3 costs', 'Going on parental leave in April')",
+            }
+        },
+        "required": ["fact"],
+    },
+}
+
+
 def convert_mcp_tools_to_claude_format(mcp_tools: List[Dict]) -> List[Dict]:
     """Convert MCP tool definitions to Claude API format"""
     claude_tools = []
@@ -519,6 +540,9 @@ def convert_mcp_tools_to_claude_format(mcp_tools: List[Dict]) -> List[Dict]:
             "input_schema": tool["inputSchema"]
         }
         claude_tools.append(claude_tool)
+
+    # Add Billy-level virtual tools
+    claude_tools.append(REMEMBER_USER_FACT_TOOL)
 
     return claude_tools
 
@@ -705,6 +729,89 @@ async def _run_chat_pipeline_traced(
         return result
 
 
+async def _build_system_prompt(
+    user_email: Optional[str],
+    account_id: Optional[str],
+    is_new_conversation: bool,
+) -> str:
+    """Build the system prompt, injecting user memories when available."""
+    base = (
+        "You are Billy, a cheeky and friendly cloud cost analysis assistant for Finout. "
+        "You have access to tools to query costs, detect anomalies, find waste, and explore filters.\n\n"
+        "PERSONALITY: You're warm, witty, and a bit cheeky — like a knowledgeable colleague "
+        "who genuinely enjoys helping people understand their cloud costs. "
+        "Use light humor when appropriate but always stay helpful and accurate. "
+        "If this is the start of a new conversation, greet the user in a fun, personalized way "
+        "using any memories you have about them.\n\n"
+        "STYLE: When narrating your steps between tool calls, use complete sentences. "
+        "Do not end a sentence with a colon before calling a tool.\n\n"
+        "CRITICAL RULE — NEVER FABRICATE: You MUST call tools before answering any question "
+        "about costs, resources, filters, anomalies, waste, or financial data. "
+        "NEVER state specific cost figures, resource names, service names, or any data "
+        "without first calling the appropriate tool. "
+        "If you are unsure which filter to use, call search_filters first. "
+        "If the user asks about cost for any service, tag, or resource, call query_costs. "
+        "Violating this rule — generating numbers or names from memory — is a critical failure.\n\n"
+        "CHARTS: The UI automatically renders interactive charts from tool call data — "
+        "pie charts for single-dimension breakdowns, stacked bar charts for time-series. "
+        "Never generate ASCII charts, text charts, or raw-data tables. "
+        "After tool calls, give 2-4 sentences of key insights (total, biggest driver, notable trend). "
+        "The chart handles the visual detail.\n\n"
+        "DIAGRAMS: The UI also auto-renders Mermaid diagrams from tool call data. "
+        "Never output diagram code or code blocks — describe what the diagram shows instead.\n\n"
+        "VIRTUAL TAGS: Virtual tags are Finout's cost allocation layer. Inferred types:\n"
+        "- reallocation: allocations drive cost splits via KPI metrics (yellow in diagram)\n"
+        "- relational: rules reference other virtual tags — a dependency/hierarchy tag (orange)\n"
+        "- custom: rules map raw costs to dimensions, no cross-tag references (green)\n"
+        "- base: no rules, no allocations — simple pass-through or empty tag (blue)\n\n"
+        "When analyze_virtual_tags returns WITHOUT a tag_name (discovery mode), narrate:\n"
+        "- Each chain in ecosystem.chains by name, what it allocates (output_values), "
+        "how deep it is (chain_depth), what services feed it (cost_dimensions), "
+        "and its composition (by_type). Paint a picture of the full allocation architecture.\n"
+        "- Mention isolated_tags count and what that implies.\n\n"
+        "When analyze_virtual_tags returns WITH a tag_name (focused mode), narrate:\n"
+        "1. WHAT IT DOES: use 'values' (the actual cost categories like team/project names) "
+        "and 'cost_dimensions' to explain what this tag allocates and from what sources\n"
+        "2. ITS ROLE: position (source/bridge/output) tells you where it sits — "
+        "source = raw data entry, bridge = mid-chain aggregator, output = final allocation\n"
+        "3. THE CHAIN: mention chain_depth, source_tags, output_tags by name\n"
+        "4. COMPLEXITY highlights from tag_details — most-connected or most-ruled tags\n"
+        "5. Any reallocation tags and what metric drives their split\n"
+        "Prioritize meaning over structure — explain WHAT costs flow WHERE and WHY, "
+        "not just 'this tag has 8 rules and 3 dependencies'. "
+        "Use analyze_virtual_tags proactively when the user asks about cost allocation, "
+        "tag hierarchies, shared-cost strategy, or which tags depend on others.\n\n"
+        "REMEMBERING USERS: When the user shares personal details — their role, team, "
+        "projects they care about, pet peeves, upcoming events — call remember_user_fact "
+        "to save it. You'll see these memories in future conversations and can use them "
+        "for personalized greetings and context-aware suggestions. "
+        "Don't save trivial query details, only genuinely personal or recurring facts.\n\n"
+        "After every interaction where you used tools to answer the user's question, "
+        "you MUST call submit_feedback before finishing your response. "
+        "Rate your ability to answer (1=couldn't answer, 5=excellent), "
+        "pick the query_type that best matches what was asked, "
+        "and note any friction points you encountered."
+    )
+
+    # Inject user memories if available
+    if user_email and account_id and is_new_conversation:
+        try:
+            memories = await db.get_memories(user_email, account_id)
+            if memories:
+                facts = "\n".join(f"- {m['fact']}" for m in memories)
+                base += (
+                    f"\n\nUSER MEMORIES (things you know about this user from past conversations):\n"
+                    f"User email: {user_email}\n"
+                    f"{facts}\n"
+                    "Use these to make your greeting personal and cheeky. "
+                    "Reference 1-2 relevant memories naturally — don't list them all."
+                )
+        except Exception as e:
+            print(f"Failed to load user memories: {e}")
+
+    return base
+
+
 async def _run_chat_pipeline_inner(
     request: ChatRequest,
     session_mcp: MCPBridge,
@@ -723,6 +830,14 @@ async def _run_chat_pipeline_inner(
     messages = [{"role": msg.role, "content": msg.content} for msg in request.conversation_history]
     messages.append({"role": "user", "content": request.message})
 
+    # Build system prompt with user memories
+    is_new_conversation = len(request.conversation_history) == 0
+    system_prompt = await _build_system_prompt(
+        request.user_email,
+        session_mcp.current_account_id,
+        is_new_conversation,
+    )
+
     # Call Claude with tools (use model from request)
     llm_response = await _call_claude_messages_create(
         status_callback=status_callback,
@@ -731,53 +846,7 @@ async def _run_chat_pipeline_inner(
         token_callback=token_callback,
         model=request.model,
         max_tokens=4096,
-        system=(
-            "You are a cloud cost analysis assistant for Finout. "
-            "You have access to tools to query costs, detect anomalies, find waste, and explore filters.\n\n"
-            "STYLE: When narrating your steps between tool calls, use complete sentences. "
-            "Do not end a sentence with a colon before calling a tool.\n\n"
-            "CRITICAL RULE — NEVER FABRICATE: You MUST call tools before answering any question "
-            "about costs, resources, filters, anomalies, waste, or financial data. "
-            "NEVER state specific cost figures, resource names, service names, or any data "
-            "without first calling the appropriate tool. "
-            "If you are unsure which filter to use, call search_filters first. "
-            "If the user asks about cost for any service, tag, or resource, call query_costs. "
-            "Violating this rule — generating numbers or names from memory — is a critical failure.\n\n"
-            "CHARTS: The UI automatically renders interactive charts from tool call data — "
-            "pie charts for single-dimension breakdowns, stacked bar charts for time-series. "
-            "Never generate ASCII charts, text charts, or raw-data tables. "
-            "After tool calls, give 2-4 sentences of key insights (total, biggest driver, notable trend). "
-            "The chart handles the visual detail.\n\n"
-            "DIAGRAMS: The UI also auto-renders Mermaid diagrams from tool call data. "
-            "Never output diagram code or code blocks — describe what the diagram shows instead.\n\n"
-            "VIRTUAL TAGS: Virtual tags are Finout's cost allocation layer. Inferred types:\n"
-            "- reallocation: allocations drive cost splits via KPI metrics (yellow in diagram)\n"
-            "- relational: rules reference other virtual tags — a dependency/hierarchy tag (orange)\n"
-            "- custom: rules map raw costs to dimensions, no cross-tag references (green)\n"
-            "- base: no rules, no allocations — simple pass-through or empty tag (blue)\n\n"
-            "When analyze_virtual_tags returns WITHOUT a tag_name (discovery mode), narrate:\n"
-            "- Each chain in ecosystem.chains by name, what it allocates (output_values), "
-            "how deep it is (chain_depth), what services feed it (cost_dimensions), "
-            "and its composition (by_type). Paint a picture of the full allocation architecture.\n"
-            "- Mention isolated_tags count and what that implies.\n\n"
-            "When analyze_virtual_tags returns WITH a tag_name (focused mode), narrate:\n"
-            "1. WHAT IT DOES: use 'values' (the actual cost categories like team/project names) "
-            "and 'cost_dimensions' to explain what this tag allocates and from what sources\n"
-            "2. ITS ROLE: position (source/bridge/output) tells you where it sits — "
-            "source = raw data entry, bridge = mid-chain aggregator, output = final allocation\n"
-            "3. THE CHAIN: mention chain_depth, source_tags, output_tags by name\n"
-            "4. COMPLEXITY highlights from tag_details — most-connected or most-ruled tags\n"
-            "5. Any reallocation tags and what metric drives their split\n"
-            "Prioritize meaning over structure — explain WHAT costs flow WHERE and WHY, "
-            "not just 'this tag has 8 rules and 3 dependencies'. "
-            "Use analyze_virtual_tags proactively when the user asks about cost allocation, "
-            "tag hierarchies, shared-cost strategy, or which tags depend on others.\n\n"
-            "After every interaction where you used tools to answer the user's question, "
-            "you MUST call submit_feedback before finishing your response. "
-            "Rate your ability to answer (1=couldn't answer, 5=excellent), "
-            "pick the query_type that best matches what was asked, "
-            "and note any friction points you encountered."
-        ),
+        system=system_prompt,
         tools=claude_tools,
         messages=messages,
     )
@@ -815,7 +884,23 @@ async def _run_chat_pipeline_inner(
 
             try:
                 tool_start = datetime.now()
-                result = await session_mcp.call_tool(tool_name, tool_input)
+
+                # Handle Billy-level virtual tools locally
+                if tool_name == "remember_user_fact":
+                    fact = tool_input.get("fact", "")
+                    user_email = request.user_email
+                    acct_id = session_mcp.current_account_id
+                    if user_email and acct_id and fact:
+                        try:
+                            await db.save_memory(user_email, acct_id, fact)
+                            result = f"Remembered: {fact}"
+                        except Exception as e:
+                            result = f"Could not save memory: {e}"
+                    else:
+                        result = "Memory not saved (missing user email or account)."
+                else:
+                    result = await session_mcp.call_tool(tool_name, tool_input)
+
                 tool_duration = (datetime.now() - tool_start).total_seconds()
                 total_tool_time += tool_duration
 
@@ -1156,6 +1241,7 @@ async def save_conversation(request: dict):
         model = request.get("model")
         messages = request.get("messages")
         tool_calls = request.get("tool_calls")
+        user_email = request.get("user_email")
 
         if not all([name, account_id, model, messages]):
             raise HTTPException(status_code=400, detail="Missing required fields")
@@ -1167,6 +1253,7 @@ async def save_conversation(request: dict):
             messages=messages,
             tool_calls=tool_calls,
             conversation_id=request.get("conversation_id"),
+            user_email=user_email,
         )
 
         return {
@@ -1269,6 +1356,101 @@ async def get_feedback_stats(account_id: Optional[str] = None):
     except Exception as e:
         print(f"Error getting feedback stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── User Memories Endpoints ───────────────────────────────────────────────────
+
+
+@app.get("/api/memories")
+async def get_memories(user_email: str, account_id: str):
+    """Get memories for a user+account pair."""
+    try:
+        memories = await db.get_memories(user_email, account_id)
+        return {"memories": memories}
+    except Exception as e:
+        print(f"Error getting memories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/memories/{memory_id}")
+async def delete_memory(memory_id: str):
+    """Delete a specific memory."""
+    try:
+        success = await db.delete_memory(memory_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Memory not found")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error deleting memory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Suggested Queries Endpoint ───────────────────────────────────────────────
+
+# Templates for context-aware suggested queries.
+# {cost_center} is replaced with actual cost center names from the account.
+_COST_CENTER_QUERY_TEMPLATES = [
+    "What are my top 5 most expensive {cost_center} services this month?",
+    "Show me {cost_center} cost trends for the last 30 days",
+    "Are there any anomalies in my {cost_center} spending?",
+    "What waste can I eliminate in {cost_center}?",
+]
+
+_GENERIC_QUERY_TEMPLATES = [
+    "Which teams are spending the most on infrastructure?",
+    "What is my estimated end-of-month spend?",
+    "How much did I spend on compute vs storage last month?",
+    "Show me cost anomalies from the past week",
+    "What are my biggest cost optimization opportunities?",
+    "Break down my costs by environment (prod vs staging vs dev)",
+]
+
+
+@app.get("/api/suggested-queries")
+async def get_suggested_queries(account_id: Optional[str] = None):
+    """Generate context-aware suggested queries based on account cost centers."""
+    if not _is_valid_account_id(account_id):
+        return {"queries": _GENERIC_QUERY_TEMPLATES[:6]}
+
+    try:
+        mcp = mcp_pool.get(account_id)
+        if not mcp or not mcp.mcp_bridge.process or mcp.mcp_bridge.process.poll() is not None:
+            return {"queries": _GENERIC_QUERY_TEMPLATES[:6]}
+
+        # Call get_account_context via MCP to learn about cost centers
+        context_result = await mcp.mcp_bridge.call_tool("get_account_context", {})
+        import re
+
+        # Extract cost center names from the response
+        cost_centers: List[str] = []
+        for line in context_result.split("\n"):
+            # Lines like "  - AWS (42 filters)" or "  - Kubernetes (15 filters)"
+            match = re.match(r"\s*-\s+(.+?)\s*\(", line)
+            if match:
+                cost_centers.append(match.group(1).strip())
+
+        if not cost_centers:
+            return {"queries": _GENERIC_QUERY_TEMPLATES[:6]}
+
+        # Build personalized queries from cost center templates
+        queries: List[str] = []
+        for cc in cost_centers[:3]:  # Use top 3 cost centers
+            template = _COST_CENTER_QUERY_TEMPLATES[len(queries) % len(_COST_CENTER_QUERY_TEMPLATES)]
+            queries.append(template.replace("{cost_center}", cc))
+
+        # Fill remaining slots with generic queries
+        for q in _GENERIC_QUERY_TEMPLATES:
+            if len(queries) >= 6:
+                break
+            queries.append(q)
+
+        return {"queries": queries}
+
+    except Exception as e:
+        print(f"Error generating suggested queries: {e}")
+        return {"queries": _GENERIC_QUERY_TEMPLATES[:6]}
+
 
 # ── OAuth endpoints for MCP client authentication ────────────────────────────
 

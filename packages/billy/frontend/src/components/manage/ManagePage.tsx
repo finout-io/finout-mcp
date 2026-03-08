@@ -133,6 +133,7 @@ function ConversationRow({
             </Text>
             <Text size="xs" c="dimmed">
               {accountLabel(summary.account_id, accountNameById)}
+              {summary.user_email && ` · ${summary.user_email}`}
             </Text>
           </Box>
           <Badge size="sm" variant="light" color="teal" style={{ flexShrink: 0 }}>

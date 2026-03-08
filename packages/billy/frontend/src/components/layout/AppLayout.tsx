@@ -146,6 +146,7 @@ export function AppLayout() {
       messages: chat.messages,
       toolCalls,
       conversationId: activeConversationIdRef.current, // always current, never stale
+      userEmail: user?.email,
     }).then((result) => {
       setActiveConversationId(result.id)
       setShareToken(result.share_token)
@@ -503,6 +504,8 @@ export function AppLayout() {
             onSuggestedQuestion={chat.sendMessage}
             model={model}
             sessionReady={session.isReady}
+            accountId={accountId}
+            userName={user?.name}
           />
 
           <Stack

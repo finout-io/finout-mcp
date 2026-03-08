@@ -39,6 +39,7 @@ class Database:
                     messages JSONB NOT NULL,
                     tool_calls JSONB,
                     user_note TEXT,
+                    user_email VARCHAR(255),
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW(),
                     share_token VARCHAR(64) UNIQUE NOT NULL
@@ -116,6 +117,14 @@ class Database:
                 """
             )
 
+            # Add user_email column if missing (migration for older DBs)
+            await conn.execute(
+                """
+                ALTER TABLE conversations
+                ADD COLUMN IF NOT EXISTS user_email VARCHAR(255);
+                """
+            )
+
             # Backward-compatible migration for older DBs that may lack defaults
             # or contain legacy null timestamps.
             await conn.execute(
@@ -140,6 +149,25 @@ class Database:
                 """
             )
 
+            # Create user_memories table for personalized greetings
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_memories (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_email VARCHAR(255) NOT NULL,
+                    account_id VARCHAR(255) NOT NULL,
+                    fact TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT clock_timestamp()
+                );
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_user_memories_lookup
+                ON user_memories(user_email, account_id);
+                """
+            )
+
     async def save_conversation(
         self,
         name: str,
@@ -148,6 +176,7 @@ class Database:
         messages: List[Dict[str, Any]],
         tool_calls: Optional[List[Dict[str, Any]]] = None,
         conversation_id: Optional[str] = None,
+        user_email: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Insert a new conversation or update an existing one by ID."""
         import uuid
@@ -158,14 +187,16 @@ class Database:
                     """
                     UPDATE conversations
                     SET name = $1, model = $2, messages = $3::jsonb,
-                        tool_calls = $4::jsonb, updated_at = NOW()
-                    WHERE id = $5
+                        tool_calls = $4::jsonb, user_email = $5,
+                        updated_at = NOW()
+                    WHERE id = $6
                     RETURNING id, name, account_id, model, created_at, share_token
                     """,
                     name,
                     model,
                     json.dumps(messages),
                     json.dumps(tool_calls) if tool_calls else None,
+                    user_email,
                     conversation_id,
                 )
                 if row:
@@ -175,8 +206,9 @@ class Database:
             share_token = secrets.token_urlsafe(32)
             row = await conn.fetchrow(
                 """
-                INSERT INTO conversations (id, name, account_id, model, messages, tool_calls, share_token)
-                VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+                INSERT INTO conversations
+                    (id, name, account_id, model, messages, tool_calls, user_email, share_token)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
                 RETURNING id, name, account_id, model, created_at, share_token
                 """,
                 uuid.uuid4(),
@@ -185,6 +217,7 @@ class Database:
                 model,
                 json.dumps(messages),
                 json.dumps(tool_calls) if tool_calls else None,
+                user_email,
                 share_token,
             )
             return dict(row)
@@ -195,7 +228,8 @@ class Database:
         """List conversations with optional filtering"""
         async with self.pool.acquire() as conn:
             query = """
-                SELECT id, name, account_id, model, created_at, updated_at,
+                SELECT id, name, account_id, model, user_email,
+                       created_at, updated_at,
                        jsonb_array_length(messages) as message_count
                 FROM conversations
                 WHERE 1=1
@@ -281,6 +315,80 @@ class Database:
             )
 
             return result == "UPDATE 1"
+
+    async def save_memory(
+        self,
+        user_email: str,
+        account_id: str,
+        fact: str,
+    ) -> Dict[str, Any]:
+        """Save a personal fact about a user."""
+        import uuid
+
+        async with self.pool.acquire() as conn:
+            # Cap at 20 memories per user+account to keep prompts lean
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM user_memories WHERE user_email = $1 AND account_id = $2",
+                user_email,
+                account_id,
+            )
+            if count >= 20:
+                # Delete the oldest memory to make room
+                await conn.execute(
+                    """
+                    DELETE FROM user_memories WHERE id = (
+                        SELECT id FROM user_memories
+                        WHERE user_email = $1 AND account_id = $2
+                        ORDER BY created_at ASC LIMIT 1
+                    )
+                    """,
+                    user_email,
+                    account_id,
+                )
+
+            row = await conn.fetchrow(
+                """
+                INSERT INTO user_memories (id, user_email, account_id, fact)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id, user_email, account_id, fact, created_at
+                """,
+                uuid.uuid4(),
+                user_email,
+                account_id,
+                fact,
+            )
+            return dict(row)
+
+    async def get_memories(
+        self,
+        user_email: str,
+        account_id: str,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Get memories for a user+account pair, newest first."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, fact, created_at
+                FROM user_memories
+                WHERE user_email = $1 AND account_id = $2
+                ORDER BY created_at DESC
+                LIMIT $3
+                """,
+                user_email,
+                account_id,
+                limit,
+            )
+            return [dict(row) for row in rows]
+
+    async def delete_memory(self, memory_id: str) -> bool:
+        """Delete a specific memory."""
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM user_memories WHERE id = $1",
+                memory_id,
+            )
+            return result == "DELETE 1"
 
     async def save_feedback(
         self,

@@ -41,6 +41,7 @@ export interface Conversation {
   messages: Message[]
   tool_calls: ToolCall[]
   user_note?: string
+  user_email?: string
   created_at: string
   updated_at: string
   share_token?: string
@@ -55,6 +56,7 @@ export interface ConversationSummary {
   updated_at: string
   share_token?: string
   user_note?: string
+  user_email?: string
 }
 
 export interface ChatResponse {

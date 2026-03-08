@@ -8,6 +8,7 @@ export interface SaveConversationParams {
   messages: Message[]
   tool_calls: ToolCall[]
   user_note?: string
+  user_email?: string
   conversation_id?: string
 }
 
