@@ -121,6 +121,21 @@ Just describe what changed, not the journey.
 
 ---
 
+## Maintaining Tools Reference
+
+**When you add, remove, or significantly change a tool in `tool_schemas.py`, update `packages/billy/src/billy/tools_reference.py` to match.**
+
+The tools reference powers the "Tools" panel in the Billy UI. Keep it in sync:
+
+- **Add a tool** → add a new `ToolEntry` to `TOOLS_REFERENCE`
+- **Remove a tool** → remove the entry
+- **Change a tool's description/behavior** → update `description`, `when_to_use`, `example_prompts`, `key_params`, or `workflow`
+- **Change availability** → update `availability` (`"public"` or `"internal"`)
+
+This applies to both Claude Code and Codex — **neither should modify tool_schemas.py without also updating tools_reference.py**.
+
+---
+
 ## Automated Quality Checks
 
 **IMPORTANT:** After making code changes, always run quality checks.

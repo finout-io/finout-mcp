@@ -105,3 +105,18 @@ export interface WhatsNewResponse {
   current_version: string
   entries: WhatsNewEntry[]
 }
+
+export interface ToolEntry {
+  name: string
+  category: string
+  availability: 'public' | 'internal'
+  description: string
+  when_to_use: string[]
+  example_prompts: string[]
+  key_params: string[]
+  workflow: string | null
+}
+
+export interface ToolsResponse {
+  tools: ToolEntry[]
+}

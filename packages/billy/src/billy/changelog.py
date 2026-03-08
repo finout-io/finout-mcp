@@ -19,6 +19,24 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.10.0",
+        "date": "2026-03-08",
+        "title": "Tools reference panel in Billy UI",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Add Tools panel to Billy UI listing all available MCP tools with descriptions, example prompts, and category filters",
+                "Add tools_reference.py as the source of truth for tool documentation (synced with tool_schemas.py)",
+                "Add CLAUDE.md rule: update tools_reference.py whenever tools are added/changed/removed"
+            ]
+        }
+    },
+    {
         "version": "0.9.0",
         "date": "2026-03-08",
         "title": "Improve streaming readability",

@@ -1,14 +1,18 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   AppShell,
+  Badge,
   Box,
   Button,
   Card,
   Center,
+  Code,
+  Divider,
   Group,
   List,
   Modal,
   Popover,
+  ScrollArea,
   Stack,
   Text,
   TextInput,
@@ -23,10 +27,11 @@ import { useChat } from '../../hooks/useChat'
 import { useConversations } from '../../hooks/useConversations'
 import { useUser } from '../../hooks/useUser'
 import { getWhatsNew } from '../../api/whatsNew'
+import { getTools } from '../../api/tools'
 import { Sidebar } from './Sidebar'
 import { ChatArea } from '../chat/ChatArea'
 import { ChatInput } from '../chat/ChatInput'
-import type { ConversationSummary, ModelId, WhatsNewEntry } from '../../types'
+import type { ConversationSummary, ModelId, ToolEntry, WhatsNewEntry } from '../../types'
 import { MODEL_OPTIONS } from '../../types'
 import { Link } from 'react-router-dom'
 
@@ -93,6 +98,8 @@ export function AppLayout() {
   const [shareToken, setShareToken] = useState<string | undefined>()
   const [whatsNewOpen, setWhatsNewOpen] = useState(false)
   const [unseenEntries, setUnseenEntries] = useState<WhatsNewEntry[]>([])
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [toolsCategory, setToolsCategory] = useState<string>('all')
   // Ref so the auto-save effect always reads the latest ID without becoming a dep
   const activeConversationIdRef = useRef<string | undefined>(undefined)
   const lastAccountIdRef = useRef<string | null>(null)
@@ -103,6 +110,11 @@ export function AppLayout() {
     queryKey: ['whats-new'],
     queryFn: getWhatsNew,
     staleTime: 10 * 60 * 1000,
+  })
+  const { data: toolsData } = useQuery({
+    queryKey: ['tools'],
+    queryFn: getTools,
+    staleTime: Infinity,
   })
 
   // Keep ref in sync with state
@@ -241,8 +253,112 @@ export function AppLayout() {
     return <LoginScreen onLogin={setUser} />
   }
 
+  const CATEGORY_LABELS: Record<string, string> = {
+    all: 'All',
+    cost_query: 'Cost Queries',
+    filters: 'Filters',
+    waste: 'Waste & Savings',
+    context: 'Context & Objects',
+    visualization: 'Visualization',
+    admin: 'Admin',
+  }
+
+  const toolCategories = toolsData
+    ? ['all', ...Array.from(new Set(toolsData.tools.map((t) => t.category)))]
+    : []
+
+  const filteredTools = toolsData
+    ? toolsData.tools.filter((t) => toolsCategory === 'all' || t.category === toolsCategory)
+    : []
+
   return (
     <>
+      <Modal
+        opened={toolsOpen}
+        onClose={() => setToolsOpen(false)}
+        title="Available Tools"
+        size="xl"
+        centered
+      >
+        <Stack gap="md">
+          <Group gap="xs" wrap="wrap">
+            {toolCategories.map((cat) => (
+              <Button
+                key={cat}
+                size="xs"
+                variant={toolsCategory === cat ? 'filled' : 'light'}
+                color="finoutTeal"
+                onClick={() => setToolsCategory(cat)}
+              >
+                {CATEGORY_LABELS[cat] ?? cat}
+              </Button>
+            ))}
+          </Group>
+          <ScrollArea h={480}>
+            <Stack gap="md">
+              {filteredTools.map((tool: ToolEntry) => (
+                <Card key={tool.name} padding="sm" radius="sm" withBorder>
+                  <Stack gap={6}>
+                    <Group gap="xs" align="center">
+                      <Code fw={700}>{tool.name}</Code>
+                      <Badge
+                        size="xs"
+                        color={tool.availability === 'public' ? 'teal' : 'grape'}
+                        variant="light"
+                      >
+                        {tool.availability}
+                      </Badge>
+                      <Badge size="xs" color="gray" variant="light">
+                        {CATEGORY_LABELS[tool.category] ?? tool.category}
+                      </Badge>
+                    </Group>
+                    <Text size="sm">{tool.description}</Text>
+                    {tool.workflow && (
+                      <Text size="xs" c="dimmed" ff="monospace">
+                        Workflow: {tool.workflow}
+                      </Text>
+                    )}
+                    {tool.when_to_use.length > 0 && (
+                      <Stack gap={2}>
+                        <Text size="xs" fw={600} c="dimmed">WHEN TO USE</Text>
+                        <List size="xs" spacing={2}>
+                          {tool.when_to_use.map((w) => (
+                            <List.Item key={w}>{w}</List.Item>
+                          ))}
+                        </List>
+                      </Stack>
+                    )}
+                    {tool.example_prompts.filter((p) => !p.startsWith('(')).length > 0 && (
+                      <Stack gap={2}>
+                        <Text size="xs" fw={600} c="dimmed">EXAMPLE PROMPTS</Text>
+                        <List size="xs" spacing={2}>
+                          {tool.example_prompts.filter((p) => !p.startsWith('(')).map((p) => (
+                            <List.Item key={p}>{p}</List.Item>
+                          ))}
+                        </List>
+                      </Stack>
+                    )}
+                    {tool.key_params.length > 0 && (
+                      <Stack gap={2}>
+                        <Text size="xs" fw={600} c="dimmed">KEY PARAMS</Text>
+                        <List size="xs" spacing={2}>
+                          {tool.key_params.map((p) => (
+                            <List.Item key={p}>{p}</List.Item>
+                          ))}
+                        </List>
+                      </Stack>
+                    )}
+                  </Stack>
+                </Card>
+              ))}
+            </Stack>
+          </ScrollArea>
+          <Divider />
+          <Group justify="flex-end">
+            <Button onClick={() => setToolsOpen(false)}>Close</Button>
+          </Group>
+        </Stack>
+      </Modal>
       <Modal
         opened={whatsNewOpen}
         onClose={markWhatsNewSeen}
@@ -312,6 +428,18 @@ export function AppLayout() {
             {session.error && ` · Error: ${session.error}`}
           </Text>
           <Group gap="xs">
+            {toolsData && (
+              <Button
+                size="xs"
+                variant="subtle"
+                onClick={() => {
+                  setToolsCategory('all')
+                  setToolsOpen(true)
+                }}
+              >
+                Tools
+              </Button>
+            )}
             {whatsNewData && (
               <Button
                 size="xs"

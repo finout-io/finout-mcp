@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from urllib.parse import quote
 from .changelog import CHANGELOG_ENTRIES
+from .tools_reference import TOOLS_REFERENCE
 from .db import db
 from .auth import get_jwt_user
 from .oauth import (
@@ -618,6 +619,12 @@ async def whats_new():
         "current_version": _get_app_version(),
         "entries": CHANGELOG_ENTRIES,
     }
+
+
+@app.get("/api/tools")
+async def get_tools():
+    """Return structured reference for all available MCP tools."""
+    return {"tools": TOOLS_REFERENCE}
 
 
 @app.get("/api/me")
