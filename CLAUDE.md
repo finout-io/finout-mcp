@@ -179,10 +179,40 @@ If pre-commit fails, fix issues and commit again.
 
 - ✅ All linting must pass
 - ✅ All type checking must pass
-- ✅ All tests must pass (28/28)
+- ✅ All tests must pass
 - ❌ Don't mark tasks complete if `make check` fails
 - ❌ Don't skip checks "to save time"
 - ❌ Don't disable type checkers - fix the code instead
+
+---
+
+## Before Every Commit and Push
+
+**REQUIRED — no exceptions:**
+
+1. **Run quality checks** (`packages/mcp-server`):
+   ```bash
+   cd packages/mcp-server && make check
+   ```
+   All linting, type checking, and tests must pass.
+
+2. **Run hosted package tests** (`packages/mcp-server-hosted`):
+   ```bash
+   cd packages/mcp-server-hosted && uv run pytest
+   ```
+   All tests must pass.
+
+3. **Prepare changelog** using `/release-whats-new` or the script directly:
+   ```bash
+   uv run python scripts/release_minor_with_changelog.py \
+     --title "$TITLE" \
+     --external "$EXTERNAL_CHANGE" \
+     --internal "$INTERNAL_CHANGE" \
+     --billy "$BILLY_CHANGE" \
+     --commit
+   ```
+
+Do not commit or push if any of the above fail.
 
 ---
 

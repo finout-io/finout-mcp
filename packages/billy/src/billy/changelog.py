@@ -19,6 +19,24 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.9.0",
+        "date": "2026-03-08",
+        "title": "Improve streaming readability",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Fix streaming text: separate each LLM turn with a paragraph break so multi-step reasoning is readable",
+                "Instruct Claude not to end narration sentences with a colon before tool calls",
+                "Add remark-breaks to render single newlines as line breaks in chat"
+            ]
+        }
+    },
+    {
         "version": "0.8.0",
         "date": "2026-03-08",
         "title": "Object usage tracing + Billy OAuth endpoints",

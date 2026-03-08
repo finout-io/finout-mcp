@@ -785,6 +785,8 @@ async def _run_chat_pipeline_inner(
         system=(
             "You are a cloud cost analysis assistant for Finout. "
             "You have access to tools to query costs, detect anomalies, find waste, and explore filters.\n\n"
+            "STYLE: When narrating your steps between tool calls, use complete sentences. "
+            "Do not end a sentence with a colon before calling a tool.\n\n"
             "CRITICAL RULE — NEVER FABRICATE: You MUST call tools before answering any question "
             "about costs, resources, filters, anomalies, waste, or financial data. "
             "NEVER state specific cost figures, resource names, service names, or any data "
@@ -926,6 +928,9 @@ async def _run_chat_pipeline_inner(
 
         if status_callback:
             await status_callback({"phase": "analysis", "message": "Reviewing tool results..."})
+
+        if token_callback:
+            await token_callback("\n\n")
 
         llm_response = await _call_claude_messages_create(
             status_callback=status_callback,
