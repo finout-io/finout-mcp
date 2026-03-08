@@ -12,9 +12,3 @@ export async function getAccounts(): Promise<{ accounts: Account[]; currentAccou
   return { accounts: data.accounts, currentAccountId: data.current_account_id }
 }
 
-export function switchAccount(accountId: string): Promise<{ status: string }> {
-  return apiFetch<{ status: string }>('/api/switch-account', {
-    method: 'POST',
-    body: JSON.stringify({ account_id: accountId }),
-  })
-}

@@ -7,7 +7,6 @@ import asyncio
 import json
 import os
 import subprocess
-import secrets
 import shutil
 import sys
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -17,7 +16,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 
-from fastapi import FastAPI, HTTPException, Response, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -244,18 +243,15 @@ class MCPBridge:
                 self.process.kill()
             print("MCP server stopped")
 
-# Session management
+# MCP pool: one subprocess per active account
 @dataclass
-class SessionData:
-    """Data for each user session"""
-    session_id: str
-    mcp_bridge: MCPBridge
+class AccountSession:
     account_id: str
+    mcp_bridge: MCPBridge
     last_activity: datetime
 
-# Session storage and configuration
-sessions: Dict[str, SessionData] = {}
-MAX_CONCURRENT_SESSIONS = 10
+mcp_pool: Dict[str, AccountSession] = {}
+MAX_CONCURRENT_ACCOUNTS = 10
 SESSION_TIMEOUT = timedelta(minutes=30)
 def _read_timeout_seconds(env_var: str, default: float) -> Optional[float]:
     raw = os.getenv(env_var)
@@ -278,78 +274,38 @@ def _read_timeout_seconds(env_var: str, default: float) -> Optional[float]:
 
 
 CHAT_REQUEST_TIMEOUT_SECONDS = _read_timeout_seconds("BILLY_CHAT_TIMEOUT_SECONDS", 540.0)
-SESSION_COOKIE_NAME = "billy_session_id"
 PUBLIC_MODE = os.getenv("BILLY_PUBLIC_MODE", "").lower() in ("1", "true", "yes")
-ACCOUNT_COOKIE_NAME = "billy_account_id"
-
-def get_or_create_session_id(request: Request, response: Response) -> str:
-    """Get session ID from cookie or create new one"""
-    session_id = request.cookies.get(SESSION_COOKIE_NAME)
-
-    if not session_id:
-        session_id = secrets.token_urlsafe(32)
-    # Refresh cookie TTL on each request (sliding session).
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=session_id,
-        max_age=SESSION_TIMEOUT.total_seconds(),
-        httponly=True,
-        samesite="lax"
-    )
-
-    return session_id
-
-async def get_session_mcp(session_id: str) -> Optional[MCPBridge]:
-    """Get MCP bridge for session, return None if not exists"""
-    session = sessions.get(session_id)
-    if session:
-        session.last_activity = datetime.now()
-        return session.mcp_bridge
-    return None
 
 
-async def ensure_session_mcp(session_id: str, account_id_hint: Optional[str] = None) -> Optional[MCPBridge]:
-    """
-    Ensure a session-scoped MCP bridge exists and is running.
-
-    This auto-recovers from:
-    - per-pod in-memory session misses (multi-replica routing)
-    - MCP subprocess exits during a live session
-    """
-    session = sessions.get(session_id)
-    if session:
-        # Recover dead MCP process in-place.
-        if not session.mcp_bridge.process or session.mcp_bridge.process.poll() is not None:
+async def get_or_create_account_mcp(account_id: str) -> Optional[MCPBridge]:
+    """Return the MCP bridge for an account, starting one if needed."""
+    entry = mcp_pool.get(account_id)
+    if entry:
+        if not entry.mcp_bridge.process or entry.mcp_bridge.process.poll() is not None:
             try:
-                print(
-                    f"Session {session_id[:8]}: MCP not running, restarting for account {session.account_id}"
-                )
-                await session.mcp_bridge.restart_with_account(session.account_id)
+                print(f"MCP dead for account {account_id[:8]}, restarting...")
+                await entry.mcp_bridge.restart_with_account(account_id)
             except Exception as e:
-                print(f"Session {session_id[:8]}: Failed to restart MCP: {e}")
+                print(f"Failed to restart MCP for account {account_id[:8]}: {e}")
                 return None
-        session.last_activity = datetime.now()
-        return session.mcp_bridge
+        entry.last_activity = datetime.now()
+        return entry.mcp_bridge
 
-    # Session not found on this pod: only use explicit account hint.
-    # Do NOT use global account fallbacks because they can leak/flip accounts across users/pods.
-    account_id = account_id_hint
-    if not account_id:
-        return None
+    if len(mcp_pool) >= MAX_CONCURRENT_ACCOUNTS:
+        await evict_oldest_account()
 
     try:
-        print(f"Session {session_id[:8]}: Rehydrating MCP session for account {account_id}")
+        print(f"Starting MCP for account {account_id[:8]}...")
         mcp = MCPBridge()
         await mcp.start(account_id)
-        sessions[session_id] = SessionData(
-            session_id=session_id,
-            mcp_bridge=mcp,
+        mcp_pool[account_id] = AccountSession(
             account_id=account_id,
+            mcp_bridge=mcp,
             last_activity=datetime.now(),
         )
         return mcp
     except Exception as e:
-        print(f"Session {session_id[:8]}: Failed to rehydrate MCP session: {e}")
+        print(f"Failed to start MCP for account {account_id[:8]}: {e}")
         return None
 
 
@@ -364,33 +320,34 @@ def _is_valid_account_id(value: Optional[str]) -> bool:
         return False
 
 
-def get_account_hint(request: Request) -> Optional[str]:
-    """Get account hint from per-browser cookie."""
-    account_id = request.cookies.get(ACCOUNT_COOKIE_NAME)
-    if _is_valid_account_id(account_id):
-        return account_id
-    return None
+async def evict_oldest_account():
+    """Evict the least-recently-used account MCP to stay within MAX_CONCURRENT_ACCOUNTS."""
+    if not mcp_pool:
+        return
+    oldest_id = min(mcp_pool, key=lambda k: mcp_pool[k].last_activity)
+    print(f"Evicting MCP for account {oldest_id[:8]}...")
+    await mcp_pool[oldest_id].mcp_bridge.stop()
+    del mcp_pool[oldest_id]
+
 
 async def cleanup_idle_sessions():
-    """Background task to cleanup idle sessions"""
+    """Background task to stop MCP subprocesses for accounts idle beyond SESSION_TIMEOUT."""
     while True:
         try:
             await asyncio.sleep(300)  # Run every 5 minutes
 
             now = datetime.now()
-            to_remove = []
-
-            for session_id, session in sessions.items():
-                if (now - session.last_activity) > SESSION_TIMEOUT:
-                    print(f"Cleaning up idle session: {session_id[:8]}... (account: {session.account_id})")
-                    await session.mcp_bridge.stop()
-                    to_remove.append(session_id)
-
-            for session_id in to_remove:
-                del sessions[session_id]
+            to_remove = [
+                account_id for account_id, entry in mcp_pool.items()
+                if (now - entry.last_activity) > SESSION_TIMEOUT
+            ]
+            for account_id in to_remove:
+                print(f"Cleaning up idle MCP for account {account_id[:8]}...")
+                await mcp_pool[account_id].mcp_bridge.stop()
+                del mcp_pool[account_id]
 
             if to_remove:
-                print(f"Cleaned up {len(to_remove)} idle sessions. Active sessions: {len(sessions)}")
+                print(f"Cleaned up {len(to_remove)} idle accounts. Active: {len(mcp_pool)}")
 
             # Expire old tool output entries
             expired = [
@@ -404,19 +361,6 @@ async def cleanup_idle_sessions():
 
         except Exception as e:
             print(f"Error in cleanup task: {e}")
-
-async def evict_oldest_session():
-    """Evict oldest idle session to make room"""
-    if not sessions:
-        return
-
-    oldest = min(sessions.values(), key=lambda s: s.last_activity)
-    print(f"Evicting oldest session: {oldest.session_id[:8]}... (account: {oldest.account_id})")
-    await oldest.mcp_bridge.stop()
-    del sessions[oldest.session_id]
-
-# Global MCP bridge (DEPRECATED - kept for backward compatibility during migration)
-mcp_bridge: Optional[MCPBridge] = None
 
 # Out-of-band tool output store: request_id → {calls, created_at}
 # Outputs are excluded from the SSE final event and fetched separately by the frontend.
@@ -449,11 +393,11 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
-    # Stop all active MCP sessions
-    for session in list(sessions.values()):
-        await session.mcp_bridge.stop()
-    sessions.clear()
-    print(f"Stopped {len(sessions)} active sessions")
+    # Stop all active MCP subprocesses
+    for entry in list(mcp_pool.values()):
+        await entry.mcp_bridge.stop()
+    mcp_pool.clear()
+    print("Stopped all MCP subprocesses")
 
     # Close database connection
     await db.disconnect()
@@ -606,8 +550,8 @@ async def health():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "active_sessions": len(sessions),
-        "max_sessions": MAX_CONCURRENT_SESSIONS
+        "active_accounts": len(mcp_pool),
+        "max_accounts": MAX_CONCURRENT_ACCOUNTS,
     }
 
 
@@ -718,39 +662,38 @@ def _tool_calls_metadata(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any
 async def _run_chat_pipeline(
     request: ChatRequest,
     session_mcp: MCPBridge,
-    session_id: str,
     status_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     token_callback: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Dict[str, Any]:
     """Execute chat + MCP tool loop, optionally emitting progress status events."""
     if _langfuse:
         return await _run_chat_pipeline_traced(
-            request, session_mcp, session_id, status_callback, token_callback
+            request, session_mcp, status_callback, token_callback
         )
     return await _run_chat_pipeline_inner(
-        request, session_mcp, session_id, status_callback, token_callback
+        request, session_mcp, status_callback, token_callback
     )
 
 
 async def _run_chat_pipeline_traced(
     request: ChatRequest,
     session_mcp: MCPBridge,
-    session_id: str,
     status_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     token_callback: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Dict[str, Any]:
+    account_id = session_mcp.current_account_id or ""
     with _langfuse.start_as_current_span(
         name="chat_pipeline",
-        input={"message": request.message, "model": request.model, "session_id": session_id},
+        input={"message": request.message, "model": request.model, "account_id": account_id},
     ) as span:
         _langfuse.update_current_trace(
-            session_id=session_id,
-            user_id=request.user_email or session_mcp.current_account_id,
+            session_id=account_id,
+            user_id=request.user_email or account_id,
             tags=[request.model],
             metadata={"conversation_length": len(request.conversation_history)},
         )
         result = await _run_chat_pipeline_inner(
-            request, session_mcp, session_id, status_callback, token_callback
+            request, session_mcp, status_callback, token_callback
         )
         span.update(
             output={
@@ -765,7 +708,6 @@ async def _run_chat_pipeline_traced(
 async def _run_chat_pipeline_inner(
     request: ChatRequest,
     session_mcp: MCPBridge,
-    session_id: str,
     status_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     token_callback: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Dict[str, Any]:
@@ -888,7 +830,7 @@ async def _run_chat_pipeline_inner(
                             tools_used=tool_input.get("tools_used"),
                             friction_points=tool_input.get("friction_points"),
                             suggestion=tool_input.get("suggestion"),
-                            session_id=session_id,
+                            session_id=session_mcp.current_account_id or "",
                         )
                     except Exception as e:
                         print(f"Failed to save feedback to database: {e}")
@@ -971,41 +913,29 @@ async def _run_chat_pipeline_inner(
     }
 
 
-async def _get_validated_session_mcp(
-    request: ChatRequest,
-    http_request: Request,
-    session_id: str,
-    forced_account_id: Optional[str] = None,
-) -> MCPBridge:
-    account_hint = forced_account_id or (
-        request.account_id if _is_valid_account_id(request.account_id) else None
-    ) or get_account_hint(http_request)
-    session_mcp = await ensure_session_mcp(session_id, account_hint)
-
-    if not session_mcp:
+async def _get_account_mcp_or_raise(account_id: Optional[str]) -> MCPBridge:
+    if not _is_valid_account_id(account_id):
         raise HTTPException(status_code=400, detail="No account selected. Please select an account first.")
-
-    if not session_mcp.process or session_mcp.process.poll() is not None:
-        raise HTTPException(
-            status_code=500, detail="MCP server not running. Please try switching accounts again."
-        )
-
-    return session_mcp
+    mcp = await get_or_create_account_mcp(account_id)  # type: ignore[arg-type]
+    if not mcp:
+        raise HTTPException(status_code=400, detail="No account selected. Please select an account first.")
+    if not mcp.process or mcp.process.poll() is not None:
+        raise HTTPException(status_code=500, detail="MCP server not running. Please try again.")
+    return mcp
 
 
 @app.post("/api/chat")
-async def chat(request: ChatRequest, http_request: Request, response: Response):
-    """Handle chat requests with Claude API and MCP tools (session-based)."""
-    session_id = get_or_create_session_id(http_request, response)
-    forced_account_id: Optional[str] = None
+async def chat(request: ChatRequest, http_request: Request):
+    """Handle chat requests with Claude API and MCP tools."""
+    account_id = request.account_id
     if PUBLIC_MODE:
         jwt_user = await get_jwt_user(http_request)
-        forced_account_id = jwt_user.get("tenantId")
-    session_mcp = await _get_validated_session_mcp(request, http_request, session_id, forced_account_id)
+        account_id = jwt_user.get("tenantId")
+    session_mcp = await _get_account_mcp_or_raise(account_id)
 
     try:
         async with _maybe_timeout(CHAT_REQUEST_TIMEOUT_SECONDS):
-            return await _run_chat_pipeline(request, session_mcp, session_id)
+            return await _run_chat_pipeline(request, session_mcp)
     except TimeoutError:
         raise HTTPException(status_code=504, detail=_chat_timeout_detail())
     except Exception as e:
@@ -1018,12 +948,11 @@ async def chat(request: ChatRequest, http_request: Request, response: Response):
 @app.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest, http_request: Request):
     """Handle chat requests via SSE with progress events and heartbeats."""
-    session_id = http_request.cookies.get(SESSION_COOKIE_NAME) or secrets.token_urlsafe(32)
-    forced_account_id: Optional[str] = None
+    account_id = request.account_id
     if PUBLIC_MODE:
         jwt_user = await get_jwt_user(http_request)
-        forced_account_id = jwt_user.get("tenantId")
-    session_mcp = await _get_validated_session_mcp(request, http_request, session_id, forced_account_id)
+        account_id = jwt_user.get("tenantId")
+    session_mcp = await _get_account_mcp_or_raise(account_id)
 
     async def event_generator():
         queue: asyncio.Queue[str] = asyncio.Queue()
@@ -1039,7 +968,6 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                     result = await _run_chat_pipeline(
                         request,
                         session_mcp,
-                        session_id,
                         status_callback=lambda payload: send_event("status", payload),
                         token_callback=lambda chunk: send_event("token", {"text": chunk}),
                     )
@@ -1107,7 +1035,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                 task.cancel()
             await asyncio.gather(heartbeat_task, worker_task, return_exceptions=True)
 
-    stream_response = StreamingResponse(
+    return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={
@@ -1116,40 +1044,10 @@ async def chat_stream(request: ChatRequest, http_request: Request):
             "X-Accel-Buffering": "no",
         },
     )
-    stream_response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=session_id,
-        max_age=SESSION_TIMEOUT.total_seconds(),
-        httponly=True,
-        samesite="lax",
-    )
-    return stream_response
-
-@app.get("/api/tools")
-async def list_tools(http_request: Request, response: Response):
-    """List available tools from MCP server (session-based)"""
-    # Get session ID
-    session_id = get_or_create_session_id(http_request, response)
-
-    # Get session MCP
-    session_mcp = await get_session_mcp(session_id)
-
-    if not session_mcp:
-        return {"tools": [], "message": "No account selected"}
-
-    # Check if MCP process is running
-    if not session_mcp.process or session_mcp.process.poll() is not None:
-        return {"tools": [], "message": "MCP server not running"}
-
-    try:
-        tools = await session_mcp.list_tools()
-        return {"tools": tools}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/accounts")
-async def get_accounts(http_request: Request, response: Response):
-    """Fetch available accounts from Finout internal API (with caching)"""
+async def get_accounts(http_request: Request):
+    """Fetch available accounts from Finout internal API (with caching)."""
     global _account_cache, _account_cache_time
 
     # In public mode, return a single account derived from the JWT
@@ -1157,18 +1055,11 @@ async def get_accounts(http_request: Request, response: Response):
         jwt_user = await get_jwt_user(http_request)
         tenant_id = jwt_user.get("tenantId", "")
         email = jwt_user.get("email", "")
-        session_id = get_or_create_session_id(http_request, response)
-        session = sessions.get(session_id)
-        current_id = session.account_id if session else tenant_id
         return {
             "accounts": [{"name": email, "accountId": tenant_id}],
-            "current_account_id": current_id,
+            "current_account_id": None,
             "cached": False,
         }
-
-    # Get session to determine current account
-    session_id = get_or_create_session_id(http_request, response)
-    session = sessions.get(session_id)
 
     try:
         # Check if cache is valid
@@ -1177,17 +1068,15 @@ async def get_accounts(http_request: Request, response: Response):
             _account_cache_time is not None and
             now - _account_cache_time < _account_cache_ttl):
             print(f"Using cached accounts ({len(_account_cache)} accounts, age: {(now - _account_cache_time).seconds}s)")
-            # Return session account if exists, otherwise cookie-scoped account hint
-            current_id = session.account_id if session else get_account_hint(http_request)
             return {
                 "accounts": _account_cache,
-                "current_account_id": current_id,
+                "current_account_id": None,
                 "cached": True
             }
 
         import httpx
 
-        # Resolve Finout API URL (support both env names during migration).
+        # Resolve Finout API URL
         internal_api_url = (
             os.getenv("FINOUT_API_URL")
             or os.getenv("FINOUT_INTERNAL_API_URL")
@@ -1196,16 +1085,8 @@ async def get_accounts(http_request: Request, response: Response):
 
         print(f"Fetching accounts from: {internal_api_url}/account-service/account?isActive=true")
 
-        # Create httpx client
         async with httpx.AsyncClient(timeout=30.0) as http_client:
-            # Fetch accounts from INTERNAL API
-            # Internal API only needs authorized-user-roles header (no auth token!)
-            headers = {
-                "authorized-user-roles": "sysAdmin"
-                # Note: NO authorized-account-id header - this allows getting all accounts
-                # Note: NO x-finout-access-token - internal API doesn't need it
-            }
-
+            headers = {"authorized-user-roles": "sysAdmin"}
             accounts_response = await http_client.get(
                 f"{internal_api_url}/account-service/account",
                 headers=headers,
@@ -1218,11 +1099,9 @@ async def get_accounts(http_request: Request, response: Response):
             accounts_response.raise_for_status()
             accounts = accounts_response.json()
 
-            # Extract name and accountId, filter by AI features enabled
             account_list = []
             if isinstance(accounts, list):
                 for account in accounts:
-                    # Only include accounts with AI features enabled
                     general_config = account.get("generalConfig", {})
                     if general_config.get("aiFeaturesEnabled", False):
                         account_list.append({
@@ -1231,7 +1110,6 @@ async def get_accounts(http_request: Request, response: Response):
                         })
             elif isinstance(accounts, dict) and "accounts" in accounts:
                 for account in accounts["accounts"]:
-                    # Only include accounts with AI features enabled
                     general_config = account.get("generalConfig", {})
                     if general_config.get("aiFeaturesEnabled", False):
                         account_list.append({
@@ -1241,16 +1119,12 @@ async def get_accounts(http_request: Request, response: Response):
 
             print(f"Loaded {len(account_list)} accounts (cached for {_account_cache_ttl.seconds}s)")
 
-            # Update cache
             _account_cache = account_list
             _account_cache_time = now
 
-            # Return session account if exists, otherwise cookie-scoped account hint
-            current_id = session.account_id if session else get_account_hint(http_request)
-
             return {
                 "accounts": account_list,
-                "current_account_id": current_id,
+                "current_account_id": None,
                 "cached": False
             }
 
@@ -1261,73 +1135,6 @@ async def get_accounts(http_request: Request, response: Response):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/switch-account")
-async def switch_account(request: dict, http_request: Request, response: Response):
-    """
-    Switch to a different account by creating/restarting session MCP server.
-    Each session has its own isolated MCP instance.
-    """
-    # In public mode, always use the JWT tenantId — ignore request body
-    if PUBLIC_MODE:
-        jwt_user = await get_jwt_user(http_request)
-        account_id = jwt_user.get("tenantId")
-    else:
-        account_id = request.get("account_id")
-    if not account_id:
-        raise HTTPException(status_code=400, detail="account_id is required")
-    if not _is_valid_account_id(account_id):
-        raise HTTPException(status_code=400, detail="account_id must be a UUID")
-
-    # Get or create session ID
-    session_id = get_or_create_session_id(http_request, response)
-
-    # Check if we need to evict oldest session
-    if session_id not in sessions and len(sessions) >= MAX_CONCURRENT_SESSIONS:
-        await evict_oldest_session()
-
-    # Get or create session
-    session = sessions.get(session_id)
-
-    if session:
-        # Session exists - check if account changed
-        if session.account_id != account_id:
-            print(f"Session {session_id[:8]}: Switching from {session.account_id} to {account_id}")
-            await session.mcp_bridge.restart_with_account(account_id)
-            session.account_id = account_id
-        elif not session.mcp_bridge.process or session.mcp_bridge.process.poll() is not None:
-            print(f"Session {session_id[:8]}: MCP was down, restarting for account {account_id}")
-            await session.mcp_bridge.restart_with_account(account_id)
-        session.last_activity = datetime.now()
-    else:
-        # New session - create MCP bridge
-        print(f"Session {session_id[:8]}: Creating new MCP for account {account_id}")
-        mcp = MCPBridge()
-        await mcp.start(account_id)
-
-        sessions[session_id] = SessionData(
-            session_id=session_id,
-            mcp_bridge=mcp,
-            account_id=account_id,
-            last_activity=datetime.now()
-        )
-
-    print(f"Active sessions: {len(sessions)}/{MAX_CONCURRENT_SESSIONS}")
-
-    # Persist selected account per browser/client
-    response.set_cookie(
-        key=ACCOUNT_COOKIE_NAME,
-        value=account_id,
-        max_age=SESSION_TIMEOUT.total_seconds(),
-        httponly=True,
-        samesite="lax",
-    )
-
-    return {
-        "success": True,
-        "account_id": account_id,
-        "message": f"Switched to account {account_id}"
-    }
 
 @app.get("/api/chat/tool-outputs/{request_id}")
 async def get_tool_outputs(request_id: str):

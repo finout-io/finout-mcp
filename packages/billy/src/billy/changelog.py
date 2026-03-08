@@ -19,6 +19,22 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.14.0",
+        "date": "2026-03-08",
+        "title": "AI disclaimer",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Add AI disclaimer near chat input"
+            ]
+        }
+    },
+    {
         "version": "0.13.0",
         "date": "2026-03-08",
         "title": "Usage diagram tests",

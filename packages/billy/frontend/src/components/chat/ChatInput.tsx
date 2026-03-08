@@ -1,5 +1,5 @@
 import { useState, useCallback, KeyboardEvent } from 'react'
-import { ActionIcon, Group, Stack, Textarea, Tooltip } from '@mantine/core'
+import { ActionIcon, Group, Stack, Text, Textarea, Tooltip } from '@mantine/core'
 import { useVoiceInput } from '../../hooks/useVoiceInput'
 import type { ModelId } from '../../types'
 
@@ -84,6 +84,9 @@ export function ChatInput({ onSend, model, disabled, loading }: Props) {
           </ActionIcon>
         </Tooltip>
       </Group>
+      <Text size="xs" c="dimmed" ta="center">
+        ✦ Uses AI. Verify results.
+      </Text>
     </Stack>
   )
 }
