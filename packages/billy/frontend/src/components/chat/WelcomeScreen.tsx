@@ -34,10 +34,10 @@ export function WelcomeScreen({ onQuestion, disabled }: Props) {
           maw={260}
           radius="md"
         />
-        <Title order={2} ta="center">
+        <Title order={2} ta="center" style={{ color: '#1e293b' }}>
           Ask Billy
         </Title>
-        <Text c="dimmed" ta="center" size="sm">
+        <Text ta="center" size="sm" style={{ color: '#64748b' }}>
           Get instant insights into your cloud spending
         </Text>
       </Stack>
@@ -52,9 +52,9 @@ export function WelcomeScreen({ onQuestion, disabled }: Props) {
             fullWidth
             onClick={() => onQuestion(q)}
             disabled={disabled}
-            style={{ textAlign: 'left', height: 'auto', padding: '8px 16px', backgroundColor: '#ffffff', border: '1px solid #e9ecef', color: '#1a1f2e' }}
+            style={{ textAlign: 'left', height: 'auto', padding: '8px 16px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', color: '#1e293b' }}
           >
-            <Text size="sm" style={{ whiteSpace: 'normal', color: '#1a1f2e' }}>
+            <Text size="sm" style={{ whiteSpace: 'normal', color: '#1e293b' }}>
               {q}
             </Text>
           </Button>

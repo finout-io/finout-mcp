@@ -23,11 +23,11 @@ export function AccountSelector({ accounts, value, onChange, disabled }: Props) 
       radius="md"
       size="sm"
       styles={{
-        label: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' },
+        label: { color: '#94a3b8', fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' },
         input: {
-          backgroundColor: 'rgba(255,255,255,0.08)',
-          border: '1px solid rgba(255,255,255,0.15)',
-          color: '#ffffff',
+          backgroundColor: '#2a3244',
+          border: '1px solid #3d4a5c',
+          color: '#e2e8f0',
         },
       }}
     />

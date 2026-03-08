@@ -19,6 +19,27 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.11.0",
+        "date": "2026-03-08",
+        "title": "Billy UI redesign \u2014 Finout-aligned light theme",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Redesigned UI to match Finout app visual style (light theme, dark navy sidebar)",
+                "Replaced robot emoji avatar with Billy cat mascot image",
+                "Updated sidebar banner to transparent-background version",
+                "Fixed chart and Mermaid diagram colors for light mode legibility",
+                "Bumped font sizes and updated link color to #1570ef",
+                "Locked app to light mode only (removed theme toggle)"
+            ]
+        }
+    },
+    {
         "version": "0.10.0",
         "date": "2026-03-08",
         "title": "Tools reference panel in Billy UI",

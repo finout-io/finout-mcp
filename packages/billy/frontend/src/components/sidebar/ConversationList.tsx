@@ -41,10 +41,10 @@ export function ConversationList({ accountId, activeId, onSelect }: Props) {
         radius="md"
         styles={{
           input: {
-            backgroundColor: 'rgba(255,255,255,0.08)',
-            border: '1px solid rgba(255,255,255,0.15)',
-            color: '#ffffff',
-            '&::placeholder': { color: 'rgba(255,255,255,0.4)' },
+            backgroundColor: '#2a3244',
+            border: '1px solid #3d4a5c',
+            color: '#e2e8f0',
+            '&::placeholder': { color: '#94a3b8' },
           },
         }}
       />
@@ -53,7 +53,7 @@ export function ConversationList({ accountId, activeId, onSelect }: Props) {
         {isLoading ? (
           <Loader size="xs" color="finoutBlue" mt="sm" />
         ) : conversations.length === 0 ? (
-          <Text size="xs" ta="center" mt="md" style={{ color: 'rgba(255,255,255,0.4)' }}>
+          <Text size="xs" ta="center" mt="md" style={{ color: '#94a3b8' }}>
             {search ? 'No results' : 'No saved conversations'}
           </Text>
         ) : (
@@ -64,15 +64,19 @@ export function ConversationList({ accountId, activeId, onSelect }: Props) {
               description={formatDate(c.updated_at)}
               active={c.id === activeId}
               onClick={() => onSelect(c)}
-              style={{ borderRadius: 6 }}
+              variant="subtle"
+              color="gray"
+              style={{
+                borderRadius: 6,
+                color: '#e2e8f0',
+                backgroundColor: c.id === activeId ? '#2d3748' : 'transparent',
+              }}
               styles={{
                 root: {
-                  color: 'rgba(255,255,255,0.8)',
-                  '&:hover': { backgroundColor: 'rgba(255,255,255,0.05)' },
-                  '&[dataActive]': { backgroundColor: 'rgba(255,255,255,0.1)' },
+                  '&:hover, &[dataHover]': { backgroundColor: '#252d3d' },
                 },
-                label: { color: 'rgba(255,255,255,0.85)' },
-                description: { color: 'rgba(255,255,255,0.4)' },
+                label: { color: '#e2e8f0', fontSize: '13px' },
+                description: { color: '#94a3b8' },
               }}
             />
           ))

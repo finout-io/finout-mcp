@@ -35,9 +35,9 @@ export function MarkdownRenderer({ content, size = 'sm' }: Props) {
     blockquote: ({ children }) => (
       <Box
         style={(theme) => ({
-          borderLeft: `3px solid ${theme.colors.dark[3]}`,
+          borderLeft: '3px solid #e2e8f0',
           paddingLeft: theme.spacing.sm,
-          color: theme.colors.gray[4],
+          color: '#64748b',
         })}
       >
         {children}
@@ -49,8 +49,8 @@ export function MarkdownRenderer({ content, size = 'sm' }: Props) {
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        style={(theme) => ({
-          color: theme.colors.finoutTeal[4],
+        style={() => ({
+          color: '#1570ef',
           textDecoration: 'underline',
         })}
       >
@@ -61,7 +61,7 @@ export function MarkdownRenderer({ content, size = 'sm' }: Props) {
       <Box
         component="code"
         style={(theme) => ({
-          backgroundColor: theme.colors.dark[5],
+          backgroundColor: '#f1f5f9',
           borderRadius: theme.radius.xs,
           padding: className ? theme.spacing.sm : '0 4px',
           fontFamily: 'monospace',
@@ -69,6 +69,7 @@ export function MarkdownRenderer({ content, size = 'sm' }: Props) {
           wordBreak: className ? 'break-word' : 'normal',
           display: className ? 'block' : 'inline',
           overflowX: className ? 'auto' : 'visible',
+          color: '#1e293b',
         })}
       >
         {children}
@@ -79,7 +80,7 @@ export function MarkdownRenderer({ content, size = 'sm' }: Props) {
       <Box
         style={(theme) => ({
           overflowX: 'auto',
-          border: `1px solid ${theme.colors.dark[4]}`,
+          border: '1px solid #e2e8f0',
           borderRadius: theme.radius.sm,
         })}
       >
@@ -103,13 +104,14 @@ export function MarkdownRenderer({ content, size = 'sm' }: Props) {
       <Box
         component="th"
         style={(theme) => ({
-          border: `1px solid ${theme.colors.dark[4]}`,
+          border: '1px solid #e2e8f0',
           padding: `${theme.spacing.xs} ${theme.spacing.sm}`,
-          backgroundColor: theme.colors.dark[5],
+          backgroundColor: '#f8fafc',
           textAlign: 'left',
           fontWeight: 700,
           fontSize: theme.fontSizes.xs,
           whiteSpace: 'nowrap',
+          color: '#1e293b',
         })}
       >
         {children}
@@ -119,12 +121,13 @@ export function MarkdownRenderer({ content, size = 'sm' }: Props) {
       <Box
         component="td"
         style={(theme) => ({
-          border: `1px solid ${theme.colors.dark[4]}`,
+          border: '1px solid #e2e8f0',
           padding: `${theme.spacing.xs} ${theme.spacing.sm}`,
           fontSize: theme.fontSizes[size],
           verticalAlign: 'top',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
+          color: '#1e293b',
         })}
       >
         {children}
@@ -140,7 +143,7 @@ export function MarkdownRenderer({ content, size = 'sm' }: Props) {
             background-color: transparent;
           }
           .${tableClassName} tbody tr:nth-child(even) td {
-            background-color: rgba(255, 255, 255, 0.03);
+            background-color: #f8fafc;
           }
         `}
       </style>

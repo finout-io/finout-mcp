@@ -395,7 +395,7 @@ export function AppLayout() {
         navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: false } }}
         padding={0}
       >
-      <AppShell.Navbar p="md" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', backgroundColor: '#1a1f2e', borderRight: '1px solid rgba(255,255,255,0.1)' }}>
+      <AppShell.Navbar p="md" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', backgroundColor: '#1e2433', borderRight: '1px solid #2d3748' }}>
         <Sidebar
           accounts={session.accounts}
           selectedAccountId={session.selectedAccount?.accountId ?? null}
@@ -409,14 +409,14 @@ export function AppLayout() {
         />
       </AppShell.Navbar>
 
-      <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#f8f9fa' }}>
+      <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#f8fafc' }}>
         {/* Header */}
         <Group
           px="md"
           py="sm"
           justify="space-between"
           style={{
-            borderBottom: '1px solid #e9ecef',
+            borderBottom: '1px solid #e2e8f0',
             flexShrink: 0,
             backgroundColor: '#ffffff',
           }}
@@ -431,6 +431,7 @@ export function AppLayout() {
               <Button
                 size="xs"
                 variant="subtle"
+                color="#1570ef"
                 onClick={() => {
                   setToolsCategory('all')
                   setToolsOpen(true)
@@ -443,6 +444,7 @@ export function AppLayout() {
               <Button
                 size="xs"
                 variant="subtle"
+                color="#1570ef"
                 onClick={() => {
                   setUnseenEntries(whatsNewData.entries)
                   setWhatsNewOpen(true)
@@ -453,14 +455,14 @@ export function AppLayout() {
             )}
             {chat.messages.length > 0 && (
               <Tooltip label="Copy chat as Markdown">
-                <Button size="xs" variant="subtle" onClick={handleExport}>
+                <Button size="xs" variant="subtle" color="#1570ef" onClick={handleExport}>
                   📋 Export
                 </Button>
               </Tooltip>
             )}
             {shareToken && (
               <Tooltip label="Copy share link">
-                <Button size="xs" variant="subtle" onClick={handleCopyShareLink}>
+                <Button size="xs" variant="subtle" color="#1570ef" onClick={handleCopyShareLink}>
                   🔗 Share
                 </Button>
               </Tooltip>
@@ -470,6 +472,7 @@ export function AppLayout() {
               to="/manage"
               size="xs"
               variant="subtle"
+              color="#1570ef"
             >
               Manage
             </Button>
@@ -507,7 +510,7 @@ export function AppLayout() {
             py="sm"
             gap="xs"
             style={{
-              borderTop: '1px solid #e9ecef',
+              borderTop: '1px solid #e2e8f0',
               flexShrink: 0,
               backgroundColor: '#ffffff',
             }}

@@ -1,20 +1,17 @@
 import { useEffect, useRef } from 'react'
-import { Box, Center, Group, Text } from '@mantine/core'
+import { Box, Group, Text } from '@mantine/core'
 import { ChatMessage } from './ChatMessage'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { WelcomeScreen } from './WelcomeScreen'
 import type { Message, ModelId } from '../../types'
 
 function StreamingAssistantMessage({
-  model,
   statusMessage,
   streamingText,
 }: {
-  model: ModelId
   statusMessage: string | null
   streamingText: string
 }) {
-  const emoji = model.includes('haiku') ? '⚡' : model.includes('opus') ? '👑' : '🤖'
   const hasStream = streamingText.trim().length > 0
   const hasStatus = Boolean(statusMessage && statusMessage.trim().length > 0)
 
@@ -26,18 +23,13 @@ function StreamingAssistantMessage({
 
   return (
     <Group align="flex-start" gap="xs" mb="md">
-      <Center
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: '50%',
-          fontSize: 18,
-          flexShrink: 0,
-          backgroundColor: '#f1f3f5',
-        }}
-      >
-        {emoji}
-      </Center>
+      <img
+        src="/billy-avatar.png"
+        alt="Billy"
+        width={36}
+        height={36}
+        style={{ flexShrink: 0 }}
+      />
       <Box
         style={(theme) => ({
           maxWidth: '75%',
@@ -45,9 +37,9 @@ function StreamingAssistantMessage({
           padding: `${theme.spacing.sm} ${theme.spacing.md}`,
           borderRadius: theme.radius.lg,
           backgroundColor: '#ffffff',
-          color: '#1a1f2e',
-          border: '1px solid #e9ecef',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+          color: '#1e293b',
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
         })}
       >
         <MarkdownRenderer content={text} size="sm" />
@@ -148,7 +140,6 @@ export function ChatArea({
           ))}
           {isSending && (
             <StreamingAssistantMessage
-              model={model}
               statusMessage={statusMessage}
               streamingText={streamingText}
             />

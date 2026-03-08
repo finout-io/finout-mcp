@@ -8,7 +8,7 @@ const COLORS = [
   '#56B6C2', '#D19A66',
 ]
 
-const labelStyle = { color: '#C1C2C5', fontSize: '11px' }
+const labelStyle = { color: '#64748b', fontSize: '12px' }
 
 interface ChartSeries {
   name: string
@@ -174,7 +174,7 @@ function buildOptions(chart: RenderChartData): Highcharts.Options {
       chart: { type: 'pie', height: 320, backgroundColor: 'transparent' },
       colors: palette,
       credits: { enabled: false },
-      title: { text: title, style: { color: '#C1C2C5', fontSize: '13px' } },
+      title: { text: title, style: { color: '#475569', fontSize: '13px' } },
       tooltip: {
         formatter: function (this: Highcharts.Point): string {
           const pct = ((this as unknown as { percentage?: number }).percentage ?? 0).toFixed(1)
@@ -187,13 +187,13 @@ function buildOptions(chart: RenderChartData): Highcharts.Options {
           dataLabels: {
             enabled: points.length <= 8,
             format: '{point.name}: {point.percentage:.1f}%',
-            style: { color: '#C1C2C5', fontSize: '10px', textOutline: 'none' },
+            style: { color: '#475569', fontSize: '10px', textOutline: 'none' },
             distance: 15,
           },
           showInLegend: points.length > 8,
         },
       },
-      legend: { itemStyle: { color: '#C1C2C5', fontSize: '11px' } },
+      legend: { itemStyle: { color: '#475569', fontSize: '11px' } },
       series: [{ type: 'pie', name: series[0]?.name ?? 'Cost', data: points }],
     }
   }
@@ -211,7 +211,7 @@ function buildOptions(chart: RenderChartData): Highcharts.Options {
 
     const lineYAxis: Highcharts.YAxisOptions | Highcharts.YAxisOptions[] = hasMultiAxis
       ? y_axes.map((axis, idx) => ({
-          gridLineColor: '#373A40',
+          gridLineColor: '#e2e8f0',
           labels: {
             style: labelStyle,
             formatter: function (this: Highcharts.AxisLabelsFormatterContextObject): string {
@@ -219,36 +219,36 @@ function buildOptions(chart: RenderChartData): Highcharts.Options {
               return formatValue(Number(this.value), isCostLikeLabel(axisLabel))
             },
           },
-          title: { text: axis.label, style: { color: '#C1C2C5' } },
+          title: { text: axis.label, style: { color: '#475569' } },
           opposite: axis.opposite ?? false,
           min: axis.min,
           max: axis.max,
         }))
       : {
-          gridLineColor: '#373A40',
+          gridLineColor: '#e2e8f0',
           labels: {
             style: labelStyle,
             formatter: function (this: Highcharts.AxisLabelsFormatterContextObject): string {
               return formatValue(Number(this.value), currencyLike)
             },
           },
-          title: { text: yTitle, style: { color: '#C1C2C5' } },
+          title: { text: yTitle, style: { color: '#475569' } },
         }
 
     return {
       chart: { type: 'line', height: 280, backgroundColor: 'transparent' },
       colors: palette,
       credits: { enabled: false },
-      title: { text: title, style: { color: '#C1C2C5', fontSize: '13px' } },
+      title: { text: title, style: { color: '#475569', fontSize: '13px' } },
       xAxis: {
         categories,
         labels: { style: labelStyle, rotation: -45 },
-        lineColor: '#373A40',
-        tickColor: '#373A40',
-        title: x_label ? { text: x_label, style: { color: '#C1C2C5' } } : undefined,
+        lineColor: '#e2e8f0',
+        tickColor: '#e2e8f0',
+        title: x_label ? { text: x_label, style: { color: '#475569' } } : undefined,
       },
       yAxis: lineYAxis,
-      legend: { itemStyle: { color: '#C1C2C5' } },
+      legend: { itemStyle: { color: '#475569' } },
       tooltip: {
         formatter: function (this: Highcharts.Point): string {
           const axisRef = this.series.options.yAxis
@@ -274,29 +274,29 @@ function buildOptions(chart: RenderChartData): Highcharts.Options {
     chart: { type: hcType, height: 280, backgroundColor: 'transparent' },
     colors: palette,
     credits: { enabled: false },
-    title: { text: title, style: { color: '#C1C2C5', fontSize: '13px' } },
+    title: { text: title, style: { color: '#475569', fontSize: '13px' } },
     xAxis: {
       categories,
       labels: { style: labelStyle },
-      lineColor: '#373A40',
-      tickColor: '#373A40',
-      title: x_label ? { text: x_label, style: { color: '#C1C2C5' } } : undefined,
+      lineColor: '#e2e8f0',
+      tickColor: '#e2e8f0',
+      title: x_label ? { text: x_label, style: { color: '#475569' } } : undefined,
     },
     yAxis: {
-      gridLineColor: '#373A40',
+      gridLineColor: '#e2e8f0',
       labels: {
         style: labelStyle,
         formatter: function (this: Highcharts.AxisLabelsFormatterContextObject): string {
           return formatValue(Number(this.value), currencyLike)
         },
       },
-      title: { text: yTitle, style: { color: '#C1C2C5' } },
+      title: { text: yTitle, style: { color: '#475569' } },
     },
     plotOptions: {
       bar: { colorByPoint: series.length === 1 },
       column: { colorByPoint: series.length === 1 },
     },
-    legend: { itemStyle: { color: '#C1C2C5' }, enabled: series.length > 1 },
+    legend: { itemStyle: { color: '#475569' }, enabled: series.length > 1 },
     tooltip: {
       formatter: function (this: Highcharts.Point): string {
         return `<b>${this.series.name}</b>: ${formatValue(this.y ?? 0, currencyLike)}`
@@ -315,7 +315,7 @@ export function ChartPanel({ output }: { output: unknown }) {
       withBorder
       mt="sm"
       p="xs"
-      style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid #373A40' }}
+      style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}
     >
       <HighchartsReact highcharts={Highcharts} options={options} />
     </Card>

@@ -36,7 +36,7 @@ export function ToolCallCard({ toolCall, index }: Props) {
   return (
     <Box
       style={(theme) => ({
-        border: `1px solid ${hasError ? theme.colors.red[5] : theme.colors.gray[3]}`,
+        border: `1px solid ${hasError ? theme.colors.red[5] : '#e2e8f0'}`,
         borderRadius: theme.radius.md,
         overflow: 'hidden',
         marginTop: theme.spacing.xs,

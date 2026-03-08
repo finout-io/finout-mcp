@@ -2,7 +2,24 @@ import { useEffect, useRef, useState } from 'react'
 import { ActionIcon, Box, Card, Group, Text } from '@mantine/core'
 import mermaid from 'mermaid'
 
-mermaid.initialize({ startOnLoad: false, theme: 'dark' })
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'base',
+  themeVariables: {
+    lineColor: '#94a3b8',
+    primaryColor: '#e0f2fe',
+    primaryTextColor: '#1e293b',
+    primaryBorderColor: '#94a3b8',
+    secondaryColor: '#f0fdf4',
+    secondaryTextColor: '#1e293b',
+    secondaryBorderColor: '#94a3b8',
+    tertiaryColor: '#fef3c7',
+    tertiaryTextColor: '#1e293b',
+    tertiaryBorderColor: '#94a3b8',
+    edgeLabelBackground: '#ffffff',
+    fontSize: '14px',
+  },
+})
 
 interface Transform { x: number; y: number; scale: number }
 
@@ -44,6 +61,10 @@ export function MermaidPanel({ output }: { output: unknown }) {
         svg.setAttribute('width', '100%')
         svg.style.maxWidth = 'none'
         svg.style.display = 'block'
+        // Thicken lines for better visibility
+        svg.querySelectorAll('.flowchart-link, .edge-pattern-solid, path.path').forEach((path) => {
+          ;(path as SVGElement).style.strokeWidth = '2px'
+        })
       })
       .catch(() => {}) // element may be detached before async render completes
     setTf({ x: 0, y: 0, scale: 1 })
@@ -55,7 +76,7 @@ export function MermaidPanel({ output }: { output: unknown }) {
   return (
     <Card
       withBorder mt="sm" p="xs"
-      style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid #373A40' }}
+      style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}
     >
       <Group justify="flex-end" mb={4} gap="xs">
         <Text size="xs" c="dimmed" style={{ opacity: 0.5 }}>scroll to zoom · drag to pan</Text>

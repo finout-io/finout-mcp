@@ -7,7 +7,7 @@ const finoutBlue: MantineColorsTuple = [
   '#93c5fd',
   '#60a5fa',
   '#3b82f6',
-  '#2563eb',
+  '#1570ef',
   '#1d4ed8',
   '#1e40af',
   '#1e3a8a',
@@ -34,6 +34,13 @@ export const theme = createTheme({
   },
   defaultRadius: 'md',
   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  fontSizes: {
+    xs: '13px',
+    sm: '14.5px',
+    md: '16px',
+    lg: '18px',
+    xl: '20px',
+  },
   components: {
     Button: {
       defaultProps: {
@@ -57,8 +64,8 @@ export const theme = createTheme({
       styles: {
         root: {
           backgroundColor: '#ffffff',
-          border: '1px solid #e9ecef',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
         },
       },
     },

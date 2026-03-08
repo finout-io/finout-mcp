@@ -5,13 +5,6 @@ import { MermaidPanel } from './MermaidPanel'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import type { Message } from '../../types'
 
-function modelEmoji(model?: string): string {
-  if (!model) return '🤖'
-  if (model.includes('haiku')) return '⚡'
-  if (model.includes('opus')) return '👑'
-  return '🤖'
-}
-
 function modelLabel(model?: string): string {
   if (!model) return 'Assistant'
   if (model.includes('haiku')) return 'Haiku 4.5'
@@ -26,7 +19,7 @@ interface Props {
 export function ChatMessage({ message }: Props) {
   const isUser = message.role === 'user'
 
-  const avatar = (
+  const avatar = isUser ? (
     <Center
       style={(theme) => ({
         width: 36,
@@ -34,11 +27,19 @@ export function ChatMessage({ message }: Props) {
         borderRadius: '50%',
         fontSize: 18,
         flexShrink: 0,
-        backgroundColor: isUser ? theme.colors.finoutBlue[6] : '#f1f3f5',
+        backgroundColor: theme.colors.finoutBlue[6],
       })}
     >
-      {isUser ? '👤' : modelEmoji(message.model)}
+      {'👤'}
     </Center>
+  ) : (
+    <img
+      src="/billy-avatar.png"
+      alt="Billy"
+      width={36}
+      height={36}
+      style={{ flexShrink: 0 }}
+    />
   )
 
   return (
@@ -55,9 +56,9 @@ export function ChatMessage({ message }: Props) {
           padding: `${theme.spacing.sm} ${theme.spacing.md}`,
           borderRadius: theme.radius.lg,
           backgroundColor: isUser ? theme.colors.finoutBlue[6] : '#ffffff',
-          color: isUser ? '#ffffff' : '#1a1f2e',
-          border: isUser ? 'none' : '1px solid #e9ecef',
-          boxShadow: isUser ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
+          color: isUser ? '#ffffff' : '#1e293b',
+          border: isUser ? 'none' : '1px solid #e2e8f0',
+          boxShadow: isUser ? 'none' : '0 1px 3px rgba(0,0,0,0.08)',
         })}
       >
         <Stack gap="xs">
@@ -75,7 +76,7 @@ export function ChatMessage({ message }: Props) {
               style={(theme) => ({
                 fontSize: theme.fontSizes.xs,
                 color: theme.colors.gray[6],
-                border: `1px solid ${theme.colors.gray[3]}`,
+                border: '1px solid #e2e8f0',
                 borderRadius: theme.radius.sm,
                 padding: `${theme.spacing.xs} ${theme.spacing.sm}`,
               })}
@@ -135,10 +136,10 @@ export function ChatMessage({ message }: Props) {
               mt={4}
               p="xs"
               style={(theme) => ({
-                background: theme.colors.gray[0],
+                background: '#f8fafc',
                 borderRadius: theme.radius.sm,
                 flexWrap: 'wrap',
-                border: `1px solid ${theme.colors.gray[2]}`,
+                border: '1px solid #e2e8f0',
               })}
             >
               <Text size="xs" fw={600} c="dimmed">
