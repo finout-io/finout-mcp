@@ -782,8 +782,11 @@ class TestToolDescriptions:
 
 class TestAutoGranularity:
     def test_week_periods_return_weekly(self):
-        for p in ("last_7_days", "this_week", "last_week", "two_weeks_ago"):
+        for p in ("this_week", "last_week", "two_weeks_ago"):
             assert _auto_granularity(p) == "weekly"
+
+    def test_last_7_days_returns_daily(self):
+        assert _auto_granularity("last_7_days") == "daily"
 
     def test_month_periods_return_monthly(self):
         for p in ("this_month", "last_month", "month_to_date"):

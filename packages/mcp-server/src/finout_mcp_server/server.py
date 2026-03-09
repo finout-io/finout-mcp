@@ -102,7 +102,6 @@ KEY_SECRET_TOOLS: set[str] = {
 def _auto_granularity(time_period: str) -> str:
     """Choose the coarsest time bucket that fits the period exactly."""
     if time_period in (
-        "last_7_days",
         "this_week",
         "last_week",
         "two_weeks_ago",
