@@ -257,6 +257,9 @@ uv run python scripts/release_minor_with_changelog.py \
 - Repeat `--external`, `--internal`, `--billy` flags as needed for multiple items
 - Use `"No changes"` for categories with no updates
 - The script bumps the Billy minor version and prepends the entry to `changelog.py`
+- **Entries must be customer-facing** — describe what users can now do, not how it works internally.
+  ❌ "Switch dependency detection from static analysis to runtime inference"
+  ✅ "Cost breakdowns now detect shared dependencies automatically"
 
 ---
 

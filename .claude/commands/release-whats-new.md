@@ -13,6 +13,11 @@ Use this skill when packaging a new Billy version with changelog updates.
    - External MCP
    - Internal MCP
    - Billy
+
+   **Changelog entries must be customer-facing and functionality-focused.**
+   Describe what users can now do or what changed in behavior — not how it was implemented.
+   ❌ "Switch dependency detection from static analysis to runtime inference"
+   ✅ "Cost breakdowns now detect shared dependencies automatically"
 3. Run:
 
 ```bash
