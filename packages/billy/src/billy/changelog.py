@@ -19,6 +19,22 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.16.0",
+        "date": "2026-03-11",
+        "title": "Improve dependency detection for virtual tag usages",
+        "sections": {
+            "external_mcp": [
+                "get_object_usages and check_delete_safety now detect financial plan references via structured pattern matching (default.value.key, filter costCenter:virtualTag) and transitive virtual tag dependency chains"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
         "version": "0.15.0",
         "date": "2026-03-08",
         "title": "Personalized welcome screen and user memories",

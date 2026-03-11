@@ -355,6 +355,29 @@ class FinoutClient:
         result.sort(key=lambda x: x["cost_impact"], reverse=True)
         return result
 
+    async def get_financial_plans_raw(self) -> list[dict[str, Any]]:
+        """
+        Fetch raw financial plan objects for dependency analysis.
+
+        Returns full plan structures (including components, filters, originId)
+        without budget/forecast summarisation. Used by the dependency graph tool.
+        """
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured.")
+
+        headers = self._get_internal_headers()
+        if self.internal_auth_mode == InternalAuthMode.AUTHORIZED_HEADERS:
+            headers["authorized-user-permissions"] = "fin.financial-plans.view.financial-plans"
+
+        response = await self.internal_client.get(
+            "/budgets-service/financial-plan",
+            headers=headers,
+        )
+        response.raise_for_status()
+
+        plans = response.json()
+        return plans if isinstance(plans, list) else []
+
     async def get_financial_plans(
         self,
         name: str | None = None,
