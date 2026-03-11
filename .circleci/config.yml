@@ -3,7 +3,6 @@ version: 2.1
 orbs:
   aws-cli: circleci/aws-cli@5.3.2
   aws-ecr: circleci/aws-ecr@9.5.1
-  aws-eks: circleci/aws-eks@2.2.0
   node: circleci/node@5.3.0
 
 executors:
@@ -168,15 +167,25 @@ jobs:
     circleci_ip_ranges: true
     steps:
       - checkout
-      - aws-eks/update-kubeconfig-with-authenticator:
-          cluster-name: ${EKS_CLUSTER_NAME}
-          cluster-authentication-role-arn: arn:aws:iam::277411487094:role/k8sAdmin
-          aws-region: ${AWS_DEFAULT_REGION}
+      - aws-cli/setup:
+          region: ${AWS_DEFAULT_REGION}
       - run:
           name: Install kubectl
           command: |
             curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
             sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      - run:
+          name: Configure kubeconfig for Billy deployment
+          command: |
+            if [ -z "${EKS_CLUSTER_NAME:-}" ]; then
+              echo "EKS_CLUSTER_NAME is required"
+              exit 1
+            fi
+
+            aws eks update-kubeconfig \
+              --name "${EKS_CLUSTER_NAME}" \
+              --region "${AWS_DEFAULT_REGION}" \
+              --role-arn arn:aws:iam::277411487094:role/k8sAdmin
       - run:
           name: Deploy Billy production image
           command: |
