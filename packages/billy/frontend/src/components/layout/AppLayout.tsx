@@ -42,6 +42,13 @@ const CHANGELOG_SECTION_LABELS: Record<keyof WhatsNewEntry['sections'], string> 
   billy: 'Billy',
 }
 
+function createConversationId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `conv-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 function LoginScreen({ onLogin }: { onLogin: (name: string, email: string) => void }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -95,14 +102,14 @@ export function AppLayout() {
 
   const [model, setModel] = useState<ModelId>(MODEL_OPTIONS[1]!.value)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(isEmbedded)
-  const [activeConversationId, setActiveConversationId] = useState<string | undefined>()
+  const [activeConversationId, setActiveConversationId] = useState<string>(() => createConversationId())
   const [shareToken, setShareToken] = useState<string | undefined>()
   const [whatsNewOpen, setWhatsNewOpen] = useState(false)
   const [unseenEntries, setUnseenEntries] = useState<WhatsNewEntry[]>([])
   const [toolsOpen, setToolsOpen] = useState(false)
   const [toolsCategory, setToolsCategory] = useState<string>('all')
   // Ref so the auto-save effect always reads the latest ID without becoming a dep
-  const activeConversationIdRef = useRef<string | undefined>(undefined)
+  const activeConversationIdRef = useRef<string | undefined>(activeConversationId)
   const lastAccountIdRef = useRef<string | null>(null)
   const initializedWhatsNewRef = useRef(false)
 
@@ -129,7 +136,7 @@ export function AppLayout() {
     lastAccountIdRef.current = accountId
 
     chat.clearMessages()
-    setActiveConversationId(undefined)
+    setActiveConversationId(createConversationId())
     setShareToken(undefined)
   }, [accountId, chat])
 
@@ -203,9 +210,14 @@ export function AppLayout() {
 
   const handleNewConversation = useCallback(() => {
     chat.clearMessages()
-    setActiveConversationId(undefined)
+    setActiveConversationId(createConversationId())
     setShareToken(undefined)
   }, [chat])
+
+  const handleSendMessage = useCallback(
+    (content: string, nextModel: ModelId) => chat.sendMessage(content, nextModel, activeConversationIdRef.current),
+    [chat],
+  )
 
   const handleCopyShareLink = useCallback(() => {
     if (!shareToken) return
@@ -515,7 +527,7 @@ export function AppLayout() {
             isSending={chat.isSending}
             statusMessage={chat.statusMessage}
             streamingText={chat.streamingText}
-            onSuggestedQuestion={chat.sendMessage}
+            onSuggestedQuestion={handleSendMessage}
             model={model}
             sessionReady={session.isReady}
             accountId={accountId}
@@ -533,7 +545,7 @@ export function AppLayout() {
             }}
           >
             <ChatInput
-              onSend={chat.sendMessage}
+              onSend={handleSendMessage}
               model={model}
               disabled={!session.isReady}
               loading={chat.isSending}

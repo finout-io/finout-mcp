@@ -8,7 +8,7 @@ export interface ChatState {
   isSending: boolean
   statusMessage: string | null
   streamingText: string
-  sendMessage: (content: string, model: ModelId) => Promise<void>
+  sendMessage: (content: string, model: ModelId, conversationId?: string) => Promise<void>
   clearMessages: () => void
   setMessages: (messages: Message[]) => void
 }
@@ -20,7 +20,7 @@ export function useChat(accountId: string | null, userEmail?: string): ChatState
   const [streamingText, setStreamingText] = useState('')
 
   const send = useCallback(
-    async (content: string, model: ModelId) => {
+    async (content: string, model: ModelId, conversationId?: string) => {
       if (isSending) return
 
       const userMessage: Message = { role: 'user', content }
@@ -37,11 +37,12 @@ export function useChat(accountId: string | null, userEmail?: string): ChatState
       try {
         await sendMessageStream(
           {
-          message: content,
-          conversation_history: messages,
-          model,
-          account_id: accountId ?? undefined,
-          user_email: userEmail,
+            message: content,
+            conversation_history: messages,
+            model,
+            account_id: accountId ?? undefined,
+            user_email: userEmail,
+            conversation_id: conversationId,
           },
           {
             onStatus: (status) => {

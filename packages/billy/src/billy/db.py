@@ -4,6 +4,7 @@ import os
 import json
 from typing import Optional, List, Dict, Any
 import secrets
+from uuid import UUID, uuid4
 
 # Database connection URL
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://fobo:fobo@localhost:5432/billy")
@@ -179,8 +180,6 @@ class Database:
         user_email: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Insert a new conversation or update an existing one by ID."""
-        import uuid
-
         async with self.pool.acquire() as conn:
             if conversation_id:
                 row = await conn.fetchrow(
@@ -211,7 +210,7 @@ class Database:
                 VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
                 RETURNING id, name, account_id, model, created_at, share_token
                 """,
-                uuid.uuid4(),
+                UUID(conversation_id) if conversation_id else uuid4(),
                 name,
                 account_id,
                 model,

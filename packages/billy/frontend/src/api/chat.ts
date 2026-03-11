@@ -7,6 +7,7 @@ export interface SendMessageParams {
   model: string
   account_id?: string
   user_email?: string
+  conversation_id?: string
 }
 
 export interface ChatStatusEvent {
@@ -55,6 +56,7 @@ export async function sendMessage(params: SendMessageParams): Promise<ChatRespon
         model: params.model,
         account_id: params.account_id,
         user_email: params.user_email,
+        conversation_id: params.conversation_id,
       }),
     })
   } catch (err) {
@@ -90,6 +92,7 @@ export async function sendMessageStream(
         model: params.model,
         account_id: params.account_id,
         user_email: params.user_email,
+        conversation_id: params.conversation_id,
       }),
     })
 

@@ -77,6 +77,7 @@ class ChatRequest(BaseModel):
     account_id: Optional[str] = None
     model: Optional[str] = "claude-sonnet-4-5-20250929"  # Model to use for this request
     user_email: Optional[str] = None
+    conversation_id: Optional[str] = None
 
 
 class MCPBridge:
@@ -719,16 +720,28 @@ async def _run_chat_pipeline_traced(
     token_callback: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Dict[str, Any]:
     account_id = session_mcp.current_account_id or ""
+    session_id = request.conversation_id or str(uuid4())
     with _langfuse.start_as_current_span(
         name="chat_pipeline",
-        input={"message": request.message, "model": request.model, "account_id": account_id},
+        input={
+            "message": request.message,
+            "model": request.model,
+            "account_id": account_id,
+            "conversation_id": session_id,
+        },
     ) as span:
-        _langfuse.update_current_trace(
-            session_id=account_id,
-            user_id=request.user_email or account_id,
-            tags=[request.model],
-            metadata={"conversation_length": len(request.conversation_history)},
-        )
+        trace_kwargs: Dict[str, Any] = {
+            "session_id": session_id,
+            "tags": [request.model],
+            "metadata": {
+                "account_id": account_id,
+                "conversation_id": session_id,
+                "conversation_length": len(request.conversation_history),
+            },
+        }
+        if request.user_email:
+            trace_kwargs["user_id"] = request.user_email
+        _langfuse.update_current_trace(**trace_kwargs)
         result = await _run_chat_pipeline_inner(
             request, session_mcp, status_callback, token_callback
         )
