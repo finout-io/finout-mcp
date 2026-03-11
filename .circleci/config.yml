@@ -149,6 +149,49 @@ jobs:
           source_tag: "${CIRCLE_SHA1:0:7}"
           target_tag: "latest"
 
+  tag_billy_production:
+    docker:
+      - image: cimg/aws:2022.06.1
+    steps:
+      - aws-cli/setup:
+          region: ${AWS_DEFAULT_REGION}
+      - aws-ecr/ecr_login
+      - aws-ecr/tag_image:
+          repo: billy
+          source_tag: "${CIRCLE_SHA1:0:7}"
+          target_tag: "production"
+
+  deploy_billy_production:
+    docker:
+      - image: cimg/aws:2022.06.1
+    steps:
+      - aws-cli/setup:
+          region: ${AWS_DEFAULT_REGION}
+      - run:
+          name: Install kubectl
+          command: |
+            KUBECTL_VERSION="$(curl -L -s https://dl.k8s.io/release/stable.txt)"
+            curl -L --fail --output kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            sudo mv kubectl /usr/local/bin/kubectl
+      - run:
+          name: Configure kubeconfig
+          command: |
+            aws eks update-kubeconfig \
+              --name "${EKS_CLUSTER_NAME}" \
+              --region "${AWS_DEFAULT_REGION}"
+      - run:
+          name: Deploy Billy production image
+          command: |
+            NAMESPACE="${BILLY_K8S_NAMESPACE:-billy}"
+            DEPLOYMENT="${BILLY_K8S_DEPLOYMENT:-billy}"
+            ACCOUNT_ID="${AWS_ACCOUNT_ID}"
+            REGION="${AWS_DEFAULT_REGION}"
+            IMAGE="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/billy:production"
+
+            kubectl -n "${NAMESPACE}" set image deployment/"${DEPLOYMENT}" billy="${IMAGE}"
+            kubectl -n "${NAMESPACE}" rollout status deployment/"${DEPLOYMENT}" --timeout=5m
+
   tag_hosted_public_latest:
     docker:
       - image: cimg/aws:2022.06.1
@@ -207,6 +250,20 @@ workflows:
           context: finout
           requires:
             - build_and_push_billy_image
+          filters:
+            branches:
+              only: main
+      - tag_billy_production:
+          context: finout
+          requires:
+            - build_and_push_billy_image
+          filters:
+            branches:
+              only: main
+      - deploy_billy_production:
+          context: finout
+          requires:
+            - tag_billy_production
           filters:
             branches:
               only: main

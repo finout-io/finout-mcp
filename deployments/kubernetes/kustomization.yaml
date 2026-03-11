@@ -30,7 +30,7 @@ commonLabels:
 images:
 - name: 277411487094.dkr.ecr.us-east-1.amazonaws.com/billy
   newName: 277411487094.dkr.ecr.us-east-1.amazonaws.com/billy
-  newTag: latest
+  newTag: production
 
 # ConfigMap generator (alternative to separate file)
 # configMapGenerator:

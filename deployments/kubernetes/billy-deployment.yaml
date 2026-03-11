@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: billy
-        image: 277411487094.dkr.ecr.us-east-1.amazonaws.com/billy:latest
+        image: 277411487094.dkr.ecr.us-east-1.amazonaws.com/billy:production
         imagePullPolicy: Always
         command:
         - uvicorn
