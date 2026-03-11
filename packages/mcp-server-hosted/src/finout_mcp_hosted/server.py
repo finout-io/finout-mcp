@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import anyio
-import jwt
+from dotenv import load_dotenv
 from mcp.server.streamable_http import StreamableHTTPServerTransport
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
@@ -26,10 +26,12 @@ from starlette.routing import Route
 
 import finout_mcp_server.server as server_module
 
-from .auth import _get_login_cookie_public_key, _get_public_key, authenticate_password, check_sso, check_sso_debug, exchange_sso_code, frontegg_base_url, verify_cookie_jwt, verify_login_jwt
-from .oauth import consume_auth_code, consume_sso_flow, create_sso_flow, generate_auth_code, pkce_challenge
+from .auth import _get_login_cookie_public_key, _get_public_key, check_sso, check_sso_debug, frontegg_base_url, verify_cookie_jwt, verify_login_jwt
+from .oauth import consume_auth_code, generate_auth_code
 from finout_mcp_server.finout_client import FinoutClient, InternalAuthMode
 from finout_mcp_server.server import MCPMode, server
+
+load_dotenv(override=True)
 
 
 @asynccontextmanager
@@ -214,98 +216,150 @@ def _extract_public_auth_from_scope(scope: Any) -> tuple[str, str, str]:
     return client_id, secret_key, api_url
 
 
-_LOGIN_FORM_HTML = """\
+_EMBEDDED_LOGIN_HTML = """\
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Finout — Sign in</title>
+  <script src="https://cdn.jsdelivr.net/npm/@frontegg/js@latest/umd/frontegg.production.min.js"></script>
   <style>
     *,*::before,*::after{{box-sizing:border-box}}
     body{{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-      background:#f5f7fa;display:flex;align-items:center;justify-content:center;min-height:100vh}}
-    .card{{background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.08);
-      padding:40px;width:100%;max-width:420px}}
-    .logo{{font-size:24px;font-weight:700;color:#1a1a2e;margin-bottom:8px}}
-    .subtitle{{color:#6b7280;font-size:14px;margin-bottom:32px}}
-    label{{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}}
-    input[type=email],input[type=password]{{width:100%;padding:10px 14px;border:1px solid #d1d5db;
-      border-radius:8px;font-size:15px;outline:none;transition:border-color .15s}}
-    input:focus{{border-color:#4f46e5}}
-    .field{{margin-bottom:20px}}
-    button{{width:100%;padding:11px;border-radius:8px;font-size:15px;font-weight:600;
-      cursor:pointer;transition:background .15s;border:none}}
-    .btn-primary{{background:#4f46e5;color:#fff}}
-    .btn-primary:hover{{background:#4338ca}}
-    .btn-sso{{background:#fff;color:#4f46e5;border:1px solid #4f46e5 !important;margin-top:10px}}
-    .btn-sso:hover{{background:#eef2ff}}
-    .divider{{display:flex;align-items:center;gap:12px;margin:20px 0}}
-    .divider::before,.divider::after{{content:'';flex:1;height:1px;background:#e5e7eb}}
-    .divider span{{color:#9ca3af;font-size:13px;white-space:nowrap}}
-    .error{{background:#fef2f2;border:1px solid #fecaca;color:#dc2626;border-radius:8px;
-      padding:10px 14px;font-size:14px;margin-bottom:20px}}
+      background:#f5f7fa;display:flex;align-items:center;justify-content:center;
+      min-height:100vh;flex-direction:column}}
+    #frontegg-login-box{{width:100%;max-width:480px}}
   </style>
 </head>
 <body>
-<div class="card">
-  <div class="logo">Finout</div>
-  <div class="subtitle">Sign in to connect your MCP client</div>
-  {error_html}
-  <form method="post" action="/authorize">
-    <input type="hidden" name="redirect_uri" value="{redirect_uri}">
-    <input type="hidden" name="code_challenge" value="{code_challenge}">
-    <input type="hidden" name="code_challenge_method" value="{code_challenge_method}">
-    <input type="hidden" name="state" value="{state}">
-    <input type="hidden" name="client_id" value="{client_id}">
-    <div class="field">
-      <label for="email">Email</label>
-      <input type="email" id="email" name="email" required autofocus value="{email}">
-    </div>
-    <div class="field">
-      <label for="password">Password</label>
-      <input type="password" id="password" name="password">
-    </div>
-    <button type="submit" class="btn-primary">Sign in</button>
-    {sso_button}
-  </form>
-</div>
+  <div id="frontegg-login-box"></div>
+  <script>
+    (function() {{
+      // Params may be embedded (first load) or restored from sessionStorage (post-redirect).
+      var embedded = {{
+        redirect_uri: "{redirect_uri}",
+        code_challenge: "{code_challenge}",
+        state: "{state}"
+      }};
+
+      var OAUTH_PARAMS;
+      if (embedded.redirect_uri) {{
+        // First load: save to sessionStorage to survive post-login redirect.
+        OAUTH_PARAMS = embedded;
+        sessionStorage.setItem("mcp_oauth_params", JSON.stringify(OAUTH_PARAMS));
+      }} else {{
+        // Post-redirect load: restore from sessionStorage.
+        var saved = sessionStorage.getItem("mcp_oauth_params");
+        if (saved) {{
+          try {{ OAUTH_PARAMS = JSON.parse(saved); }} catch (e) {{}}
+        }}
+      }}
+
+      if (!OAUTH_PARAMS || !OAUTH_PARAMS.redirect_uri) {{
+        document.body.innerHTML = "<p style='padding:2rem'>OAuth session expired. Please return to your MCP client and try again.</p>";
+        return;
+      }}
+
+      var app = Frontegg.initialize({{
+        contextOptions: {{
+          baseUrl: "{frontegg_base_url}",
+          clientId: "{frontegg_client_id}",
+          // Point post-login redirect back to this server, not the Frontegg portal app URL.
+          appUrl: window.location.origin
+        }},
+        hostedLoginBox: false
+      }});
+
+      var handled = false;
+
+      function completeOAuth(accessToken) {{
+        if (handled) return;
+        handled = true;
+        sessionStorage.removeItem("mcp_oauth_params");
+        var form = document.createElement("form");
+        form.method = "POST";
+        form.action = "/authorize";
+        form.style.display = "none";
+        var fields = {{
+          access_token: accessToken,
+          redirect_uri: OAUTH_PARAMS.redirect_uri,
+          code_challenge: OAUTH_PARAMS.code_challenge,
+          state: OAUTH_PARAMS.state
+        }};
+        for (var key in fields) {{
+          var input = document.createElement("input");
+          input.type = "hidden";
+          input.name = key;
+          input.value = fields[key] || "";
+          form.appendChild(input);
+        }}
+        document.body.appendChild(form);
+        form.submit();
+      }}
+
+      app.ready(function() {{
+        var s = app.store.getState();
+        if (s.auth.isAuthenticated && s.auth.user && s.auth.user.accessToken) {{
+          // Already authenticated (e.g. after post-login redirect back to this server).
+          completeOAuth(s.auth.user.accessToken);
+          return;
+        }}
+        // Navigate to /account/login so the SDK renders the login form.
+        history.pushState({{}}, "", "/account/login");
+      }});
+
+      app.store.subscribe(function() {{
+        if (handled) return;
+        var s = app.store.getState();
+        if (s.auth.isAuthenticated && s.auth.user && s.auth.user.accessToken) {{
+          completeOAuth(s.auth.user.accessToken);
+        }}
+      }});
+    }})();
+  </script>
 </body>
 </html>
 """
 
-_SSO_BUTTON_HTML = """\
-    <div class="divider"><span>or</span></div>
-    <button type="submit" name="sso" value="true" class="btn-sso">Sign in with SSO</button>"""
 
-
-def _render_login_form(
-    *,
-    redirect_uri: str,
-    code_challenge: str,
-    code_challenge_method: str,
-    state: str,
-    client_id: str,
-    error: str = "",
-    email: str = "",
+def _embedded_login_page(
+    redirect_uri: str = "",
+    code_challenge: str = "",
+    state: str = "",
 ) -> HTMLResponse:
-    error_html = f'<div class="error">{html.escape(error)}</div>' if error else ""
-    sso_button = _SSO_BUTTON_HTML if os.getenv("FRONTEGG_CLIENT_ID") else ""
-    body = _LOGIN_FORM_HTML.format(
-        error_html=error_html,
-        sso_button=sso_button,
+    """Render the Frontegg embedded login page.
+
+    Called both for the initial /authorize GET (params embedded in HTML) and for
+    post-login callback routes (empty params, restored from sessionStorage by JS).
+    """
+    fe_base_url = os.getenv("FRONTEGG_BASE_URL", "")
+    fe_client_id = os.getenv("FRONTEGG_MCP_CLIENT_ID", "")
+    if not fe_base_url or not fe_client_id:
+        return HTMLResponse(
+            "<p>Server misconfiguration: Frontegg not configured.</p>", status_code=500
+        )
+    body = _EMBEDDED_LOGIN_HTML.format(
         redirect_uri=html.escape(redirect_uri, quote=True),
         code_challenge=html.escape(code_challenge, quote=True),
-        code_challenge_method=html.escape(code_challenge_method, quote=True),
         state=html.escape(state, quote=True),
-        client_id=html.escape(client_id, quote=True),
-        email=html.escape(email, quote=True),
+        frontegg_base_url=html.escape(fe_base_url, quote=True),
+        frontegg_client_id=html.escape(fe_client_id, quote=True),
     )
     return HTMLResponse(body)
 
 
+async def oauth_login_callback(request: Request) -> Response:
+    """Handle Frontegg's post-login redirect (e.g. /account/login-callback).
+
+    After embedded login, Frontegg navigates to {appUrl}/account/login-callback.
+    We serve the same login page (no params) so the JS picks them up from sessionStorage.
+    """
+    return _embedded_login_page()
+
+
 async def oauth_authorize_get(request: Request) -> Response:
-    """Render Finout-branded login form for OAuth PKCE authorization."""
+    """Serve Frontegg embedded login for OAuth PKCE authorization."""
     params = request.query_params
     response_type = params.get("response_type", "")
     redirect_uri = params.get("redirect_uri", "")
@@ -317,136 +371,44 @@ async def oauth_authorize_get(request: Request) -> Response:
             status_code=400,
         )
 
-    # If the user already has a valid Finout session cookie (set by app.finout.io and
-    # sent automatically when the MCP server is on a *.finout.io subdomain), skip the
-    # login form entirely and complete the OAuth flow silently.
-    cookie_token = request.cookies.get("__fnt_dd_", "")
-    if cookie_token:
-        try:
-            verify_cookie_jwt(cookie_token)
-            state = params.get("state", "")
-            code = generate_auth_code(cookie_token, code_challenge, redirect_uri)
-            query: dict[str, str] = {"code": code}
-            if state:
-                query["state"] = state
-            return RedirectResponse(f"{redirect_uri}?{urlencode(query)}", status_code=302)
-        except Exception:
-            pass  # Cookie invalid/expired/unconfigured — fall through to login form
-
-    return _render_login_form(
+    return _embedded_login_page(
         redirect_uri=redirect_uri,
         code_challenge=code_challenge,
-        code_challenge_method=params.get("code_challenge_method", "S256"),
         state=params.get("state", ""),
-        client_id=params.get("client_id", ""),
     )
 
 
 async def oauth_authorize_post(request: Request) -> Response:
-    """Process login form submission: authenticate, generate auth code, redirect."""
+    """Complete OAuth after Frontegg embedded login.
+
+    Receives the Frontegg JWT from the client-side SDK, validates it,
+    generates an auth code, and redirects to the MCP client's redirect_uri.
+    """
     form = await request.form()
-    email = str(form.get("email", "")).strip()
-    password = str(form.get("password", "")).strip()
+    access_token = str(form.get("access_token", "")).strip()
     redirect_uri = str(form.get("redirect_uri", "")).strip()
     code_challenge = str(form.get("code_challenge", "")).strip()
-    code_challenge_method = str(form.get("code_challenge_method", "S256")).strip()
     state = str(form.get("state", "")).strip()
-    client_id = str(form.get("client_id", "")).strip()
 
-    def _form_error(msg: str) -> HTMLResponse:
-        return _render_login_form(
-            redirect_uri=redirect_uri,
-            code_challenge=code_challenge,
-            code_challenge_method=code_challenge_method,
-            state=state,
-            client_id=client_id,
-            error=msg,
-            email=email,
-        )
-
-    if not redirect_uri or not code_challenge:
-        return _form_error("Missing required OAuth parameters.")
-
-    sso_requested = str(form.get("sso", "")).strip() == "true"
-
-    if sso_requested:
-        frontegg_client_id = os.getenv("FRONTEGG_CLIENT_ID", "")
-        frontegg_base = frontegg_base_url()
-        if not frontegg_base or not frontegg_client_id:
-            return _form_error(
-                "SSO is not configured on this server. Contact your administrator."
-            )
-        nonce, code_verifier = create_sso_flow(redirect_uri, code_challenge, state)
-        base_url = os.getenv("MCP_BASE_URL", "").rstrip("/")
-        params = urlencode({
-            "response_type": "code",
-            "client_id": frontegg_client_id,
-            "redirect_uri": f"{base_url}/oauth/callback",
-            "code_challenge": pkce_challenge(code_verifier),
-            "code_challenge_method": "S256",
-            "state": nonce,
-            "login_hint": email,
-        })
-        return RedirectResponse(f"{frontegg_base}/oauth/authorize?{params}", status_code=302)
-
-    try:
-        token = await authenticate_password(email, password)
-    except ValueError as exc:
-        return _form_error(str(exc))
-    except Exception:
-        return _form_error("Authentication service unavailable. Please try again.")
-
-    code = generate_auth_code(token, code_challenge, redirect_uri)
-
-    query: dict[str, str] = {"code": code}
-    if state:
-        query["state"] = state
-    location = f"{redirect_uri}?{urlencode(query)}"
-    return RedirectResponse(location, status_code=302)
-
-
-async def oauth_sso_callback(request: Request) -> Response:
-    """Handle Frontegg's redirect after SSO authentication.
-
-    Frontegg redirects here after the user authenticates with their IdP.
-    We exchange the Frontegg code for a JWT, then redirect to the original
-    MCP client's redirect_uri with our own authorization code.
-    """
-    error = request.query_params.get("error", "")
-    if error:
-        desc = request.query_params.get("error_description", error)
-        return HTMLResponse(
-            f"<p>SSO authentication failed: {html.escape(desc)}</p>",
+    if not access_token or not redirect_uri or not code_challenge:
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": "Missing required parameters"},
             status_code=400,
         )
 
-    code = request.query_params.get("code", "")
-    nonce = request.query_params.get("state", "")
-
     try:
-        entry = consume_sso_flow(nonce)
-    except ValueError:
-        return JSONResponse({"error": "invalid_state"}, status_code=400)
-
-    base_url = os.getenv("MCP_BASE_URL", "").rstrip("/")
-    try:
-        jwt_token = await exchange_sso_code(
-            code=code,
-            code_verifier=entry.frontegg_code_verifier,
-            redirect_uri=f"{base_url}/oauth/callback",
-        )
-    except Exception as exc:
+        verify_login_jwt(access_token)
+    except Exception:
         return JSONResponse(
-            {"error": "sso_token_exchange_failed", "error_description": str(exc)},
-            status_code=502,
+            {"error": "invalid_token", "error_description": "Invalid or expired Frontegg token"},
+            status_code=401,
         )
 
-    auth_code = generate_auth_code(jwt_token, entry.original_code_challenge, entry.original_redirect_uri)
-    query: dict[str, str] = {"code": auth_code}
-    if entry.original_state:
-        query["state"] = entry.original_state
-    location = f"{entry.original_redirect_uri}?{urlencode(query)}"
-    return RedirectResponse(location, status_code=302)
+    code = generate_auth_code(access_token, code_challenge, redirect_uri)
+    query: dict[str, str] = {"code": code}
+    if state:
+        query["state"] = state
+    return RedirectResponse(f"{redirect_uri}?{urlencode(query)}", status_code=302)
 
 
 async def oauth_register(request: Request) -> JSONResponse:
@@ -742,7 +704,9 @@ app = Starlette(
         Route("/debug/verify-token", endpoint=debug_verify_token, methods=["GET"]),
         Route("/authorize", endpoint=oauth_authorize_get, methods=["GET"]),
         Route("/authorize", endpoint=oauth_authorize_post, methods=["POST"]),
-        Route("/oauth/callback", endpoint=oauth_sso_callback, methods=["GET"]),
+        # Frontegg redirects to {appUrl}/account/login-callback after embedded login.
+        Route("/account/login-callback", endpoint=oauth_login_callback, methods=["GET"]),
+        Route("/account/login", endpoint=oauth_login_callback, methods=["GET"]),
         Route("/register", endpoint=oauth_register, methods=["POST"]),
         Route("/token", endpoint=oauth_token, methods=["POST"]),
         Route(

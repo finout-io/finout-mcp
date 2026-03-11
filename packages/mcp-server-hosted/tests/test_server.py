@@ -1,7 +1,7 @@
 import base64
 import hashlib
 import importlib
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from starlette.testclient import TestClient
@@ -130,9 +130,10 @@ def test_mcp_get_with_invalid_bearer_is_unauthorized():
 # ── /authorize ────────────────────────────────────────────────────────────────
 
 
-def test_authorize_get_returns_login_form(monkeypatch):
+def test_authorize_get_returns_embedded_login_page(monkeypatch):
     module = importlib.import_module("finout_mcp_hosted.server")
-    monkeypatch.delenv("FRONTEGG_CLIENT_ID", raising=False)
+    monkeypatch.setenv("FRONTEGG_BASE_URL", "https://app-abc.frontegg.com")
+    monkeypatch.setenv("FRONTEGG_MCP_CLIENT_ID", "test-client-id")
     with TestClient(module.app) as client:
         response = client.get(
             "/authorize",
@@ -147,13 +148,15 @@ def test_authorize_get_returns_login_form(monkeypatch):
         )
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "<form" in response.text
-    assert "Finout" in response.text
+    assert "frontegg" in response.text.lower()
+    assert "app-abc.frontegg.com" in response.text
+    assert "test-client-id" in response.text
 
 
-def test_authorize_get_shows_sso_button_when_client_id_set(monkeypatch):
+def test_authorize_get_missing_frontegg_config_returns_500(monkeypatch):
     module = importlib.import_module("finout_mcp_hosted.server")
-    monkeypatch.setenv("FRONTEGG_CLIENT_ID", "some-client-id")
+    monkeypatch.delenv("FRONTEGG_BASE_URL", raising=False)
+    monkeypatch.delenv("FRONTEGG_MCP_CLIENT_ID", raising=False)
     with TestClient(module.app) as client:
         response = client.get(
             "/authorize",
@@ -163,17 +166,14 @@ def test_authorize_get_shows_sso_button_when_client_id_set(monkeypatch):
                 "code_challenge": _make_challenge("verifier-abc"),
                 "code_challenge_method": "S256",
                 "state": "xyz",
-                "client_id": "finout-mcp",
             },
         )
-    assert response.status_code == 200
-    assert "Sign in with SSO" in response.text
+    assert response.status_code == 500
 
 
 def test_authorize_get_missing_params_returns_400():
     module = importlib.import_module("finout_mcp_hosted.server")
     with TestClient(module.app) as client:
-        # Missing code_challenge and redirect_uri
         response = client.get(
             "/authorize",
             params={"response_type": "code"},
@@ -195,52 +195,52 @@ def test_authorize_get_wrong_response_type_returns_400():
     assert response.status_code == 400
 
 
-def test_authorize_post_bad_credentials_returns_form_with_error():
+def test_authorize_post_valid_jwt_redirects_with_code():
     module = importlib.import_module("finout_mcp_hosted.server")
     with patch(
-        "finout_mcp_hosted.server.authenticate_password",
-        new=AsyncMock(side_effect=ValueError("Invalid credentials")),
-    ):
-        with TestClient(module.app) as client:
-            response = client.post(
-                "/authorize",
-                data={
-                    "email": "user@example.com",
-                    "password": "wrong",
-                    "redirect_uri": "http://localhost:6274/oauth/callback",
-                    "code_challenge": _make_challenge("verifier"),
-                    "code_challenge_method": "S256",
-                    "state": "abc",
-                    "client_id": "finout-mcp",
-                },
-            )
-    assert response.status_code == 200
-    assert "Invalid credentials" in response.text
-
-
-def test_authorize_post_valid_redirects_with_code():
-    module = importlib.import_module("finout_mcp_hosted.server")
-    with patch(
-        "finout_mcp_hosted.server.authenticate_password",
-        new=AsyncMock(return_value="fake-frontegg-jwt"),
+        "finout_mcp_hosted.server.verify_login_jwt",
+        return_value={"tenantId": "tenant-123"},
     ):
         with TestClient(module.app, follow_redirects=False) as client:
             response = client.post(
                 "/authorize",
                 data={
-                    "email": "user@example.com",
-                    "password": "correct",
+                    "access_token": "fake-frontegg-jwt",
                     "redirect_uri": "http://localhost:6274/oauth/callback",
                     "code_challenge": _make_challenge("verifier-xyz"),
-                    "code_challenge_method": "S256",
                     "state": "mystate",
-                    "client_id": "finout-mcp",
                 },
             )
     assert response.status_code == 302
     location = response.headers["location"]
     assert "code=" in location
     assert "state=mystate" in location
+
+
+def test_authorize_post_invalid_jwt_returns_401():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with patch(
+        "finout_mcp_hosted.server.verify_login_jwt",
+        side_effect=Exception("bad token"),
+    ):
+        with TestClient(module.app) as client:
+            response = client.post(
+                "/authorize",
+                data={
+                    "access_token": "invalid-token",
+                    "redirect_uri": "http://localhost/cb",
+                    "code_challenge": _make_challenge("v"),
+                    "state": "",
+                },
+            )
+    assert response.status_code == 401
+
+
+def test_authorize_post_missing_params_returns_400():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with TestClient(module.app) as client:
+        response = client.post("/authorize", data={})
+    assert response.status_code == 400
 
 
 # ── /token ────────────────────────────────────────────────────────────────────
@@ -252,20 +252,17 @@ def test_token_exchange_valid():
     challenge = _make_challenge(verifier)
 
     with patch(
-        "finout_mcp_hosted.server.authenticate_password",
-        new=AsyncMock(return_value="jwt-from-frontegg"),
+        "finout_mcp_hosted.server.verify_login_jwt",
+        return_value={"tenantId": "tenant-123"},
     ):
         with TestClient(module.app, follow_redirects=False) as client:
             post_resp = client.post(
                 "/authorize",
                 data={
-                    "email": "u@example.com",
-                    "password": "p",
+                    "access_token": "jwt-from-frontegg",
                     "redirect_uri": "http://localhost/cb",
                     "code_challenge": challenge,
-                    "code_challenge_method": "S256",
                     "state": "",
-                    "client_id": "finout-mcp",
                 },
             )
         assert post_resp.status_code == 302
@@ -332,184 +329,6 @@ def test_openid_configuration_same_as_auth_server(monkeypatch):
         response = client.get("/.well-known/openid-configuration")
     assert response.status_code == 200
     assert response.json()["issuer"] == "https://mcp.example.com"
-
-
-# ── Cookie-based auth ─────────────────────────────────────────────────────────
-
-
-def test_authorize_get_with_valid_cookie_skips_form_and_redirects(monkeypatch):
-    """When __fnt_dd_ cookie is valid, /authorize redirects immediately with a code."""
-    module = importlib.import_module("finout_mcp_hosted.server")
-    with patch(
-        "finout_mcp_hosted.server.verify_cookie_jwt",
-        return_value={"tenantId": "tenant-123"},
-    ):
-        with TestClient(module.app, follow_redirects=False) as client:
-            client.cookies.set("__fnt_dd_", "valid-cookie-token")
-            response = client.get(
-                "/authorize",
-                params={
-                    "response_type": "code",
-                    "redirect_uri": "http://localhost:6274/oauth/callback",
-                    "code_challenge": _make_challenge("verifier"),
-                    "code_challenge_method": "S256",
-                    "state": "mystate",
-                    "client_id": "finout-mcp",
-                },
-            )
-    assert response.status_code == 302
-    location = response.headers["location"]
-    assert "localhost:6274" in location
-    assert "code=" in location
-    assert "state=mystate" in location
-    # No login form should appear
-    assert "text/html" not in response.headers.get("content-type", "")
-
-
-def test_authorize_get_with_invalid_cookie_falls_through_to_form(monkeypatch):
-    """When __fnt_dd_ cookie is invalid, /authorize falls through to the login form."""
-    module = importlib.import_module("finout_mcp_hosted.server")
-    monkeypatch.delenv("FRONTEGG_CLIENT_ID", raising=False)
-    with patch(
-        "finout_mcp_hosted.server.verify_cookie_jwt",
-        side_effect=Exception("bad token"),
-    ):
-        with TestClient(module.app) as client:
-            client.cookies.set("__fnt_dd_", "bad-cookie")
-            response = client.get(
-                "/authorize",
-                params={
-                    "response_type": "code",
-                    "redirect_uri": "http://localhost:6274/oauth/callback",
-                    "code_challenge": _make_challenge("verifier"),
-                    "code_challenge_method": "S256",
-                    "state": "s",
-                    "client_id": "finout-mcp",
-                },
-            )
-    assert response.status_code == 200
-    assert "<form" in response.text
-
-
-def test_authorize_get_without_cookie_shows_form(monkeypatch):
-    """Without __fnt_dd_ cookie, /authorize shows the login form."""
-    module = importlib.import_module("finout_mcp_hosted.server")
-    monkeypatch.delenv("FRONTEGG_CLIENT_ID", raising=False)
-    with TestClient(module.app) as client:
-        response = client.get(
-            "/authorize",
-            params={
-                "response_type": "code",
-                "redirect_uri": "http://localhost:6274/oauth/callback",
-                "code_challenge": _make_challenge("verifier"),
-                "code_challenge_method": "S256",
-                "state": "s",
-                "client_id": "finout-mcp",
-            },
-        )
-    assert response.status_code == 200
-    assert "<form" in response.text
-
-
-# ── SSO proxy flow ────────────────────────────────────────────────────────────
-
-
-def test_authorize_post_sso_detected_redirects_to_frontegg(monkeypatch):
-    module = importlib.import_module("finout_mcp_hosted.server")
-    monkeypatch.setenv("MCP_BASE_URL", "https://mcp.example.com")
-    monkeypatch.setenv("FRONTEGG_AUTH_URL", "https://app-abc.frontegg.com/identity/resources/auth/v1/user")
-    monkeypatch.setenv("FRONTEGG_CLIENT_ID", "my-client-id")
-
-    with TestClient(module.app, follow_redirects=False) as client:
-        response = client.post(
-            "/authorize",
-            data={
-                "email": "sso-user@company.com",
-                "sso": "true",
-                "redirect_uri": "http://localhost:6274/oauth/callback",
-                "code_challenge": _make_challenge("verifier"),
-                "code_challenge_method": "S256",
-                "state": "abc",
-                "client_id": "finout-mcp",
-            },
-        )
-    assert response.status_code == 302
-    location = response.headers["location"]
-    assert "app-abc.frontegg.com/oauth/authorize" in location
-    assert "login_hint=sso-user%40company.com" in location
-    assert "redirect_uri=https%3A%2F%2Fmcp.example.com%2Foauth%2Fcallback" in location
-
-
-def test_authorize_post_sso_no_client_id_shows_error(monkeypatch):
-    module = importlib.import_module("finout_mcp_hosted.server")
-    monkeypatch.setenv("FRONTEGG_AUTH_URL", "https://app-abc.frontegg.com/identity/resources/auth/v1/user")
-    monkeypatch.delenv("FRONTEGG_CLIENT_ID", raising=False)
-
-    with TestClient(module.app) as client:
-        response = client.post(
-            "/authorize",
-            data={
-                "email": "sso@company.com",
-                "sso": "true",
-                "redirect_uri": "http://localhost/cb",
-                "code_challenge": _make_challenge("v"),
-                "code_challenge_method": "S256",
-                "state": "",
-                "client_id": "finout-mcp",
-            },
-        )
-    assert response.status_code == 200
-    assert "not configured" in response.text
-
-
-def test_oauth_sso_callback_valid(monkeypatch):
-    module = importlib.import_module("finout_mcp_hosted.server")
-    monkeypatch.setenv("MCP_BASE_URL", "https://mcp.example.com")
-    monkeypatch.setenv("FRONTEGG_AUTH_URL", "https://app-abc.frontegg.com/identity/resources/auth/v1/user")
-    monkeypatch.setenv("FRONTEGG_CLIENT_ID", "my-client-id")
-
-    from finout_mcp_hosted.oauth import create_sso_flow
-    nonce, _ = create_sso_flow(
-        "http://localhost:6274/oauth/callback", _make_challenge("vv"), "orig-state"
-    )
-
-    with patch(
-        "finout_mcp_hosted.server.exchange_sso_code",
-        new=AsyncMock(return_value="sso-jwt-token"),
-    ):
-        with TestClient(module.app, follow_redirects=False) as client:
-            response = client.get(
-                "/oauth/callback",
-                params={"code": "frontegg-auth-code", "state": nonce},
-            )
-
-    assert response.status_code == 302
-    location = response.headers["location"]
-    assert "localhost:6274" in location
-    assert "code=" in location
-    assert "state=orig-state" in location
-
-
-def test_oauth_sso_callback_invalid_state():
-    module = importlib.import_module("finout_mcp_hosted.server")
-    with TestClient(module.app) as client:
-        response = client.get(
-            "/oauth/callback",
-            params={"code": "some-code", "state": "no-such-nonce"},
-        )
-    assert response.status_code == 400
-    assert response.json()["error"] == "invalid_state"
-
-
-def test_oauth_sso_callback_frontegg_error():
-    module = importlib.import_module("finout_mcp_hosted.server")
-    with TestClient(module.app) as client:
-        response = client.get(
-            "/oauth/callback",
-            params={"error": "access_denied", "error_description": "User cancelled"},
-        )
-    assert response.status_code == 400
-    assert "User cancelled" in response.text
 
 
 # ── /register ─────────────────────────────────────────────────────────────────

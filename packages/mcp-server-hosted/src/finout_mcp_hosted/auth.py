@@ -7,11 +7,21 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 import jwt
+from jwt import PyJWKClient
+
+
+@lru_cache(maxsize=1)
+def _get_jwks_client() -> PyJWKClient:
+    """Return a JWKS client for the Frontegg JWKS endpoint."""
+    base = os.getenv("FRONTEGG_BASE_URL", "").rstrip("/")
+    if not base:
+        raise ValueError("FRONTEGG_BASE_URL is required for JWT validation.")
+    return PyJWKClient(f"{base}/.well-known/jwks.json")
 
 
 @lru_cache(maxsize=1)
 def _get_public_key() -> str:
-    """Load base64-encoded RSA public key from FINOUT_JWT_PUBLIC_KEY env var."""
+    """Load base64-encoded RSA public key from FINOUT_JWT_PUBLIC_KEY env var (legacy)."""
     raw = os.getenv("FINOUT_JWT_PUBLIC_KEY", "")
     return base64.b64decode(raw).decode()
 
@@ -75,26 +85,6 @@ def frontegg_base_url() -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
-async def authenticate_password(email: str, password: str) -> str:
-    """Call Frontegg's password auth API, return Frontegg JWT access token."""
-    url = os.getenv("FRONTEGG_AUTH_URL", "")
-    if not url:
-        raise ValueError("FRONTEGG_AUTH_URL not configured")
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(url, json={"email": email, "password": password})
-        if not resp.is_success:
-            try:
-                body = resp.json()
-                msg = body.get("message") or body.get("error") or f"HTTP {resp.status_code}"
-            except Exception:
-                msg = f"HTTP {resp.status_code}"
-            raise ValueError(msg)
-        token = resp.json().get("accessToken", "")
-        if not token:
-            raise ValueError("No token in response")
-        return token
-
-
 async def check_sso(email: str) -> bool:
     """Return True if the email domain requires SSO login."""
     base = frontegg_base_url()
@@ -131,39 +121,14 @@ async def check_sso_debug(email: str) -> dict:
         return {"error": str(exc)}
 
 
-async def exchange_sso_code(code: str, code_verifier: str, redirect_uri: str) -> str:
-    """Exchange a Frontegg authorization code (from SSO callback) for a JWT."""
-    base = frontegg_base_url()
-    client_id = os.getenv("FRONTEGG_CLIENT_ID", "")
-    if not base or not client_id:
-        raise ValueError("FRONTEGG_AUTH_URL and FRONTEGG_CLIENT_ID are required for SSO")
-    token_url = f"{base}/oauth/token"
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(
-            token_url,
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "client_id": client_id,
-                "code_verifier": code_verifier,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        resp.raise_for_status()
-        token = resp.json().get("access_token", "")
-        if not token:
-            raise ValueError("No access_token in SSO token response")
-        return token
-
-
 def verify_login_jwt(token: str) -> dict:
-    """Verify RS256 JWT, return payload with tenantId, email, id."""
+    """Verify RS256 JWT via Frontegg JWKS, return payload with tenantId, email, id."""
+    signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
     audience = _get_expected_audience()
     options = {} if audience else {"verify_aud": False}
     payload = jwt.decode(
         token,
-        _get_public_key(),
+        signing_key,
         algorithms=["RS256"],
         issuer=_get_expected_issuer(),
         audience=audience,
