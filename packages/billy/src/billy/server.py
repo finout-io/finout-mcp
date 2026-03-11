@@ -51,7 +51,14 @@ if os.getenv("LANGFUSE_SECRET_KEY"):
     try:
         from langfuse import Langfuse as _Langfuse
 
-        _langfuse = _Langfuse()  # Registers OTel TracerProvider
+        candidate = _Langfuse()  # Registers OTel TracerProvider
+        if hasattr(candidate, "start_as_current_span") and hasattr(candidate, "update_current_trace"):
+            _langfuse = candidate
+        else:
+            print(
+                "Langfuse client missing v3 tracing API; disabling Billy tracing. "
+                "Install a newer langfuse package to re-enable observability."
+            )
 
         from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
 

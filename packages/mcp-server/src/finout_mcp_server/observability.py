@@ -33,8 +33,18 @@ def _get_langfuse() -> Any:
     try:
         from langfuse import Langfuse
 
-        _langfuse_instance = Langfuse()
-        logger.info("Langfuse observability enabled (host=%s)", os.getenv("LANGFUSE_HOST"))
+        candidate = Langfuse()
+        if hasattr(candidate, "start_as_current_span") and hasattr(
+            candidate, "update_current_trace"
+        ):
+            _langfuse_instance = candidate
+            logger.info("Langfuse observability enabled (host=%s)", os.getenv("LANGFUSE_HOST"))
+        else:
+            logger.warning(
+                "Langfuse client missing v3 tracing API; disabling MCP observability. "
+                "Install a newer langfuse package to re-enable observability."
+            )
+            _langfuse_instance = None
     except Exception:
         logger.debug("Langfuse not available", exc_info=True)
         _langfuse_instance = None
