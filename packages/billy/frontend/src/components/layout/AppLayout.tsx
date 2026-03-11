@@ -85,13 +85,16 @@ function LoginScreen({ onLogin }: { onLogin: (name: string, email: string) => vo
   )
 }
 
+
 export function AppLayout() {
   const { user, setUser, clearUser } = useUser()
   const session = useSession()
+  const { isEmbedded } = session
   const accountId = session.selectedAccount?.accountId ?? null
   const chat = useChat(accountId, user?.email)
 
   const [model, setModel] = useState<ModelId>(MODEL_OPTIONS[1]!.value)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(isEmbedded)
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>()
   const [shareToken, setShareToken] = useState<string | undefined>()
   const [whatsNewOpen, setWhatsNewOpen] = useState(false)
@@ -249,6 +252,13 @@ export function AppLayout() {
   }, [whatsNewData])
 
   if (!user) {
+    if (isEmbedded) {
+      return (
+        <Center h="100vh">
+          <Text size="sm" c="dimmed">Waiting for embedded user context…</Text>
+        </Center>
+      )
+    }
     return <LoginScreen onLogin={setUser} />
   }
 
@@ -393,7 +403,7 @@ export function AppLayout() {
         </Stack>
       </Modal>
       <AppShell
-        navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: false } }}
+        navbar={{ width: sidebarCollapsed ? 64 : 260, breakpoint: 'sm', collapsed: { mobile: false } }}
         padding={0}
       >
       <AppShell.Navbar p="md" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', backgroundColor: '#1e2433', borderRight: '1px solid #2d3748' }}>
@@ -402,6 +412,9 @@ export function AppLayout() {
           selectedAccountId={session.selectedAccount?.accountId ?? null}
           onSelectAccount={session.selectAccount}
           isInitializing={session.isInitializing}
+          isEmbedded={isEmbedded}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
           model={model}
           onModelChange={setModel}
           activeConversationId={activeConversationId}
@@ -411,88 +424,89 @@ export function AppLayout() {
       </AppShell.Navbar>
 
       <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#f8fafc' }}>
-        {/* Header */}
-        <Group
-          px="md"
-          py="sm"
-          justify="space-between"
-          style={{
-            borderBottom: '1px solid #e2e8f0',
-            flexShrink: 0,
-            backgroundColor: '#ffffff',
-          }}
-        >
-          <Text size="sm" c="dimmed">
-            {session.selectedAccount?.name ?? 'No account selected'}
-            {session.isInitializing && ' · Initializing…'}
-            {session.error && ` · Error: ${session.error}`}
-          </Text>
-          <Group gap="xs">
-            {toolsData && (
-              <Button
-                size="xs"
-                variant="subtle"
-                color="#1570ef"
-                onClick={() => {
-                  setToolsCategory('all')
-                  setToolsOpen(true)
-                }}
-              >
-                Tools
-              </Button>
-            )}
-            {whatsNewData && (
-              <Button
-                size="xs"
-                variant="subtle"
-                color="#1570ef"
-                onClick={() => {
-                  setUnseenEntries(whatsNewData.entries)
-                  setWhatsNewOpen(true)
-                }}
-              >
-                What's new
-              </Button>
-            )}
-            {chat.messages.length > 0 && (
-              <Tooltip label="Copy chat as Markdown">
-                <Button size="xs" variant="subtle" color="#1570ef" onClick={handleExport}>
-                  📋 Export
+        {!isEmbedded && (
+          <Group
+            px="md"
+            py="sm"
+            justify="space-between"
+            style={{
+              borderBottom: '1px solid #e2e8f0',
+              flexShrink: 0,
+              backgroundColor: '#ffffff',
+            }}
+          >
+            <Text size="sm" c="dimmed">
+              {session.selectedAccount?.name ?? 'No account selected'}
+              {session.isInitializing && ' · Initializing…'}
+              {session.error && ` · Error: ${session.error}`}
+            </Text>
+            <Group gap="xs">
+              {toolsData && (
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  color="#1570ef"
+                  onClick={() => {
+                    setToolsCategory('all')
+                    setToolsOpen(true)
+                  }}
+                >
+                  Tools
                 </Button>
-              </Tooltip>
-            )}
-            {shareToken && (
-              <Tooltip label="Copy share link">
-                <Button size="xs" variant="subtle" color="#1570ef" onClick={handleCopyShareLink}>
-                  🔗 Share
+              )}
+              {whatsNewData && (
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  color="#1570ef"
+                  onClick={() => {
+                    setUnseenEntries(whatsNewData.entries)
+                    setWhatsNewOpen(true)
+                  }}
+                >
+                  What's new
                 </Button>
-              </Tooltip>
-            )}
-            <Button
-              component={Link}
-              to="/manage"
-              size="xs"
-              variant="subtle"
-              color="#1570ef"
-            >
-              Manage
-            </Button>
-            <Popover position="bottom-end" shadow="md">
-              <Popover.Target>
-                <Button size="xs" variant="subtle">{user.name}</Button>
-              </Popover.Target>
-              <Popover.Dropdown>
-                <Stack gap="xs">
-                  <Text size="sm" fw={500}>{user.name}</Text>
-                  <Text size="xs" c="dimmed">{user.email}</Text>
-                  <Button size="xs" variant="light" color="red" onClick={clearUser}>
-                    Sign out
+              )}
+              {chat.messages.length > 0 && (
+                <Tooltip label="Copy chat as Markdown">
+                  <Button size="xs" variant="subtle" color="#1570ef" onClick={handleExport}>
+                    📋 Export
                   </Button>
-                </Stack>
-              </Popover.Dropdown>
-            </Popover>
+                </Tooltip>
+              )}
+              {shareToken && (
+                <Tooltip label="Copy share link">
+                  <Button size="xs" variant="subtle" color="#1570ef" onClick={handleCopyShareLink}>
+                    🔗 Share
+                  </Button>
+                </Tooltip>
+              )}
+              <Button
+                component={Link}
+                to="/manage"
+                size="xs"
+                variant="subtle"
+                color="#1570ef"
+              >
+                Manage
+              </Button>
+              <Popover position="bottom-end" shadow="md">
+                <Popover.Target>
+                  <Button size="xs" variant="subtle">{user.name}</Button>
+                </Popover.Target>
+                <Popover.Dropdown>
+                  <Stack gap="xs">
+                    <Text size="sm" fw={500}>{user.name}</Text>
+                    <Text size="xs" c="dimmed">{user.email}</Text>
+                    <Button size="xs" variant="light" color="red" onClick={clearUser}>
+                      Sign out
+                    </Button>
+                  </Stack>
+                </Popover.Dropdown>
+              </Popover>
+            </Group>
           </Group>
-        </Group>
+        )}
 
         {/* Chat area */}
         <Box style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>

@@ -19,6 +19,25 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.17.0",
+        "date": "2026-03-11",
+        "title": "FOBO embedded mode",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Add embedded-mode account syncing with FOBO while ignoring persisted standalone account selection",
+                "Load embedded user identity from URL params without persisting it to local storage",
+                "Hide header and banner in embedded mode and add an auto-collapsed, collapsible sidebar with a compact new-conversation action",
+                "Make Billy CORS origins configurable via BILLY_ALLOWED_ORIGINS"
+            ]
+        }
+    },
+    {
         "version": "0.16.0",
         "date": "2026-03-11",
         "title": "Improve dependency detection for virtual tag usages",

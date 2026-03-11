@@ -416,10 +416,16 @@ def _get_app_version() -> str:
     except PackageNotFoundError:
         return os.getenv("BILLY_VERSION", "0.0.0-dev")
 
-# CORS middleware for development
+# CORS middleware — configurable via BILLY_ALLOWED_ORIGINS (comma-separated)
+_allowed_origins_env = os.getenv("BILLY_ALLOWED_ORIGINS", "")
+_allowed_origins: list[str] = (
+    [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+    if _allowed_origins_env
+    else ["*"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
