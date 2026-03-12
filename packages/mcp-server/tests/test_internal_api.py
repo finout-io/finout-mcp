@@ -2234,9 +2234,9 @@ class TestTopMoversImpl:
 
         # this_month is partial — comparison should be normalized to an absolute range,
         # not the full last_month
-        assert (
-            " to " in result["comparison_period"]
-        ), "Comparison period should be normalized to an absolute range for partial this_month"
+        assert " to " in result["comparison_period"], (
+            "Comparison period should be normalized to an absolute range for partial this_month"
+        )
         assert "_normalization_note" in result
         assert periods_queried[0] == "this_month"
 
