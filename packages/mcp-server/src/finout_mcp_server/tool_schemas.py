@@ -17,21 +17,33 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="query_costs",
             description=(
-                "Query cloud costs AND usage with flexible filters and grouping.\n\n"
+                "Query cloud costs, usage, and operational metrics with flexible filters and grouping.\n\n"
                 "WHEN TO USE: When the user asks about spending, costs, bills, expenses, "
-                "or usage for any cloud service or resource.\n\n"
+                "usage, savings plans, runtime hours, or resource counts.\n\n"
                 "WORKFLOW (follow this order):\n"
                 "1) ALWAYS call search_filters first — it returns a 'filters' list with ready-to-use objects\n"
                 "2) Copy the EXACT filter object from the 'filters' list (costCenter, key, path, type)\n"
                 "3) Call get_filter_values to discover the correct value (values are unintuitive!)\n"
                 "4) Add operator ('is' or 'oneOf') and the verified value, then query\n\n"
-                "TIME-SERIES: The API always returns time-series data (nested 'data' array per row). "
+                "RESPONSE FORMAT: Flat rows with human-readable column names. "
+                "Example: {'Services': 'AmazonEC2', 'Sum(Net Amortized Cost)': 55216.95}. "
                 "The server auto-selects the right granularity — omit x_axis_group_by unless the user "
-                "explicitly requests a different one. NEVER manually aggregate or sum numbers — "
-                "read totals directly from the API response.\n\n"
+                "explicitly requests a different one.\n\n"
                 "PRESENTING RESULTS: Give 2-4 sentences of key insights: total, biggest driver, "
                 "notable trend. No table or raw data dump needed. "
                 "To visualize results, call render_chart with curated data.\n\n"
+                "MULTI-METRIC QUERIES (single call):\n"
+                "- extra_measurements: Add cost types like unblendedCost, blendedCost alongside the primary\n"
+                "- billing_metrics: Add savingsPlanEffectiveCost, reservationEffectiveCost\n"
+                "- predefined_queries: Add runtimeProportionResources, ebsRunningHours, countS3Objects\n"
+                "- count_distinct: Count unique values of a dimension (e.g., how many regions?)\n"
+                "- All of these return additional columns in the SAME response row\n\n"
+                "CROSS-DIMENSION ANALYSIS: Pass multiple items in group_by to analyze two "
+                "dimensions simultaneously (e.g., service × region). This creates a row per combination.\n\n"
+                "CUSTOM AGGREGATIONS: extra_measurements supports avg, min, max — not just sum. "
+                "Use avg for 'average daily cost', max for 'peak cost day', min for 'cheapest period'.\n\n"
+                "AMORTIZATION ANALYSIS: Query both netAmortizedCost (primary) and unblendedCost "
+                "(via extra_measurements) to see how RIs/SPs reduce your effective cost per service.\n\n"
                 "COST + USAGE IN ONE QUERY:\n"
                 "- Cost is ALWAYS returned in results\n"
                 "- To ALSO get usage: Provide usage_configuration\n"
@@ -71,8 +83,9 @@ async def list_tools() -> list[Tool]:
                             "Time period to analyze. Supports:\n"
                             "- Predefined: today, yesterday, last_7_days, this_week, last_week, "
                             "two_weeks_ago, last_30_days, this_month, last_month, last_quarter\n"
-                            "- Custom range: 'YYYY-MM-DD to YYYY-MM-DD' (e.g., '2026-01-24 to 2026-01-31')\n"
-                            "- This allows comparing specific date ranges like 'last 7 days of each month'"
+                            "- Flexible relative: last_N_days, last_N_weeks, last_N_months "
+                            "(e.g., 'last_14_days', 'last_3_months', 'last_6_weeks')\n"
+                            "- Custom range: 'YYYY-MM-DD to YYYY-MM-DD' (e.g., '2026-01-24 to 2026-01-31')"
                         ),
                         "default": "last_30_days",
                     },
@@ -151,12 +164,13 @@ async def list_tools() -> list[Tool]:
                     },
                     "x_axis_group_by": {
                         "type": "string",
-                        "enum": ["daily", "weekly", "monthly", "quarterly"],
+                        "enum": ["hourly", "daily", "weekly", "monthly", "quarterly"],
                         "description": (
                             "Override the auto-selected granularity. The server picks the coarsest "
                             "bucket that fits the period exactly (weekly for named-week periods, "
                             "monthly for named-month/quarter periods, daily otherwise). "
                             "Only set this when the user explicitly requests a different granularity: "
+                            "'hourly breakdown for today' → 'hourly'; "
                             "'daily breakdown for last month' → 'daily'; "
                             "'weekly view for last quarter' → 'weekly'; "
                             "any trend question on a month/quarter period → 'daily'."
@@ -195,6 +209,88 @@ async def list_tools() -> list[Tool]:
                             "returns both EC2 cost AND hours used in the same query."
                         ),
                     },
+                    "extra_measurements": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "description": (
+                                        "Cost metric type: amortizedCost, unblendedCost, "
+                                        "blendedCost, netAmortizedCost"
+                                    ),
+                                },
+                                "aggregation": {
+                                    "type": "string",
+                                    "enum": ["sum", "avg", "min", "max"],
+                                    "default": "sum",
+                                    "description": (
+                                        "Aggregation: sum (total), avg (average per row), "
+                                        "min (lowest), max (peak)"
+                                    ),
+                                },
+                            },
+                            "required": ["type"],
+                        },
+                        "description": (
+                            "Additional cost metrics in the same query. "
+                            "The primary metric (netAmortizedCost sum) is always included. "
+                            "Use this to compare cost types or get min/max/avg.\n"
+                            'Examples: [{"type": "unblendedCost"}] or '
+                            '[{"type": "amortizedCost", "aggregation": "max"}]'
+                        ),
+                    },
+                    "billing_metrics": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "savingsPlanEffectiveCost",
+                                "reservationEffectiveCost",
+                            ],
+                        },
+                        "description": (
+                            "Billing metrics to include alongside cost. "
+                            "Returns savings plan or reservation effective cost columns."
+                        ),
+                    },
+                    "count_distinct": {
+                        "type": "object",
+                        "properties": {
+                            "costCenter": {"type": "string"},
+                            "key": {"type": "string"},
+                            "path": {"type": "string"},
+                            "type": {"type": "string"},
+                        },
+                        "required": ["costCenter", "key", "path", "type"],
+                        "description": (
+                            "Count unique values of a dimension. Uses the same metadata "
+                            "as group_by (from search_filters). "
+                            "Example: count distinct regions → adds 'Count Distinct(Region)' column."
+                        ),
+                    },
+                    "predefined_queries": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "runtimeProportionResources",
+                                "vcpuRuntimeProportionResources",
+                                "ebsRunningHours",
+                                "countS3Objects",
+                                "normalizedStorageUsage",
+                            ],
+                        },
+                        "description": (
+                            "Predefined operational metrics to include alongside cost.\n"
+                            "- runtimeProportionResources: Normalized runtime hours\n"
+                            "- vcpuRuntimeProportionResources: vCPU-weighted runtime\n"
+                            "- ebsRunningHours: EBS volume hours\n"
+                            "- countS3Objects: S3 object count\n"
+                            "- normalizedStorageUsage: Normalized storage"
+                        ),
+                    },
                 },
                 "required": ["time_period"],
             },
@@ -221,6 +317,7 @@ async def list_tools() -> list[Tool]:
                             "Current/recent time period. Supports:\n"
                             "- Predefined: today, yesterday, last_7_days, this_week, last_week, "
                             "two_weeks_ago, last_30_days, this_month, last_month, last_quarter\n"
+                            "- Flexible relative: last_N_days, last_N_weeks, last_N_months\n"
                             "- Custom range: 'YYYY-MM-DD to YYYY-MM-DD'"
                         ),
                     },
@@ -230,6 +327,7 @@ async def list_tools() -> list[Tool]:
                             "Period to compare against. Supports:\n"
                             "- Predefined: yesterday, last_7_days, this_week, last_week, "
                             "two_weeks_ago, last_30_days, this_month, last_month, last_quarter\n"
+                            "- Flexible relative: last_N_days, last_N_weeks, last_N_months\n"
                             "- Custom range: 'YYYY-MM-DD to YYYY-MM-DD'"
                         ),
                     },
@@ -288,6 +386,45 @@ async def list_tools() -> list[Tool]:
                             "required": ["costCenter", "key", "path", "type"],
                         },
                         "description": "Optional: Dimensions to group comparison by (full metadata from search_filters)",
+                    },
+                    "extra_measurements": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "description": (
+                                        "Cost metric type: amortizedCost, unblendedCost, "
+                                        "blendedCost, netAmortizedCost"
+                                    ),
+                                },
+                                "aggregation": {
+                                    "type": "string",
+                                    "enum": ["sum", "avg", "min", "max"],
+                                    "default": "sum",
+                                },
+                            },
+                            "required": ["type"],
+                        },
+                        "description": (
+                            "Additional cost metrics to compare across both periods. "
+                            "Example: compare amortized vs unblended cost changes."
+                        ),
+                    },
+                    "billing_metrics": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "savingsPlanEffectiveCost",
+                                "reservationEffectiveCost",
+                            ],
+                        },
+                        "description": (
+                            "Billing metrics to compare alongside cost "
+                            "(e.g., track savings plan coverage changes)."
+                        ),
                     },
                 },
                 "required": ["current_period", "comparison_period"],
@@ -1098,6 +1235,438 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["name"],
+            },
+        ),
+        Tool(
+            name="get_top_movers",
+            description=(
+                "Identify which dimensions had the biggest cost changes between two periods.\n\n"
+                "WHEN TO USE: When the user asks 'what changed?', 'what drove the increase?', "
+                "'biggest cost changes', 'what spiked?', 'where did costs go up/down?', "
+                "or any question about cost movement by dimension.\n\n"
+                "WORKFLOW: Same as query_costs — call search_filters first for filter/group_by metadata.\n\n"
+                "HOW IT WORKS: Queries both periods grouped by the specified dimension, "
+                "computes the delta and % change for each value, and ranks by absolute change. "
+                "Also flags new items (appeared this period) and removed items. "
+                "When comparison_period is omitted, automatically infers the equivalent prior "
+                "period — including last_quarter → the quarter before it.\n\n"
+                "PRESENTING RESULTS: Lead with overall trend, then top 3 movers. "
+                "Use render_chart with a bar chart showing positive (increases) and negative (decreases) deltas."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "time_period": {
+                        "type": "string",
+                        "description": (
+                            "Current time period to analyze. Supports predefined periods, "
+                            "flexible relative (last_N_days), and custom ranges."
+                        ),
+                        "default": "last_30_days",
+                    },
+                    "comparison_period": {
+                        "type": "string",
+                        "description": (
+                            "Period to compare against. If omitted, automatically uses "
+                            "the equivalent previous period (e.g., last_30_days → the 30 days before that)."
+                        ),
+                    },
+                    "group_by": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "costCenter": {"type": "string"},
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                                "type": {
+                                    "type": "string",
+                                    "description": "MUST copy from search_filters results.",
+                                },
+                            },
+                            "required": ["costCenter", "key", "path", "type"],
+                        },
+                        "description": (
+                            "REQUIRED: Dimension to rank movers by (e.g., service, region, team). "
+                            "Copy from search_filters results."
+                        ),
+                    },
+                    "filters": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "costCenter": {"type": "string"},
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                                "type": {"type": "string"},
+                                "operator": {
+                                    "type": "string",
+                                    "default": "is",
+                                    "enum": ["is", "oneOf", "not", "notOneOf"],
+                                },
+                                "value": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ]
+                                },
+                            },
+                            "required": ["costCenter", "key", "path", "type", "value"],
+                        },
+                        "description": "Optional: Filters to scope the analysis",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Max movers to return per direction (increases and decreases)",
+                    },
+                },
+                "required": ["group_by"],
+            },
+        ),
+        Tool(
+            name="get_unit_economics",
+            description=(
+                "Compute cost-per-unit by counting unique resources alongside cost.\n\n"
+                "WHEN TO USE: When the user asks 'cost per instance', 'cost per resource', "
+                "'average cost per X', 'how many unique Ys', 'unit economics', "
+                "or any question combining cost with resource counts.\n\n"
+                "WORKFLOW:\n"
+                "1) search_filters to find the dimension to count (e.g., resource ID)\n"
+                "2) Optionally search_filters for group_by (e.g., service) and filters\n"
+                "3) Call this tool with count_dimension + optional group_by\n\n"
+                "HOW IT WORKS: Single query that returns both cost and Count Distinct(dimension) "
+                "in the same row, then computes cost / count for each group.\n\n"
+                "EXAMPLES:\n"
+                "- Cost per EC2 instance: count_dimension=resource_id, filter=EC2\n"
+                "- Cost per region grouped by service: count_dimension=region, group_by=service\n"
+                "- Cost per Lambda function: count_dimension=function_name, filter=Lambda"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "time_period": {
+                        "type": "string",
+                        "description": "Time period to analyze.",
+                        "default": "last_30_days",
+                    },
+                    "count_dimension": {
+                        "type": "object",
+                        "properties": {
+                            "costCenter": {"type": "string"},
+                            "key": {"type": "string"},
+                            "path": {"type": "string"},
+                            "type": {"type": "string"},
+                        },
+                        "required": ["costCenter", "key", "path", "type"],
+                        "description": (
+                            "REQUIRED: Dimension to count unique values of. "
+                            "Use search_filters to find the right metadata. "
+                            "Example: to count EC2 instances, use the resource_id filter metadata."
+                        ),
+                    },
+                    "group_by": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "costCenter": {"type": "string"},
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                                "type": {"type": "string"},
+                            },
+                            "required": ["costCenter", "key", "path", "type"],
+                        },
+                        "description": (
+                            "Optional: Group results by dimension (e.g., service, region). "
+                            "Returns cost-per-unit for each group."
+                        ),
+                    },
+                    "filters": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "costCenter": {"type": "string"},
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                                "type": {"type": "string"},
+                                "operator": {
+                                    "type": "string",
+                                    "default": "is",
+                                    "enum": ["is", "oneOf", "not", "notOneOf"],
+                                },
+                                "value": {
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "string"}},
+                                    ]
+                                },
+                            },
+                            "required": ["costCenter", "key", "path", "type", "value"],
+                        },
+                        "description": "Optional: Filters to scope the analysis",
+                    },
+                    "cost_type": {
+                        "type": "string",
+                        "enum": [
+                            "netAmortizedCost",
+                            "amortizedCost",
+                            "unblendedCost",
+                            "blendedCost",
+                        ],
+                        "default": "netAmortizedCost",
+                        "description": "Cost metric to use for unit economics calculation",
+                    },
+                },
+                "required": ["count_dimension"],
+            },
+        ),
+        Tool(
+            name="get_cost_patterns",
+            description=(
+                "Analyze hourly cost patterns — peak hours, off-peak, weekday vs weekend.\n\n"
+                "WHEN TO USE: When the user asks about 'peak hours', 'off-peak', "
+                "'hourly pattern', 'when is spending highest', 'weekday vs weekend costs', "
+                "or any time-of-day cost analysis.\n\n"
+                "HOW IT WORKS: Queries with hourly granularity, then computes hour-of-day "
+                "averages, peak/off-peak hours, weekday/weekend splits, and volatility.\n\n"
+                "BEST FOR: Short periods (last_7_days, this_week) where hourly data is meaningful. "
+                "Longer periods will have many data points."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "time_period": {
+                        "type": "string",
+                        "description": "Time period to analyze (shorter periods work best).",
+                        "default": "last_7_days",
+                    },
+                    "filters": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Optional: Filters to scope the analysis",
+                    },
+                    "group_by": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Optional: Group by dimension for per-group patterns",
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_savings_coverage",
+            description=(
+                "Analyze savings plan and reservation coverage.\n\n"
+                "WHEN TO USE: When the user asks about 'savings plan coverage', "
+                "'RI utilization', 'on-demand vs reserved', 'commitment coverage', "
+                "'how much is covered by savings plans', or SP/RI optimization.\n\n"
+                "HOW IT WORKS: Queries cost with billing metrics (savingsPlanEffectiveCost, "
+                "reservationEffectiveCost) and computes coverage ratio per group.\n\n"
+                "PRESENTING RESULTS: Show overall coverage %, then highlight services "
+                "with low coverage as optimization opportunities."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "time_period": {
+                        "type": "string",
+                        "description": "Time period to analyze.",
+                        "default": "last_30_days",
+                    },
+                    "group_by": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "costCenter": {"type": "string"},
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                                "type": {"type": "string"},
+                            },
+                            "required": ["costCenter", "key", "path", "type"],
+                        },
+                        "description": (
+                            "Optional: Group coverage by dimension (e.g., service). "
+                            "Shows coverage per group."
+                        ),
+                    },
+                    "filters": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Optional: Filters to scope the analysis",
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_tag_coverage",
+            description=(
+                "Analyze what percentage of spend is tagged by a given dimension.\n\n"
+                "WHEN TO USE: When the user asks about 'tag coverage', 'untagged spend', "
+                "'governance', 'what percentage is tagged', 'tagging gaps', "
+                "or cost allocation completeness.\n\n"
+                "HOW IT WORKS: Runs two queries — total cost and cost grouped by the tag. "
+                "Only rows with a real tag value count as tagged spend; empty, null, or "
+                "placeholder values (N/A, none, unknown) are treated as untagged. "
+                "The difference between total and tagged = untagged spend.\n\n"
+                "PRESENTING RESULTS: Lead with overall coverage %. "
+                "Highlight groups with lowest coverage as governance gaps."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "time_period": {
+                        "type": "string",
+                        "description": "Time period to analyze.",
+                        "default": "last_30_days",
+                    },
+                    "tag_dimension": {
+                        "type": "object",
+                        "properties": {
+                            "costCenter": {"type": "string"},
+                            "key": {"type": "string"},
+                            "path": {"type": "string"},
+                            "type": {"type": "string"},
+                        },
+                        "required": ["costCenter", "key", "path", "type"],
+                        "description": (
+                            "REQUIRED: The tag/dimension to measure coverage for. "
+                            "Use search_filters to find the right metadata "
+                            "(e.g., team tag, environment tag, cost-center tag)."
+                        ),
+                    },
+                    "group_by": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "costCenter": {"type": "string"},
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                                "type": {"type": "string"},
+                            },
+                            "required": ["costCenter", "key", "path", "type"],
+                        },
+                        "description": (
+                            "Optional: Group results by dimension (e.g., service) to see "
+                            "which groups have the worst tag coverage."
+                        ),
+                    },
+                    "filters": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Optional: Filters to scope the analysis",
+                    },
+                },
+                "required": ["tag_dimension"],
+            },
+        ),
+        Tool(
+            name="get_budget_status",
+            description=(
+                "Compare actual spend against financial plan budgets.\n\n"
+                "WHEN TO USE: When the user asks 'are we on budget?', 'budget vs actual', "
+                "'burn rate', 'will we exceed the budget?', 'budget utilization', "
+                "or any question comparing spend to planned amounts.\n\n"
+                "HOW IT WORKS: Fetches financial plans and queries actual cost per plan, "
+                "matching each plan's cost type (net amortized, blended, etc.). "
+                "Computes utilization %, daily burn rate, and projected month-end spend.\n\n"
+                "PRESENTING RESULTS: Lead with status (on_track/at_risk/over_budget), "
+                "then utilization %, remaining budget, and projected month-end."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "plan_name": {
+                        "type": "string",
+                        "description": "Optional: Filter to a specific plan by name (partial, case-insensitive).",
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": (
+                            "Budget month in 'YYYY-M' format (e.g., '2026-3'). "
+                            "Defaults to current month."
+                        ),
+                    },
+                    "time_period": {
+                        "type": "string",
+                        "description": (
+                            "Override the time period for actual cost query. "
+                            "Defaults to the budget month (auto-derived from period)."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_cost_statistics",
+            description=(
+                "Compute daily cost statistics — mean, median, peak, trough, volatility.\n\n"
+                "WHEN TO USE: When the user asks about 'average daily cost', 'cost volatility', "
+                "'peak day', 'most expensive day', 'cost variability', 'cost distribution', "
+                "or statistical analysis of spending.\n\n"
+                "HOW IT WORKS: Queries with daily granularity, aggregates all groups into "
+                "daily totals, then computes mean, median, min, max, standard deviation, "
+                "and coefficient of variation. Peak and trough days reflect the true total "
+                "daily spend, not individual group rows.\n\n"
+                "PRESENTING RESULTS: Lead with daily average and highlight volatility. "
+                "Call out peak and trough days. Compare variability across groups if grouped."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "time_period": {
+                        "type": "string",
+                        "description": "Time period to analyze.",
+                        "default": "last_30_days",
+                    },
+                    "group_by": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "costCenter": {"type": "string"},
+                                "key": {"type": "string"},
+                                "path": {"type": "string"},
+                                "type": {"type": "string"},
+                            },
+                            "required": ["costCenter", "key", "path", "type"],
+                        },
+                        "description": "Optional: Group statistics by dimension",
+                    },
+                    "filters": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Optional: Filters to scope the analysis",
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="list_data_explorers",
+            description=(
+                "List saved data explorer configurations in the account.\n\n"
+                "WHEN TO USE: When the user asks 'what data explorers exist?', "
+                "'show me saved queries', 'list explorers', or wants to find "
+                "a previously saved data explorer.\n\n"
+                "Returns name, columns, and filter presence for each explorer."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional: Filter explorers by name or description keyword.",
+                    },
+                },
+                "required": [],
             },
         ),
     ]

@@ -738,7 +738,14 @@ class TestToolDescriptions:
         assert "get_account_context" not in public_tool_names
         assert "submit_feedback" not in public_tool_names
         assert "get_anomalies" in public_tool_names
-        assert len(public_tools) == 11
+        assert len(public_tools) == 18
+        assert "get_top_movers" in public_tool_names
+        assert "get_unit_economics" in public_tool_names
+        assert "get_cost_patterns" in public_tool_names
+        assert "get_savings_coverage" in public_tool_names
+        assert "get_tag_coverage" in public_tool_names
+        assert "get_budget_status" in public_tool_names
+        assert "get_cost_statistics" in public_tool_names
 
         server_module.runtime_mode = server_module.MCPMode.BILLY_INTERNAL.value
         internal_tools = await server_module.list_tools()
@@ -748,7 +755,10 @@ class TestToolDescriptions:
         assert "get_waste_recommendations" in internal_tool_names
         assert "render_chart" in internal_tool_names
         assert "analyze_virtual_tags" in internal_tool_names
-        assert len(internal_tools) == 19
+        assert "get_top_movers" in internal_tool_names
+        assert "get_unit_economics" in internal_tool_names
+        assert "list_data_explorers" in internal_tool_names
+        assert len(internal_tools) == 27
 
     @pytest.mark.asyncio
     async def test_create_dashboard_impl_formats_presentation_hint(self):
@@ -2084,6 +2094,800 @@ class TestContextDiscoveryRefactor:
         summary = result["summary"]
         assert "search_filters('service')" in summary
         assert "'operator': 'eq'" not in summary
+
+
+class TestTopMoversImpl:
+    """Tests for get_top_movers_impl."""
+
+    @pytest.mark.asyncio
+    async def test_top_movers_basic(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        call_count = 0
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {
+                    "amazon-cur": {
+                        "col": [{"key": "service", "path": "AWS/Services", "type": "col"}]
+                    },
+                }
+
+            async def get_filter_values(
+                self, filter_key, cost_center=None, filter_type=None, limit=100
+            ):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    # Current period
+                    return [
+                        {"Services": "EC2", "Sum(Net Amortized Cost)": 5000},
+                        {"Services": "S3", "Sum(Net Amortized Cost)": 3000},
+                        {"Services": "RDS", "Sum(Net Amortized Cost)": 2000},
+                    ]
+                else:
+                    # Comparison period
+                    return [
+                        {"Services": "EC2", "Sum(Net Amortized Cost)": 4000},
+                        {"Services": "S3", "Sum(Net Amortized Cost)": 3500},
+                        {"Services": "Lambda", "Sum(Net Amortized Cost)": 500},
+                    ]
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_top_movers_impl(
+                {
+                    "time_period": "last_30_days",
+                    "comparison_period": "last_60_days",
+                    "group_by": [
+                        {
+                            "costCenter": "amazon-cur",
+                            "key": "service",
+                            "path": "AWS/Services",
+                            "type": "col",
+                        }
+                    ],
+                }
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        assert "top_increases" in result
+        assert "top_decreases" in result
+        assert "total_delta" in result
+
+        # EC2 increased by 1000
+        increases = result["top_increases"]
+        assert any(m["name"] == "EC2" and m["delta"] == 1000 for m in increases)
+
+        # S3 decreased by 500
+        decreases = result["top_decreases"]
+        assert any(m["name"] == "S3" and m["delta"] == -500 for m in decreases)
+
+        # RDS is new (not in comparison)
+        assert "new_items" in result
+        assert any(m["name"] == "RDS" for m in result["new_items"])
+
+        # Lambda was removed (not in current)
+        assert "removed_items" in result
+        assert any(m["name"] == "Lambda" for m in result["removed_items"])
+
+    @pytest.mark.asyncio
+    async def test_top_movers_requires_group_by(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            with pytest.raises(ValueError, match="group_by is required"):
+                await server_module.get_top_movers_impl({"time_period": "last_30_days"})
+        finally:
+            server_module.finout_client = original_client
+
+    @pytest.mark.asyncio
+    async def test_top_movers_auto_comparison_period(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        periods_queried = []
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {"amazon-cur": {"col": [{"key": "svc", "path": "A/S", "type": "col"}]}}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                periods_queried.append(kwargs.get("time_period"))
+                return [{"Services": "EC2", "Sum(Net Amortized Cost)": 100}]
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_top_movers_impl(
+                {
+                    "time_period": "this_month",
+                    "group_by": [
+                        {"costCenter": "amazon-cur", "key": "svc", "path": "A/S", "type": "col"}
+                    ],
+                }
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        # Should have auto-inferred comparison_period as last_month
+        assert result["comparison_period"] == "last_month"
+        assert periods_queried[0] == "this_month"
+        assert periods_queried[1] == "last_month"
+
+
+class TestUnitEconomicsImpl:
+    """Tests for get_unit_economics_impl."""
+
+    @pytest.mark.asyncio
+    async def test_unit_economics_basic(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {
+                    "amazon-cur": {
+                        "col": [
+                            {"key": "service", "path": "AWS/Services", "type": "col"},
+                            {"key": "resource_id", "path": "AWS/ResourceId", "type": "col"},
+                        ]
+                    },
+                }
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                # API returns count-distinct values as strings
+                return [
+                    {
+                        "Services": "EC2",
+                        "Sum(Net Amortized Cost)": 10000,
+                        "Count Distinct(Resource ID)": "50",
+                    },
+                    {
+                        "Services": "RDS",
+                        "Sum(Net Amortized Cost)": 8000,
+                        "Count Distinct(Resource ID)": "10",
+                    },
+                ]
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_unit_economics_impl(
+                {
+                    "time_period": "last_30_days",
+                    "count_dimension": {
+                        "costCenter": "amazon-cur",
+                        "key": "resource_id",
+                        "path": "AWS/ResourceId",
+                        "type": "col",
+                    },
+                    "group_by": [
+                        {
+                            "costCenter": "amazon-cur",
+                            "key": "service",
+                            "path": "AWS/Services",
+                            "type": "col",
+                        }
+                    ],
+                }
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        assert "summary" in result
+        assert "data" in result
+        assert result["summary"]["total_unique_count"] == 60
+        assert result["summary"]["overall_cost_per_unit"] == "$300.00"
+
+        # EC2: 10000/50 = 200, RDS: 8000/10 = 800
+        ec2_row = next(r for r in result["data"] if r["name"] == "EC2")
+        assert ec2_row["cost_per_unit"] == 200.0
+        rds_row = next(r for r in result["data"] if r["name"] == "RDS")
+        assert rds_row["cost_per_unit"] == 800.0
+
+    @pytest.mark.asyncio
+    async def test_unit_economics_requires_count_dimension(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            with pytest.raises(ValueError, match="count_dimension is required"):
+                await server_module.get_unit_economics_impl({"time_period": "last_30_days"})
+        finally:
+            server_module.finout_client = original_client
+
+    @pytest.mark.asyncio
+    async def test_unit_economics_no_data(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                return []
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_unit_economics_impl(
+                {
+                    "time_period": "last_30_days",
+                    "count_dimension": {
+                        "costCenter": "amazon-cur",
+                        "key": "resource_id",
+                        "path": "AWS/ResourceId",
+                        "type": "col",
+                    },
+                }
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        assert result["data"] == []
+        assert "No data" in result["message"]
+
+
+class TestCostPatternsImpl:
+    @pytest.mark.asyncio
+    async def test_cost_patterns_basic(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                assert kwargs.get("x_axis_group_by") == "hourly"
+                return [
+                    {"Day": "2026-03-10T08:00:00", "Sum(Net Amortized Cost)": 100},
+                    {"Day": "2026-03-10T14:00:00", "Sum(Net Amortized Cost)": 200},
+                    {"Day": "2026-03-10T22:00:00", "Sum(Net Amortized Cost)": 50},
+                ]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_cost_patterns_impl({"time_period": "last_7_days"})
+        finally:
+            server_module.finout_client = original
+
+        assert "hourly_average" in result
+        assert "peak_hourly_cost" in result
+        assert result["total_hours_analyzed"] == 3
+
+
+class TestSavingsCoverageImpl:
+    @pytest.mark.asyncio
+    async def test_savings_coverage_basic(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                assert "savingsPlanEffectiveCost" in kwargs.get("billing_metrics", [])
+                return [
+                    {
+                        "Services": "EC2",
+                        "Sum(Net Amortized Cost)": 10000,
+                        "Sum(Savings Plan Effective Cost)": 6000,
+                        "Sum(Reservation Effective Cost)": 2000,
+                    },
+                ]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_savings_coverage_impl({"time_period": "last_30_days"})
+        finally:
+            server_module.finout_client = original
+
+        assert "summary" in result
+        assert result["summary"]["overall_coverage_percent"] == 80.0
+
+
+class TestTagCoverageImpl:
+    @pytest.mark.asyncio
+    async def test_tag_coverage_basic(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        call_count = 0
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    # Total cost query
+                    return [{"Sum(Net Amortized Cost)": 10000}]
+                else:
+                    # Grouped by tag — tagged spend
+                    return [
+                        {"Team": "Alpha", "Sum(Net Amortized Cost)": 6000},
+                        {"Team": "Beta", "Sum(Net Amortized Cost)": 2000},
+                    ]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_tag_coverage_impl(
+                {
+                    "time_period": "last_30_days",
+                    "tag_dimension": {
+                        "costCenter": "amazon-cur",
+                        "key": "team",
+                        "path": "AWS/Team",
+                        "type": "tag",
+                    },
+                }
+            )
+        finally:
+            server_module.finout_client = original
+
+        assert result["summary"]["overall_coverage_percent"] == 80.0
+        assert result["summary"]["untagged_cost"] == "$2,000.00"
+
+    @pytest.mark.asyncio
+    async def test_tag_coverage_requires_tag_dimension(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            with pytest.raises(ValueError, match="tag_dimension is required"):
+                await server_module.get_tag_coverage_impl({"time_period": "last_30_days"})
+        finally:
+            server_module.finout_client = original
+
+
+class TestBudgetStatusImpl:
+    @pytest.mark.asyncio
+    async def test_budget_status_basic(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_financial_plans(self, name=None, period=None):
+                return [
+                    {
+                        "name": "AWS Budget",
+                        "total_budget": 100000,
+                        "total_forecast": 95000,
+                        "cost_type": "netAmortizedCost",
+                    }
+                ]
+
+            async def query_costs_with_filters(self, **kwargs):
+                return [{"Sum(Net Amortized Cost)": 40000}]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_budget_status_impl({"period": "2026-3"})
+        finally:
+            server_module.finout_client = original
+
+        assert len(result["plans"]) == 1
+        plan = result["plans"][0]
+        assert plan["plan_name"] == "AWS Budget"
+        assert plan["budget"] == "$100,000.00"
+        assert plan["actual_spend"] == "$40,000.00"
+        assert plan["utilization_percent"] == 40.0
+
+
+class TestCostStatisticsImpl:
+    @pytest.mark.asyncio
+    async def test_cost_statistics_basic(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                assert kwargs.get("x_axis_group_by") == "daily"
+                return [
+                    {"Day": "2026-03-01", "Sum(Net Amortized Cost)": 100},
+                    {"Day": "2026-03-02", "Sum(Net Amortized Cost)": 200},
+                    {"Day": "2026-03-03", "Sum(Net Amortized Cost)": 150},
+                    {"Day": "2026-03-04", "Sum(Net Amortized Cost)": 300},
+                    {"Day": "2026-03-05", "Sum(Net Amortized Cost)": 50},
+                ]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_cost_statistics_impl({"time_period": "last_7_days"})
+        finally:
+            server_module.finout_client = original
+
+        assert "statistics" in result
+        stats = result["statistics"][0]
+        assert stats["name"] == "overall"
+        assert stats["daily_mean"] == 160.0
+        assert stats["daily_min"] == 50.0
+        assert stats["daily_max"] == 300.0
+        assert stats["days"] == 5
+
+        assert result["peak_day"]["cost"] == "$300.00"
+        assert result["trough_day"]["cost"] == "$50.00"
+
+
+class TestListDataExplorersImpl:
+    @pytest.mark.asyncio
+    async def test_list_data_explorers_basic(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            account_id = "test-123"
+            _account_info = {"name": "Test"}
+
+            async def get_data_explorers(self):
+                return [
+                    {
+                        "id": "exp-1",
+                        "name": "Monthly K8s Costs",
+                        "description": "Kubernetes costs by namespace",
+                        "columns": [
+                            {
+                                "columnType": "measurement",
+                                "aggregation": "sum",
+                                "type": "netAmortizedCost",
+                            },
+                            {"columnType": "dimension", "dimension": {"key": "namespace"}},
+                        ],
+                    },
+                    {
+                        "id": "exp-2",
+                        "name": "AWS by Service",
+                        "columns": [
+                            {
+                                "columnType": "measurement",
+                                "aggregation": "sum",
+                                "type": "netAmortizedCost",
+                            },
+                        ],
+                    },
+                ]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.list_data_explorers_impl({})
+        finally:
+            server_module.finout_client = original
+
+        assert result["total"] == 2
+        assert result["explorers"][0]["name"] == "Monthly K8s Costs"
+
+    @pytest.mark.asyncio
+    async def test_list_data_explorers_with_query(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            account_id = "test-123"
+            _account_info = {"name": "Test"}
+
+            async def get_data_explorers(self):
+                return [
+                    {"id": "1", "name": "K8s Costs", "columns": []},
+                    {"id": "2", "name": "AWS Costs", "columns": []},
+                ]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.list_data_explorers_impl({"query": "k8s"})
+        finally:
+            server_module.finout_client = original
+
+        assert result["total"] == 1
+        assert result["explorers"][0]["name"] == "K8s Costs"
+
+
+class TestInferPreviousPeriod:
+    """Unit tests for _infer_previous_period."""
+
+    def test_last_quarter_does_not_map_to_itself(self):
+        from finout_mcp_server.tools.analytics import _infer_previous_period
+
+        result = _infer_previous_period("last_quarter")
+        assert result != "last_quarter", "last_quarter must not compare against itself"
+        # Should be an absolute date range (two quarters ago)
+        assert " to " in result
+
+    def test_last_quarter_returns_prior_quarter_dates(self):
+        from datetime import date, timedelta
+
+        from finout_mcp_server.tools.analytics import _infer_previous_period
+
+        result = _infer_previous_period("last_quarter")
+        start_str, end_str = result.split(" to ")
+        prev_start = date.fromisoformat(start_str)
+        prev_end = date.fromisoformat(end_str)
+
+        today = date.today()
+        current_q_month = ((today.month - 1) // 3) * 3 + 1
+        last_q_month = current_q_month - 3
+        last_q_year = today.year
+        if last_q_month <= 0:
+            last_q_month += 12
+            last_q_year -= 1
+        last_q_start = date(last_q_year, last_q_month, 1)
+
+        # prev_end must be the day before last_quarter's start
+        assert prev_end == last_q_start - timedelta(days=1)
+        # prev_start must be exactly 3 months before last_quarter's start
+        assert prev_start.day == 1
+
+    def test_simple_named_periods(self):
+        from finout_mcp_server.tools.analytics import _infer_previous_period
+
+        assert _infer_previous_period("today") == "yesterday"
+        assert _infer_previous_period("this_week") == "last_week"
+        assert _infer_previous_period("this_month") == "last_month"
+        assert _infer_previous_period("last_week") == "two_weeks_ago"
+
+
+class TestTagCoverageEmptyBuckets:
+    """Tests that empty/null tag values are excluded from tagged spend."""
+
+    @pytest.mark.asyncio
+    async def test_empty_tag_values_excluded(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        call_count = 0
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    # Total cost query
+                    return [{"Sum(Net Amortized Cost)": 10000}]
+                else:
+                    # Tag-grouped query — includes an empty-tag row (untagged spend)
+                    return [
+                        {"Team": "Alpha", "Sum(Net Amortized Cost)": 6000},
+                        {"Team": "", "Sum(Net Amortized Cost)": 3000},  # empty = untagged
+                        {"Team": "N/A", "Sum(Net Amortized Cost)": 1000},  # sentinel = untagged
+                    ]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_tag_coverage_impl(
+                {
+                    "time_period": "last_30_days",
+                    "tag_dimension": {
+                        "costCenter": "amazon-cur",
+                        "key": "team",
+                        "path": "AWS/Team",
+                        "type": "tag",
+                    },
+                }
+            )
+        finally:
+            server_module.finout_client = original
+
+        # Only Alpha (6000) should count as tagged — empty and N/A rows are untagged
+        assert result["summary"]["overall_coverage_percent"] == 60.0
+        assert result["summary"]["tagged_cost"] == "$6,000.00"
+        assert result["summary"]["untagged_cost"] == "$4,000.00"
+
+
+class TestBudgetStatusMultiplePlans:
+    """Tests that each plan uses its own cost_type for actual spend."""
+
+    @pytest.mark.asyncio
+    async def test_multiple_plans_with_different_cost_types(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        queries_made: list[dict] = []
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_financial_plans(self, name=None, period=None):
+                return [
+                    {
+                        "name": "Net Amortized Plan",
+                        "total_budget": 100000,
+                        "total_forecast": None,
+                        "cost_type": "netAmortizedCost",
+                    },
+                    {
+                        "name": "Blended Plan",
+                        "total_budget": 80000,
+                        "total_forecast": None,
+                        "cost_type": "blendedCost",
+                    },
+                ]
+
+            async def query_costs_with_filters(self, **kwargs):
+                queries_made.append({"cost_type": kwargs.get("cost_type")})
+                if str(kwargs.get("cost_type", "")).lower().startswith("blended"):
+                    return [{"Sum(Blended Cost)": 30000}]
+                return [{"Sum(Net Amortized Cost)": 45000}]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_budget_status_impl({"period": "2026-3"})
+        finally:
+            server_module.finout_client = original
+
+        # Two different cost types → two separate queries
+        assert len(queries_made) == 2
+
+        plans = {p["plan_name"]: p for p in result["plans"]}
+        # Net amortized plan should see 45000 actual
+        assert plans["Net Amortized Plan"]["actual_spend"] == "$45,000.00"
+        # Blended plan should see 30000 actual (its own query)
+        assert plans["Blended Plan"]["actual_spend"] == "$30,000.00"
+
+
+class TestCostStatisticsGroupedPeakTrough:
+    """Tests that peak/trough use daily totals, not individual grouped rows."""
+
+    @pytest.mark.asyncio
+    async def test_peak_trough_use_daily_totals_when_grouped(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {
+                    "amazon-cur": {
+                        "col": [{"key": "service", "path": "AWS/Services", "type": "col"}]
+                    }
+                }
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                # Two services per day. On 03-01: EC2=100, S3=50 → total 150.
+                # On 03-02: EC2=200, S3=300 → total 500 (the true peak day).
+                # On 03-03: EC2=80, S3=20 → total 100 (the true trough day).
+                return [
+                    {"Day": "2026-03-01", "Services": "EC2", "Sum(Net Amortized Cost)": 100},
+                    {"Day": "2026-03-01", "Services": "S3", "Sum(Net Amortized Cost)": 50},
+                    {"Day": "2026-03-02", "Services": "EC2", "Sum(Net Amortized Cost)": 200},
+                    {"Day": "2026-03-02", "Services": "S3", "Sum(Net Amortized Cost)": 300},
+                    {"Day": "2026-03-03", "Services": "EC2", "Sum(Net Amortized Cost)": 80},
+                    {"Day": "2026-03-03", "Services": "S3", "Sum(Net Amortized Cost)": 20},
+                ]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_cost_statistics_impl(
+                {
+                    "time_period": "last_7_days",
+                    "group_by": [
+                        {
+                            "costCenter": "amazon-cur",
+                            "key": "service",
+                            "path": "AWS/Services",
+                            "type": "col",
+                        }
+                    ],
+                }
+            )
+        finally:
+            server_module.finout_client = original
+
+        # Peak day should be 03-02 (total 500), not 03-02-S3 alone
+        assert result["peak_day"]["date"] == "2026-03-02"
+        assert result["peak_day"]["cost"] == "$500.00"
+        # Trough day should be 03-03 (total 100)
+        assert result["trough_day"]["date"] == "2026-03-03"
+        assert result["trough_day"]["cost"] == "$100.00"
 
 
 class TestPromptTemplates:

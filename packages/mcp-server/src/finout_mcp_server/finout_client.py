@@ -1136,13 +1136,12 @@ class FinoutClient:
         """
         Build date payload for cost queries in the format the API expects.
 
-        Args:
-            time_period: Time period string
-
-        Returns:
-            Date dict with correct format
+        Supports:
+        - Named periods: today, yesterday, last_7_days, last_30_days, etc.
+        - Flexible relative: last_N_days, last_N_weeks, last_N_months
+        - Custom range: 'YYYY-MM-DD to YYYY-MM-DD'
         """
-        # Map time periods to relative ranges (API-native)
+        # Named periods → API-native relative ranges
         relative_map = {
             "today": {"relativeRange": "last::1::day", "type": "day"},
             "yesterday": {"relativeRange": "last::2::day", "type": "day"},
@@ -1157,14 +1156,36 @@ class FinoutClient:
         if time_period in relative_map:
             return relative_map[time_period]
 
-        # For custom periods (this_week, last_week, two_weeks_ago, etc.)
+        # Flexible relative: last_N_days, last_N_weeks, last_N_months
+        import re
+
+        flex_match = re.match(r"^last_(\d+)_(days?|weeks?|months?)$", time_period)
+        if flex_match:
+            n = int(flex_match.group(1))
+            unit = flex_match.group(2).rstrip("s")  # normalize "days" → "day"
+            return {"relativeRange": f"last::{n}::{unit}", "type": unit}
+
+        # For custom periods (this_week, last_week, two_weeks_ago, date ranges)
         # use absolute timestamps
         start_ts, end_ts = self._parse_time_period(time_period)
         return {
             "from": start_ts * 1000,
             "to": end_ts * 1000,
-            "type": "day",  # Use "day" granularity for custom ranges
+            "type": "day",
         }
+
+    _GRANULARITY_MAP = {
+        "hourly": "hour",
+        "daily": "day",
+        "weekly": "week",
+        "monthly": "month",
+        "quarterly": "quarter",
+        "hour": "hour",
+        "day": "day",
+        "week": "week",
+        "month": "month",
+        "quarter": "quarter",
+    }
 
     def _build_columns(
         self,
@@ -1172,23 +1193,17 @@ class FinoutClient:
         group_by: list[dict[str, Any]] | None = None,
         x_axis_group_by: str | None = None,
         usage_configuration: dict[str, Any] | None = None,
+        extra_measurements: list[dict[str, str]] | None = None,
+        billing_metrics: list[str] | None = None,
+        count_distinct: dict[str, str] | None = None,
+        predefined_queries: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the columns array for data-explorer queries."""
         columns: list[dict[str, Any]] = []
 
         # Date aggregation column
         if x_axis_group_by:
-            granularity_map = {
-                "daily": "day",
-                "weekly": "week",
-                "monthly": "month",
-                "quarterly": "quarter",
-                "day": "day",
-                "week": "week",
-                "month": "month",
-                "quarter": "quarter",
-            }
-            agg = granularity_map.get(x_axis_group_by, x_axis_group_by)
+            agg = self._GRANULARITY_MAP.get(x_axis_group_by, x_axis_group_by)
             columns.append({"columnType": "dateAggregation", "aggregation": agg})
 
         # Dimension columns (group-by)
@@ -1211,7 +1226,7 @@ class FinoutClient:
                     }
                 )
 
-        # Measurement column (cost) — always first measurement, gets orderBy
+        # Primary measurement column (cost) — gets orderBy
         columns.append(
             {
                 "columnType": "measurement",
@@ -1220,6 +1235,17 @@ class FinoutClient:
                 "orderBy": "descending",
             }
         )
+
+        # Extra measurement columns (additional cost types / aggregations)
+        if extra_measurements:
+            for em in extra_measurements:
+                columns.append(
+                    {
+                        "columnType": "measurement",
+                        "aggregation": em.get("aggregation", "sum"),
+                        "type": em["type"],
+                    }
+                )
 
         # Usage configuration → additional measurement column
         if usage_configuration:
@@ -1234,6 +1260,33 @@ class FinoutClient:
                 usage_col["units"] = usage_configuration["units"]
             columns.append(usage_col)
 
+        # Billing metric columns (savings plans, reservations)
+        if billing_metrics:
+            for bm in billing_metrics:
+                columns.append({"columnType": "billingMetric", "aggregation": "sum", "type": bm})
+
+        # Predefined query columns (runtime hours, S3 objects, etc.)
+        if predefined_queries:
+            for pq in predefined_queries:
+                columns.append({"columnType": "predefinedQuery", "queryType": pq})
+
+        # Count-distinct column
+        if count_distinct:
+            dim: dict[str, Any] = {
+                "key": count_distinct.get("key"),
+                "type": count_distinct.get("type"),
+                "path": count_distinct.get("path"),
+            }
+            if "costCenter" in count_distinct:
+                dim["costCenter"] = self._normalize_cost_center(count_distinct["costCenter"])
+            columns.append(
+                {
+                    "columnType": "dimensionsMeasurement",
+                    "aggregation": "countDistinct",
+                    "dimension": dim,
+                }
+            )
+
         return columns
 
     async def query_costs_with_filters(
@@ -1245,18 +1298,26 @@ class FinoutClient:
         cost_type: CostType = CostType.NET_AMORTIZED,
         usage_configuration: dict[str, Any] | None = None,
         limit: int | None = None,
+        extra_measurements: list[dict[str, str]] | None = None,
+        billing_metrics: list[str] | None = None,
+        count_distinct: dict[str, str] | None = None,
+        predefined_queries: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Query costs/usage via the data-explorer API.
 
         Args:
-            time_period: Time period string (e.g., 'last_30_days')
+            time_period: Time period string (e.g., 'last_30_days', 'last_14_days')
             filters: List of filter objects with key, value, operator
             group_by: List of group-by dimension objects (costCenter, key, path, type)
-            x_axis_group_by: X-axis grouping (e.g., "daily", "monthly")
+            x_axis_group_by: X-axis grouping (e.g., "hourly", "daily", "monthly")
             cost_type: Type of cost metric to retrieve
             usage_configuration: Usage config for querying usage alongside cost
             limit: Max rows to return (None = no limit, returns all rows)
+            extra_measurements: Additional cost metrics, each with type and optional aggregation
+            billing_metrics: Billing metric types (e.g., savingsPlanEffectiveCost)
+            count_distinct: Dimension to count distinct values of
+            predefined_queries: Predefined computation types (e.g., runtimeProportionResources)
 
         Returns:
             List of flat row dicts with human-readable column names as keys.
@@ -1276,6 +1337,10 @@ class FinoutClient:
                 group_by=group_by,
                 x_axis_group_by=x_axis_group_by,
                 usage_configuration=usage_configuration,
+                extra_measurements=extra_measurements,
+                billing_metrics=billing_metrics,
+                count_distinct=count_distinct,
+                predefined_queries=predefined_queries,
             )
 
             payload: dict[str, Any] = {

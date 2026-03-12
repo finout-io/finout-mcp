@@ -19,6 +19,29 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.19.0",
+        "date": "2026-03-12",
+        "title": "Advanced cost analytics tools",
+        "sections": {
+            "external_mcp": [
+                "New tool: get_top_movers \u2014 identify which services, regions, or tags drove the biggest cost changes between two periods",
+                "New tool: get_unit_economics \u2014 compute cost-per-resource (e.g., cost per EC2 instance, cost per namespace) for any dimension",
+                "New tool: get_cost_patterns \u2014 analyze hourly cost patterns, peak vs off-peak hours, and weekday/weekend splits",
+                "New tool: get_savings_coverage \u2014 show how much spend is covered by savings plans and reservations vs on-demand",
+                "New tool: get_tag_coverage \u2014 measure what percentage of spend is tagged, and surface groups with poor tag coverage",
+                "New tool: get_budget_status \u2014 compare actual spend against financial plan budgets with burn rate and month-end projections",
+                "New tool: get_cost_statistics \u2014 compute daily cost statistics (mean, median, peak/trough days, volatility) for any scope",
+                "compare_costs now supports extra cost measurements (amortized, unblended, blended) and billing metrics (savings plan, reservation) in a single call"
+            ],
+            "internal_mcp": [
+                "New tool: list_data_explorers \u2014 browse saved data explorer configurations to discover available cost views"
+            ],
+            "billy": [
+                "Tools panel updated with all new analytics tools"
+            ]
+        }
+    },
+    {
         "version": "0.18.0",
         "date": "2026-03-12",
         "title": "Data explorer costs and sidebar toggle polish",

@@ -209,6 +209,63 @@ async def discover_context_impl(args: dict) -> dict:
     return results
 
 
+async def list_data_explorers_impl(args: dict) -> dict:
+    """List saved data explorer configurations."""
+    from ..server import finout_client
+
+    assert finout_client is not None
+
+    query = args.get("query", "").lower()
+
+    explorers = await finout_client.get_data_explorers()
+
+    results: list[dict[str, Any]] = []
+    for explorer in explorers:
+        name = explorer.get("name", "")
+        description = explorer.get("description", "")
+
+        if query and query not in name.lower() and query not in (description or "").lower():
+            continue
+
+        # Extract column types for a concise summary
+        columns = explorer.get("columns", [])
+        col_summary = []
+        for col in columns:
+            col_type = col.get("columnType", "")
+            if col_type == "measurement":
+                col_summary.append(f"{col.get('aggregation', 'sum')}({col.get('type', '?')})")
+            elif col_type == "dimension":
+                dim = col.get("dimension", {})
+                col_summary.append(dim.get("key", "?"))
+            elif col_type == "dateAggregation":
+                col_summary.append(f"date:{col.get('aggregation', '?')}")
+            elif col_type == "billingMetric":
+                col_summary.append(col.get("type", "?"))
+            elif col_type == "predefinedQuery":
+                col_summary.append(col.get("queryType", "?"))
+
+        entry: dict[str, Any] = {
+            "id": explorer.get("id"),
+            "name": name,
+            "columns": col_summary,
+        }
+        if description:
+            entry["description"] = description
+        if explorer.get("filters"):
+            entry["has_filters"] = True
+
+        results.append(entry)
+
+    return {
+        "total": len(results),
+        "explorers": results[:30],
+        "_presentation_hint": (
+            "Show each explorer's name and columns. If the user wants details, "
+            "they can use discover_context with the explorer name."
+        ),
+    }
+
+
 async def get_account_context_impl() -> dict:
     """Implementation of get_account_context tool"""
     from ..server import finout_client

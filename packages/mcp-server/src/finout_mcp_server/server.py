@@ -62,6 +62,13 @@ PUBLIC_TOOLS: set[str] = {
     "get_financial_plans",
     "get_object_usages",
     "check_delete_safety",
+    "get_top_movers",
+    "get_unit_economics",
+    "get_cost_patterns",
+    "get_savings_coverage",
+    "get_tag_coverage",
+    "get_budget_status",
+    "get_cost_statistics",
 }
 
 BILLY_INTERNAL_EXTRA_TOOLS: set[str] = {
@@ -73,6 +80,7 @@ BILLY_INTERNAL_EXTRA_TOOLS: set[str] = {
     "create_dashboard",
     "render_chart",
     "analyze_virtual_tags",
+    "list_data_explorers",
 }
 
 BILLY_INTERNAL_TOOLS: set[str] = PUBLIC_TOOLS | BILLY_INTERNAL_EXTRA_TOOLS
@@ -92,6 +100,14 @@ INTERNAL_API_TOOLS: set[str] = {
     "create_view",
     "create_dashboard",
     "analyze_virtual_tags",
+    "get_top_movers",
+    "get_unit_economics",
+    "get_cost_patterns",
+    "get_savings_coverage",
+    "get_tag_coverage",
+    "get_budget_status",
+    "get_cost_statistics",
+    "list_data_explorers",
 }
 
 KEY_SECRET_TOOLS: set[str] = {
@@ -294,6 +310,22 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 result = await get_object_usages_impl(arguments)
             elif name == "check_delete_safety":
                 result = await check_delete_safety_impl(arguments)
+            elif name == "get_top_movers":
+                result = await get_top_movers_impl(arguments)
+            elif name == "get_unit_economics":
+                result = await get_unit_economics_impl(arguments)
+            elif name == "get_cost_patterns":
+                result = await get_cost_patterns_impl(arguments)
+            elif name == "get_savings_coverage":
+                result = await get_savings_coverage_impl(arguments)
+            elif name == "get_tag_coverage":
+                result = await get_tag_coverage_impl(arguments)
+            elif name == "get_budget_status":
+                result = await get_budget_status_impl(arguments)
+            elif name == "get_cost_statistics":
+                result = await get_cost_statistics_impl(arguments)
+            elif name == "list_data_explorers":
+                result = await list_data_explorers_impl(arguments or {})
             else:
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -401,6 +433,15 @@ from .tools import (
 from .tools import (
     get_anomalies_impl as get_anomalies_impl,
 )
+from .tools import (  # noqa: E402
+    get_budget_status_impl as get_budget_status_impl,
+)
+from .tools import (
+    get_cost_patterns_impl as get_cost_patterns_impl,
+)
+from .tools import (
+    get_cost_statistics_impl as get_cost_statistics_impl,
+)
 from .tools import (
     get_filter_values_impl as get_filter_values_impl,
 )
@@ -411,6 +452,18 @@ from .tools import (
     get_object_usages_impl as get_object_usages_impl,
 )
 from .tools import (
+    get_savings_coverage_impl as get_savings_coverage_impl,
+)
+from .tools import (
+    get_tag_coverage_impl as get_tag_coverage_impl,
+)
+from .tools import (
+    get_top_movers_impl as get_top_movers_impl,
+)
+from .tools import (
+    get_unit_economics_impl as get_unit_economics_impl,
+)
+from .tools import (
     get_usage_unit_types_impl as get_usage_unit_types_impl,
 )
 from .tools import (
@@ -418,6 +471,9 @@ from .tools import (
 )
 from .tools import (
     list_available_filters_impl as list_available_filters_impl,
+)
+from .tools import (
+    list_data_explorers_impl as list_data_explorers_impl,
 )
 from .tools import (
     query_costs_impl as query_costs_impl,

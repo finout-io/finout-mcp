@@ -17,7 +17,7 @@ dependencies = [
 finout-mcp = "finout_mcp_server.server:main"
 
 [project.optional-dependencies]
-observability = ["langfuse>=2.0.0"]
+observability = ["langfuse>=4.0.0,<5"]
 
 [build-system]
 requires = ["hatchling"]

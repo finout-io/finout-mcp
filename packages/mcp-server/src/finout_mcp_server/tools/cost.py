@@ -57,6 +57,10 @@ async def query_costs_impl(args: dict) -> dict:
     group_by = args.get("group_by")
     x_axis_group_by = args.get("x_axis_group_by") or _auto_granularity(time_period)
     usage_configuration = args.get("usage_configuration")
+    extra_measurements = args.get("extra_measurements")
+    billing_metrics = args.get("billing_metrics")
+    count_distinct = args.get("count_distinct")
+    predefined_queries = args.get("predefined_queries")
 
     # Check if internal API is configured
     if not finout_client.internal_api_url:
@@ -137,13 +141,17 @@ async def query_costs_impl(args: dict) -> dict:
                     f"Use search_filters to find equivalent filters for those providers."
                 )
 
-    # Query costs using internal API
+    # Query costs using data-explorer API
     data = await finout_client.query_costs_with_filters(
         time_period=time_period,
         filters=filters if filters else None,
         group_by=group_by,
         x_axis_group_by=x_axis_group_by,
         usage_configuration=usage_configuration,
+        extra_measurements=extra_measurements,
+        billing_metrics=billing_metrics,
+        count_distinct=count_distinct,
+        predefined_queries=predefined_queries,
     )
 
     # Summarize to avoid context overload
@@ -209,6 +217,8 @@ async def compare_costs_impl(args: dict) -> dict:
     comparison_period = args["comparison_period"]
     filters = args.get("filters", [])
     group_by = args.get("group_by")
+    extra_measurements = args.get("extra_measurements")
+    billing_metrics = args.get("billing_metrics")
 
     # Check if internal API is configured
     if not finout_client.internal_api_url:
@@ -232,12 +242,16 @@ async def compare_costs_impl(args: dict) -> dict:
         time_period=current_period,
         filters=filters if filters else None,
         group_by=group_by,
+        extra_measurements=extra_measurements,
+        billing_metrics=billing_metrics,
     )
 
     comparison_data = await finout_client.query_costs_with_filters(
         time_period=comparison_period,
         filters=filters if filters else None,
         group_by=group_by,
+        extra_measurements=extra_measurements,
+        billing_metrics=billing_metrics,
     )
 
     current_total = _extract_total(current_data)
