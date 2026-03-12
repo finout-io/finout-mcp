@@ -48,7 +48,7 @@ export function SharedConversation() {
         <Stack gap={4}>
           <Title order={2}>{conversation.name}</Title>
           <Text size="sm" c="dimmed">
-            {conversation.account_id} · {conversation.model} ·{' '}
+            {conversation.account_name ?? conversation.account_id} · {conversation.model} ·{' '}
             {new Date(conversation.created_at).toLocaleDateString()}
           </Text>
         </Stack>

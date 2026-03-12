@@ -126,6 +126,14 @@ class Database:
                 """
             )
 
+            # Add account_name column if missing (migration for older DBs)
+            await conn.execute(
+                """
+                ALTER TABLE conversations
+                ADD COLUMN IF NOT EXISTS account_name VARCHAR(255);
+                """
+            )
+
             # Backward-compatible migration for older DBs that may lack defaults
             # or contain legacy null timestamps.
             await conn.execute(
@@ -178,6 +186,7 @@ class Database:
         tool_calls: Optional[List[Dict[str, Any]]] = None,
         conversation_id: Optional[str] = None,
         user_email: Optional[str] = None,
+        account_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Insert a new conversation or update an existing one by ID."""
         async with self.pool.acquire() as conn:
@@ -189,7 +198,7 @@ class Database:
                         tool_calls = $4::jsonb, user_email = $5,
                         updated_at = NOW()
                     WHERE id = $6
-                    RETURNING id, name, account_id, model, created_at, share_token
+                    RETURNING id, name, account_id, account_name, model, created_at, share_token
                     """,
                     name,
                     model,
@@ -206,13 +215,14 @@ class Database:
             row = await conn.fetchrow(
                 """
                 INSERT INTO conversations
-                    (id, name, account_id, model, messages, tool_calls, user_email, share_token)
-                VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
-                RETURNING id, name, account_id, model, created_at, share_token
+                    (id, name, account_id, account_name, model, messages, tool_calls, user_email, share_token)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9)
+                RETURNING id, name, account_id, account_name, model, created_at, share_token
                 """,
                 UUID(conversation_id) if conversation_id else uuid4(),
                 name,
                 account_id,
+                account_name,
                 model,
                 json.dumps(messages),
                 json.dumps(tool_calls) if tool_calls else None,
@@ -257,7 +267,7 @@ class Database:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, name, account_id, model, messages, tool_calls, user_note,
+                SELECT id, name, account_id, account_name, model, messages, tool_calls, user_note,
                        created_at, updated_at, share_token
                 FROM conversations
                 WHERE id = $1
@@ -281,7 +291,7 @@ class Database:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, name, account_id, model, messages, tool_calls, user_note,
+                SELECT id, name, account_id, account_name, model, messages, tool_calls, user_note,
                        created_at, updated_at, share_token
                 FROM conversations
                 WHERE share_token = $1

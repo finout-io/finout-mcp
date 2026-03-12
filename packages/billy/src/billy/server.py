@@ -1267,6 +1267,7 @@ async def save_conversation(request: dict):
         messages = request.get("messages")
         tool_calls = request.get("tool_calls")
         user_email = request.get("user_email")
+        account_name = request.get("account_name")
 
         if not all([name, account_id, model, messages]):
             raise HTTPException(status_code=400, detail="Missing required fields")
@@ -1279,6 +1280,7 @@ async def save_conversation(request: dict):
             tool_calls=tool_calls,
             conversation_id=request.get("conversation_id"),
             user_email=user_email,
+            account_name=account_name,
         )
 
         return {

@@ -152,6 +152,7 @@ export function AppLayout() {
     save({
       name,
       accountId,
+      accountName: session.selectedAccount?.name,
       model,
       messages: chat.messages,
       toolCalls,

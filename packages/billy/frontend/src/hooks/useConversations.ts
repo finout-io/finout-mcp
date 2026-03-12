@@ -36,6 +36,7 @@ export function useConversations(accountId: string | null, search?: string) {
     (params: {
       name: string
       accountId: string
+      accountName?: string
       model: string
       messages: Message[]
       toolCalls: ToolCall[]
@@ -45,6 +46,7 @@ export function useConversations(accountId: string | null, search?: string) {
       return saveMutation.mutateAsync({
         name: params.name,
         account_id: params.accountId,
+        account_name: params.accountName,
         model: params.model,
         messages: params.messages,
         tool_calls: params.toolCalls,

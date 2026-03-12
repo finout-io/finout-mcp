@@ -37,6 +37,7 @@ export interface Conversation {
   id: string
   name: string
   account_id: string
+  account_name?: string
   model: string
   messages: Message[]
   tool_calls: ToolCall[]

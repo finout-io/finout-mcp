@@ -4,6 +4,7 @@ import type { Conversation, ConversationSummary, Message, ToolCall } from '../ty
 export interface SaveConversationParams {
   name: string
   account_id: string
+  account_name?: string
   model: string
   messages: Message[]
   tool_calls: ToolCall[]
