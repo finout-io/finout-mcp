@@ -47,7 +47,7 @@ repo_root = package_root.parent.parent
 
 # Langfuse observability — auto-instrument Anthropic SDK calls.
 _langfuse: Any = None
-if os.getenv("LANGFUSE_SECRET_KEY"):
+if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
     try:
         from langfuse import Langfuse as _Langfuse
 
@@ -56,8 +56,7 @@ if os.getenv("LANGFUSE_SECRET_KEY"):
             _langfuse = candidate
         else:
             print(
-                "Langfuse client missing v3 tracing API; disabling Billy tracing. "
-                "Install a newer langfuse package to re-enable observability."
+                "Langfuse client missing required tracing API; disabling Billy tracing."
             )
 
         from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor

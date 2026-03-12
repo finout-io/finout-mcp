@@ -258,7 +258,7 @@ CHANGELOG_ENTRIES: List[ChangelogEntry] = [
             ],
             "billy": [
                 "Add evaluation dataset seeder and experiment runner with tool_correctness, no_fabrication, and response_quality (LLM-as-judge) scores",
-                "Fix evaluation runner to use Langfuse v3 run_experiment API with async task support"
+                "Fix evaluation runner to use the Langfuse experiment API with async task support"
             ]
         }
     },

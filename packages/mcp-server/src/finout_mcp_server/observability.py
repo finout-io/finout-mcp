@@ -27,7 +27,16 @@ def _get_langfuse() -> Any:
 
     _langfuse_checked = True
 
-    if not os.getenv("LANGFUSE_SECRET_KEY"):
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+    if not public_key or not secret_key:
+        logger.debug(
+            "Langfuse observability disabled: missing credentials",
+            extra={
+                "has_public_key": bool(public_key),
+                "has_secret_key": bool(secret_key),
+            },
+        )
         return None
 
     try:
@@ -41,8 +50,7 @@ def _get_langfuse() -> Any:
             logger.info("Langfuse observability enabled (host=%s)", os.getenv("LANGFUSE_HOST"))
         else:
             logger.warning(
-                "Langfuse client missing v3 tracing API; disabling MCP observability. "
-                "Install a newer langfuse package to re-enable observability."
+                "Langfuse client missing required tracing API; disabling MCP observability."
             )
             _langfuse_instance = None
     except Exception:

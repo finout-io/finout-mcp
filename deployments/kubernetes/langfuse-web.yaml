@@ -80,21 +80,25 @@ spec:
             secretKeyRef:
               name: langfuse-secrets
               key: langfuse-s3-access-key-id
+              optional: true
         - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
               name: langfuse-secrets
               key: langfuse-s3-secret-access-key
+              optional: true
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
               name: langfuse-secrets
               key: langfuse-s3-access-key-id
+              optional: true
         - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
               name: langfuse-secrets
               key: langfuse-s3-secret-access-key
+              optional: true
         - name: LANGFUSE_INIT_ORG_ID
           valueFrom:
             secretKeyRef:

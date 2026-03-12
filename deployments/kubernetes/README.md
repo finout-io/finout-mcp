@@ -271,6 +271,8 @@ This repository now includes a full in-cluster Langfuse stack in the `billy` nam
 - `langfuse-redis` (StatefulSet + PVC)
 - `langfuse-ingress`
 
+The application code is pinned to the Python Langfuse SDK `4.x`, while the official self-host server images are still published on the `3.x` image line. Keep those version tracks separate when upgrading.
+
 S3 storage default is AWS S3 (`billy-langfuse` bucket). `langfuse-minio` is optional/dev-only.
 
 ### 1. Create Langfuse Secrets
@@ -288,7 +290,8 @@ Required keys are documented in the example file:
 - `encryption-key`
 - `clickhouse-user` / `clickhouse-password`
 - `redis-auth`
-- `langfuse-s3-access-key-id` / `langfuse-s3-secret-access-key`
+- Optional: `langfuse-s3-access-key-id` / `langfuse-s3-secret-access-key`
+  Omit these if the cluster provides AWS credentials via IAM/IRSA or another ambient credential source.
 
 Create the S3 bucket before rollout:
 
@@ -299,13 +302,11 @@ aws s3api create-bucket --bucket billy-langfuse --region us-east-1
 ### 2. Apply Langfuse Core Resources
 
 ```bash
-kubectl apply -f deployments/kubernetes/langfuse-configmap.yaml
-kubectl apply -f deployments/kubernetes/langfuse-clickhouse.yaml
-kubectl apply -f deployments/kubernetes/langfuse-redis.yaml
-kubectl apply -f deployments/kubernetes/langfuse-web.yaml
-kubectl apply -f deployments/kubernetes/langfuse-worker.yaml
-kubectl apply -f deployments/kubernetes/langfuse-ingress.yaml
+kubectl apply -k deployments/kubernetes
 ```
+
+The Kubernetes base currently pins `langfuse/langfuse:3.157.0` and `langfuse/langfuse-worker:3.157.0`.
+If you need a different Langfuse server image, update the `images:` section in `deployments/kubernetes/kustomization.yaml`.
 
 Optional dev-only MinIO:
 

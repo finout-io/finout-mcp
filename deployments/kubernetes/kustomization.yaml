@@ -20,17 +20,24 @@ resources:
 # - langfuse-secret.yaml  # Uncomment after creating from .example
 
 # Common labels for all resources
-commonLabels:
-  app.kubernetes.io/name: billy
-  app.kubernetes.io/component: diagnostic-tool
-  app.kubernetes.io/part-of: finout-mcp
-  app.kubernetes.io/managed-by: kustomize
+labels:
+- pairs:
+    app.kubernetes.io/name: billy
+    app.kubernetes.io/component: diagnostic-tool
+    app.kubernetes.io/part-of: finout-mcp
+    app.kubernetes.io/managed-by: kustomize
 
 # Image configuration
 images:
 - name: 277411487094.dkr.ecr.us-east-1.amazonaws.com/billy
   newName: 277411487094.dkr.ecr.us-east-1.amazonaws.com/billy
   newTag: production
+- name: langfuse/langfuse
+  newName: langfuse/langfuse
+  newTag: "3.157.0"
+- name: langfuse/langfuse-worker
+  newName: langfuse/langfuse-worker
+  newTag: "3.157.0"
 
 # ConfigMap generator (alternative to separate file)
 # configMapGenerator:

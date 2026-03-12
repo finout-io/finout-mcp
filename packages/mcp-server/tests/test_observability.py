@@ -19,7 +19,7 @@ def _reset_langfuse_state():
 
 
 def _make_mock_langfuse():
-    """Create a mock Langfuse client with v3 start_as_current_span API."""
+    """Create a mock Langfuse client with the tracing API expected by Langfuse 4."""
     mock_span = MagicMock()
     mock_lf = MagicMock()
 
@@ -32,11 +32,13 @@ def _make_mock_langfuse():
 
 
 def test_get_langfuse_returns_none_without_env(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
     assert observability._get_langfuse() is None
 
 
 def test_get_langfuse_caches_result(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
     observability._get_langfuse()
     assert observability._langfuse_checked is True
@@ -45,6 +47,7 @@ def test_get_langfuse_caches_result(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_get_langfuse_creates_instance_when_configured(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
     mock_lf = MagicMock()
 
@@ -58,6 +61,7 @@ def test_get_langfuse_creates_instance_when_configured(monkeypatch: pytest.Monke
 
 
 def test_get_langfuse_returns_none_on_import_error(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
     with patch.dict("sys.modules", {"langfuse": None}):
         result = observability._get_langfuse()
@@ -68,6 +72,7 @@ def test_get_langfuse_returns_none_on_import_error(monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.asyncio
 async def test_trace_tool_noop_without_langfuse(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
 
     async with observability.trace_tool("query_costs", {"period": "last_7_days"}) as ctx:

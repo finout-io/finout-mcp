@@ -28,8 +28,10 @@ services:
 
   # --- Langfuse observability stack ---
   # Uses a host PostgreSQL instance (port 5432) for Postgres.
+  # Langfuse self-host images are currently published on the v3 server line.
+  # The Python SDK used by Billy/MCP is pinned separately at langfuse==4.x.
   langfuse-web:
-    image: docker.io/langfuse/langfuse:3
+    image: docker.io/langfuse/langfuse:${LANGFUSE_SERVER_IMAGE_TAG:-3.157.0}
     restart: unless-stopped
     depends_on:
       langfuse-minio:
@@ -84,7 +86,7 @@ services:
       LANGFUSE_INIT_USER_PASSWORD: devdevdev
 
   langfuse-worker:
-    image: docker.io/langfuse/langfuse-worker:3
+    image: docker.io/langfuse/langfuse-worker:${LANGFUSE_SERVER_IMAGE_TAG:-3.157.0}
     restart: unless-stopped
     depends_on:
       langfuse-minio:
