@@ -1,6 +1,7 @@
 """Cost querying and comparison tools."""
 
-from datetime import datetime
+import re
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from ..validation import _validate_filter_metadata, _validate_filter_values
@@ -197,14 +198,127 @@ def _is_metric_column(key: str) -> bool:
 _DATE_COLUMNS = {"Day", "Week", "Month", "Quarter", "Half Year", "Year"}
 
 
-def _find_dimension_column(row: dict[str, Any]) -> str | None:
+def _find_dimension_column(row: dict[str, Any], exclude_col: str | None = None) -> str | None:
     """Find the dimension (group-by) column — the non-numeric, non-date column."""
     for key, val in row.items():
+        if key == exclude_col:
+            continue
         if key in _DATE_COLUMNS:
             continue
         if isinstance(val, str) and not _is_metric_column(key):
             return key
     return None
+
+
+def _is_partial_period(time_period: str) -> bool:
+    """Return True if this period ends today (i.e., it is a partial, in-progress period)."""
+    return time_period in ("today", "this_week", "this_month", "this_quarter", "this_year")
+
+
+def _elapsed_days_in_period(time_period: str) -> int:
+    """Number of days elapsed so far in the current partial period, including today."""
+    today = date.today()
+    if time_period == "today":
+        return 1
+    if time_period == "this_week":
+        return today.weekday() + 1  # Mon=0 → 1 elapsed day
+    if time_period == "this_month":
+        return today.day
+    if time_period == "this_quarter":
+        q_start_month = ((today.month - 1) // 3) * 3 + 1
+        return (today - today.replace(month=q_start_month, day=1)).days + 1
+    if time_period == "this_year":
+        return (today - today.replace(month=1, day=1)).days + 1
+    return 0
+
+
+def _constrain_comparison_period(comparison_period: str, elapsed_days: int) -> str | None:
+    """
+    Constrain a named comparison period to its first N days to match a partial current period.
+    Returns an absolute date range string, or None if no adjustment applies.
+    """
+    today = date.today()
+
+    if comparison_period == "last_month":
+        start = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+        end = start + timedelta(days=elapsed_days - 1)
+        return f"{start.isoformat()} to {end.isoformat()}"
+
+    if comparison_period == "last_week":
+        days_since_monday = today.weekday()
+        last_week_monday = today - timedelta(days=days_since_monday + 7)
+        end = last_week_monday + timedelta(days=elapsed_days - 1)
+        return f"{last_week_monday.isoformat()} to {end.isoformat()}"
+
+    if comparison_period == "last_quarter":
+        current_q_month = ((today.month - 1) // 3) * 3 + 1
+        last_q_month = current_q_month - 3
+        last_q_year = today.year
+        if last_q_month <= 0:
+            last_q_month += 12
+            last_q_year -= 1
+        start = date(last_q_year, last_q_month, 1)
+        end = start + timedelta(days=elapsed_days - 1)
+        return f"{start.isoformat()} to {end.isoformat()}"
+
+    # Absolute ranges or unknown named periods — no adjustment possible
+    return None
+
+
+def _infer_previous_period(time_period: str) -> str:
+    """Infer the previous equivalent period for comparison.
+
+    For 'last_N_days', computes the N days immediately before that window.
+    For named periods, uses natural previous equivalents.
+    """
+    # Named period defaults
+    simple_map = {
+        "today": "yesterday",
+        "this_week": "last_week",
+        "last_week": "two_weeks_ago",
+        "this_month": "last_month",
+    }
+    if time_period in simple_map:
+        return simple_map[time_period]
+
+    # Flexible relative: last_N_days → absolute range for the preceding N days
+    flex_match = re.match(r"^last_(\d+)_(days?)$", time_period)
+    if flex_match:
+        n = int(flex_match.group(1))
+        today = date.today()
+        prev_end = today - timedelta(days=n + 1)
+        prev_start = today - timedelta(days=2 * n)
+        return f"{prev_start.isoformat()} to {prev_end.isoformat()}"
+
+    # last_N_weeks / last_N_months — use double lookback as approximation
+    flex_match = re.match(r"^last_(\d+)_(weeks?|months?)$", time_period)
+    if flex_match:
+        n = int(flex_match.group(1))
+        unit = flex_match.group(2).rstrip("s")
+        days = n * 7 if unit == "week" else n * 30
+        today = date.today()
+        prev_end = today - timedelta(days=days + 1)
+        prev_start = today - timedelta(days=2 * days)
+        return f"{prev_start.isoformat()} to {prev_end.isoformat()}"
+
+    if time_period == "last_quarter":
+        today = date.today()
+        current_q_month = ((today.month - 1) // 3) * 3 + 1
+        last_q_month = current_q_month - 3
+        last_q_year = today.year
+        if last_q_month <= 0:
+            last_q_month += 12
+            last_q_year -= 1
+        prev_q_month = last_q_month - 3
+        prev_q_year = last_q_year
+        if prev_q_month <= 0:
+            prev_q_month += 12
+            prev_q_year -= 1
+        prev_start = date(prev_q_year, prev_q_month, 1)
+        prev_end = date(last_q_year, last_q_month, 1) - timedelta(days=1)
+        return f"{prev_start.isoformat()} to {prev_end.isoformat()}"
+
+    return "last_30_days"
 
 
 async def compare_costs_impl(args: dict) -> dict:
@@ -321,8 +435,6 @@ async def compare_costs_impl(args: dict) -> dict:
         result["_validation_warnings"] = validation_warnings
 
     # Warn when comparing a partial period to a full one — raw totals are misleading
-    from .analytics import _constrain_comparison_period, _elapsed_days_in_period, _is_partial_period
-
     if _is_partial_period(current_period):
         elapsed = _elapsed_days_in_period(current_period)
         constrained = _constrain_comparison_period(comparison_period, elapsed)

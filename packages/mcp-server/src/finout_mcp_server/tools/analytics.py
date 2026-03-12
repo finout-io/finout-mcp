@@ -1,9 +1,43 @@
 """Analytical tools built on top of cost queries."""
 
+import asyncio
+import calendar
 import statistics
+from collections import defaultdict
+from datetime import datetime
 from typing import Any
 
-from .cost import _find_cost_column, _find_dimension_column, format_currency
+from ..finout_client import CostType
+from ..validation import _validate_filter_metadata, _validate_filter_values
+from .cost import (
+    _constrain_comparison_period,
+    _elapsed_days_in_period,
+    _find_cost_column,
+    _find_dimension_column,
+    _infer_previous_period,
+    _is_partial_period,
+    format_currency,
+)
+
+_VALID_COST_TYPES = {e.value for e in CostType}
+
+
+async def _validate_filters_and_groupby(
+    finout_client: Any,
+    filters: list,
+    group_by: list | None,
+) -> tuple[list, list | None, list[str]]:
+    """Validate filters and group_by, returning corrected values and any warnings."""
+    warnings: list[str] = []
+    if filters:
+        filters, meta_warnings = await _validate_filter_metadata(finout_client, filters)
+        warnings.extend(meta_warnings)
+        filters, value_warnings = await _validate_filter_values(finout_client, filters)
+        warnings.extend(value_warnings)
+    if group_by:
+        group_by, gb_warnings = await _validate_filter_metadata(finout_client, group_by)
+        warnings.extend(gb_warnings)
+    return filters, group_by, warnings
 
 
 async def get_top_movers_impl(args: dict) -> dict:
@@ -48,30 +82,22 @@ async def get_top_movers_impl(args: dict) -> dict:
             )
             comparison_period = constrained
 
-    from ..validation import _validate_filter_metadata, _validate_filter_values
-
-    validation_warnings: list[str] = []
-    if filters:
-        filters, meta_warnings = await _validate_filter_metadata(finout_client, filters)
-        validation_warnings.extend(meta_warnings)
-        filters, value_warnings = await _validate_filter_values(finout_client, filters)
-        validation_warnings.extend(value_warnings)
-
-    if group_by:
-        group_by, gb_warnings = await _validate_filter_metadata(finout_client, group_by)
-        validation_warnings.extend(gb_warnings)
-
-    # Query both periods grouped by the dimension
-    current_data = await finout_client.query_costs_with_filters(
-        time_period=time_period,
-        filters=filters if filters else None,
-        group_by=group_by,
+    filters, group_by, validation_warnings = await _validate_filters_and_groupby(
+        finout_client, filters, group_by
     )
 
-    comparison_data = await finout_client.query_costs_with_filters(
-        time_period=comparison_period,
-        filters=filters if filters else None,
-        group_by=group_by,
+    # Query both periods grouped by the dimension in parallel
+    current_data, comparison_data = await asyncio.gather(
+        finout_client.query_costs_with_filters(
+            time_period=time_period,
+            filters=filters if filters else None,
+            group_by=group_by,
+        ),
+        finout_client.query_costs_with_filters(
+            time_period=comparison_period,
+            filters=filters if filters else None,
+            group_by=group_by,
+        ),
     )
 
     # Build lookup dicts by dimension value
@@ -200,23 +226,12 @@ async def get_unit_economics_impl(args: dict) -> dict:
             "message": "Set FINOUT_API_URL environment variable.",
         }
 
-    from ..validation import _validate_filter_metadata, _validate_filter_values
-
-    validation_warnings: list[str] = []
-    if filters:
-        filters, meta_warnings = await _validate_filter_metadata(finout_client, filters)
-        validation_warnings.extend(meta_warnings)
-        filters, value_warnings = await _validate_filter_values(finout_client, filters)
-        validation_warnings.extend(value_warnings)
-
-    if group_by:
-        group_by, gb_warnings = await _validate_filter_metadata(finout_client, group_by)
-        validation_warnings.extend(gb_warnings)
+    filters, group_by, validation_warnings = await _validate_filters_and_groupby(
+        finout_client, filters, group_by
+    )
 
     # Single query: cost + count_distinct in one call
-    from ..finout_client import CostType
-
-    ct = CostType(cost_type) if cost_type in [e.value for e in CostType] else CostType.NET_AMORTIZED
+    ct = CostType(cost_type) if cost_type in _VALID_COST_TYPES else CostType.NET_AMORTIZED
 
     data = await finout_client.query_costs_with_filters(
         time_period=time_period,
@@ -314,65 +329,6 @@ def _to_number(val: Any) -> float:
     return 0.0
 
 
-def _is_partial_period(time_period: str) -> bool:
-    """Return True if this period ends today (i.e., it is a partial, in-progress period)."""
-    return time_period in ("today", "this_week", "this_month", "this_quarter", "this_year")
-
-
-def _elapsed_days_in_period(time_period: str) -> int:
-    """Number of days elapsed so far in the current partial period, including today."""
-    from datetime import date
-
-    today = date.today()
-    if time_period == "today":
-        return 1
-    if time_period == "this_week":
-        return today.weekday() + 1  # Mon=0 → 1 elapsed day
-    if time_period == "this_month":
-        return today.day
-    if time_period == "this_quarter":
-        q_start_month = ((today.month - 1) // 3) * 3 + 1
-        return (today - today.replace(month=q_start_month, day=1)).days + 1
-    if time_period == "this_year":
-        return (today - today.replace(month=1, day=1)).days + 1
-    return 0
-
-
-def _constrain_comparison_period(comparison_period: str, elapsed_days: int) -> str | None:
-    """
-    Constrain a named comparison period to its first N days to match a partial current period.
-    Returns an absolute date range string, or None if no adjustment applies.
-    """
-    from datetime import date, timedelta
-
-    today = date.today()
-
-    if comparison_period == "last_month":
-        start = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
-        end = start + timedelta(days=elapsed_days - 1)
-        return f"{start.isoformat()} to {end.isoformat()}"
-
-    if comparison_period == "last_week":
-        days_since_monday = today.weekday()
-        last_week_monday = today - timedelta(days=days_since_monday + 7)
-        end = last_week_monday + timedelta(days=elapsed_days - 1)
-        return f"{last_week_monday.isoformat()} to {end.isoformat()}"
-
-    if comparison_period == "last_quarter":
-        current_q_month = ((today.month - 1) // 3) * 3 + 1
-        last_q_month = current_q_month - 3
-        last_q_year = today.year
-        if last_q_month <= 0:
-            last_q_month += 12
-            last_q_year -= 1
-        start = date(last_q_year, last_q_month, 1)
-        end = start + timedelta(days=elapsed_days - 1)
-        return f"{start.isoformat()} to {end.isoformat()}"
-
-    # Absolute ranges or unknown named periods — no adjustment possible
-    return None
-
-
 _EMPTY_TAG_SENTINELS = {"", "n/a", "none", "null", "unknown", "untagged", "(empty)", "(none)"}
 
 
@@ -383,99 +339,6 @@ def _is_empty_tag_value(val: Any) -> bool:
     if isinstance(val, str) and val.strip().lower() in _EMPTY_TAG_SENTINELS:
         return True
     return False
-
-
-def _find_tag_value_column(row: dict[str, Any], exclude_col: str | None) -> str | None:
-    """Find the tag-value column, excluding the outer group-by dimension column."""
-    from .cost import _DATE_COLUMNS, _is_metric_column
-
-    for key, val in row.items():
-        if key == exclude_col:
-            continue
-        if key in _DATE_COLUMNS:
-            continue
-        if isinstance(val, str) and not _is_metric_column(key):
-            return key
-    return None
-
-
-def _infer_previous_period(time_period: str) -> str:
-    """Infer the previous equivalent period for comparison.
-
-    For 'last_N_days', computes the N days immediately before that window.
-    For named periods, uses natural previous equivalents.
-    """
-    import re
-    from datetime import date, timedelta
-
-    # Named period defaults
-    simple_map = {
-        "today": "yesterday",
-        "this_week": "last_week",
-        "last_week": "two_weeks_ago",
-        "this_month": "last_month",
-    }
-    if time_period in simple_map:
-        return simple_map[time_period]
-
-    # Flexible relative: last_N_days → absolute range for the preceding N days
-    flex_match = re.match(r"^last_(\d+)_(days?)$", time_period)
-    if flex_match:
-        n = int(flex_match.group(1))
-        today = date.today()
-        # Current window: (today - n) to (today - 1)
-        # Previous window: (today - 2n) to (today - n - 1)
-        prev_end = today - timedelta(days=n + 1)
-        prev_start = today - timedelta(days=2 * n)
-        return f"{prev_start.isoformat()} to {prev_end.isoformat()}"
-
-    # last_N_weeks / last_N_months — use double lookback as approximation
-    flex_match = re.match(r"^last_(\d+)_(weeks?|months?)$", time_period)
-    if flex_match:
-        n = int(flex_match.group(1))
-        unit = flex_match.group(2).rstrip("s")
-        if unit == "week":
-            days = n * 7
-        else:
-            days = n * 30
-        today = date.today()
-        prev_end = today - timedelta(days=days + 1)
-        prev_start = today - timedelta(days=2 * days)
-        return f"{prev_start.isoformat()} to {prev_end.isoformat()}"
-
-    # last_14_days / last_60_days will be caught by the flex_match above since
-    # they match last_N_days pattern, so for the named ones we compute properly:
-    if time_period == "last_7_days":
-        today = date.today()
-        prev_end = today - timedelta(days=8)
-        prev_start = today - timedelta(days=14)
-        return f"{prev_start.isoformat()} to {prev_end.isoformat()}"
-    if time_period == "last_30_days":
-        today = date.today()
-        prev_end = today - timedelta(days=31)
-        prev_start = today - timedelta(days=60)
-        return f"{prev_start.isoformat()} to {prev_end.isoformat()}"
-    if time_period == "last_quarter":
-        today = date.today()
-        # Compute start of current quarter (month 1, 4, 7, or 10)
-        current_q_month = ((today.month - 1) // 3) * 3 + 1
-        # last_quarter started 3 months before current quarter
-        last_q_month = current_q_month - 3
-        last_q_year = today.year
-        if last_q_month <= 0:
-            last_q_month += 12
-            last_q_year -= 1
-        # two quarters ago (the period before last_quarter):
-        prev_q_month = last_q_month - 3
-        prev_q_year = last_q_year
-        if prev_q_month <= 0:
-            prev_q_month += 12
-            prev_q_year -= 1
-        prev_start = date(prev_q_year, prev_q_month, 1)
-        prev_end = date(last_q_year, last_q_month, 1) - timedelta(days=1)
-        return f"{prev_start.isoformat()} to {prev_end.isoformat()}"
-
-    return "last_30_days"
 
 
 async def get_cost_patterns_impl(args: dict) -> dict:
@@ -491,17 +354,9 @@ async def get_cost_patterns_impl(args: dict) -> dict:
     if not finout_client.internal_api_url:
         return {"error": "Internal API not configured"}
 
-    from ..validation import _validate_filter_metadata, _validate_filter_values
-
-    validation_warnings: list[str] = []
-    if filters:
-        filters, meta_warnings = await _validate_filter_metadata(finout_client, filters)
-        validation_warnings.extend(meta_warnings)
-        filters, value_warnings = await _validate_filter_values(finout_client, filters)
-        validation_warnings.extend(value_warnings)
-    if group_by:
-        group_by, gb_warnings = await _validate_filter_metadata(finout_client, group_by)
-        validation_warnings.extend(gb_warnings)
+    filters, group_by, validation_warnings = await _validate_filters_and_groupby(
+        finout_client, filters, group_by
+    )
 
     # Try hourly granularity first; many accounts only have daily billing data
     data = await finout_client.query_costs_with_filters(
@@ -528,8 +383,6 @@ async def get_cost_patterns_impl(args: dict) -> dict:
     cost_col = _find_cost_column(data[0])
     if not cost_col:
         return {"error": "No cost column found", "raw_columns": list(data[0].keys())}
-
-    from datetime import datetime
 
     timed_costs: list[dict[str, Any]] = []
     for row in data:
@@ -599,16 +452,11 @@ async def get_cost_patterns_impl(args: dict) -> dict:
         for wd, vals in sorted(weekday_by_day.items())
     }
 
-    unit = "hourly" if granularity == "hourly" else "daily"
+    is_hourly = granularity == "hourly"
     result: dict[str, Any] = {
         "time_period": time_period,
         "granularity": granularity,
-        f"total_{unit}_periods_analyzed": len(costs),
         "total_cost": format_currency(total),
-        f"{unit}_average": format_currency(avg),
-        f"{unit}_std_dev": format_currency(std_dev),
-        f"peak_{unit}_cost": format_currency(peak_cost),
-        f"trough_{unit}_cost": format_currency(trough_cost),
         "_presentation_hint": (
             f"Granularity is {granularity}. "
             "Lead with weekday vs weekend comparison if available. "
@@ -617,6 +465,18 @@ async def get_cost_patterns_impl(args: dict) -> dict:
             "Use render_chart with a bar chart of day_of_week_average."
         ),
     }
+    if is_hourly:
+        result["total_hourly_periods_analyzed"] = len(costs)
+        result["hourly_average"] = format_currency(avg)
+        result["hourly_std_dev"] = format_currency(std_dev)
+        result["peak_hourly_cost"] = format_currency(peak_cost)
+        result["trough_hourly_cost"] = format_currency(trough_cost)
+    else:
+        result["total_daily_periods_analyzed"] = len(costs)
+        result["daily_average"] = format_currency(avg)
+        result["daily_std_dev"] = format_currency(std_dev)
+        result["peak_daily_cost"] = format_currency(peak_cost)
+        result["trough_daily_cost"] = format_currency(trough_cost)
 
     if day_averages:
         result["day_of_week_average"] = day_averages
@@ -624,12 +484,20 @@ async def get_cost_patterns_impl(args: dict) -> dict:
     if weekday_costs and weekend_costs:
         wd_avg = statistics.mean(weekday_costs)
         we_avg = statistics.mean(weekend_costs)
-        result["weekday_vs_weekend"] = {
-            f"weekday_{unit}_avg": format_currency(wd_avg),
-            f"weekend_{unit}_avg": format_currency(we_avg),
-            "weekend_to_weekday_ratio": round(we_avg / wd_avg, 2) if wd_avg > 0 else None,
-            "weekend_savings_opportunity": format_currency(max(0.0, wd_avg - we_avg)),
-        }
+        if is_hourly:
+            result["weekday_vs_weekend"] = {
+                "weekday_hourly_avg": format_currency(wd_avg),
+                "weekend_hourly_avg": format_currency(we_avg),
+                "weekend_to_weekday_ratio": round(we_avg / wd_avg, 2) if wd_avg > 0 else None,
+                "weekend_savings_opportunity": format_currency(max(0.0, wd_avg - we_avg)),
+            }
+        else:
+            result["weekday_vs_weekend"] = {
+                "weekday_daily_avg": format_currency(wd_avg),
+                "weekend_daily_avg": format_currency(we_avg),
+                "weekend_to_weekday_ratio": round(we_avg / wd_avg, 2) if wd_avg > 0 else None,
+                "weekend_savings_opportunity": format_currency(max(0.0, wd_avg - we_avg)),
+            }
 
     if hour_averages and peak_hour is not None and off_peak_hour is not None:
         result["hour_of_day_average"] = hour_averages
@@ -660,17 +528,9 @@ async def get_savings_coverage_impl(args: dict) -> dict:
     if not finout_client.internal_api_url:
         return {"error": "Internal API not configured"}
 
-    from ..validation import _validate_filter_metadata, _validate_filter_values
-
-    validation_warnings: list[str] = []
-    if filters:
-        filters, meta_warnings = await _validate_filter_metadata(finout_client, filters)
-        validation_warnings.extend(meta_warnings)
-        filters, value_warnings = await _validate_filter_values(finout_client, filters)
-        validation_warnings.extend(value_warnings)
-    if group_by:
-        group_by, gb_warnings = await _validate_filter_metadata(finout_client, group_by)
-        validation_warnings.extend(gb_warnings)
+    filters, group_by, validation_warnings = await _validate_filters_and_groupby(
+        finout_client, filters, group_by
+    )
 
     # Query with both SP and RI billing metrics
     data = await finout_client.query_costs_with_filters(
@@ -774,35 +634,24 @@ async def get_tag_coverage_impl(args: dict) -> dict:
     if not finout_client.internal_api_url:
         return {"error": "Internal API not configured"}
 
-    from ..validation import _validate_filter_metadata, _validate_filter_values
-
-    validation_warnings: list[str] = []
-    if filters:
-        filters, meta_warnings = await _validate_filter_metadata(finout_client, filters)
-        validation_warnings.extend(meta_warnings)
-        filters, value_warnings = await _validate_filter_values(finout_client, filters)
-        validation_warnings.extend(value_warnings)
-    if group_by:
-        group_by, gb_warnings = await _validate_filter_metadata(finout_client, group_by)
-        validation_warnings.extend(gb_warnings)
-
-    # Query 1: total cost (optionally grouped)
-    total_data = await finout_client.query_costs_with_filters(
-        time_period=time_period,
-        filters=filters if filters else None,
-        group_by=group_by,
+    filters, group_by, validation_warnings = await _validate_filters_and_groupby(
+        finout_client, filters, group_by
     )
 
-    # Query 2: cost grouped by the tag dimension
-    # Any row returned = that spend has a tag value. Sum of all rows = tagged spend.
-    tag_group = [tag_dimension]
-    if group_by:
-        tag_group = group_by + [tag_dimension]
+    tag_group = (group_by or []) + [tag_dimension]
 
-    tagged_data = await finout_client.query_costs_with_filters(
-        time_period=time_period,
-        filters=filters if filters else None,
-        group_by=tag_group,
+    # Query total cost and tagged cost in parallel
+    total_data, tagged_data = await asyncio.gather(
+        finout_client.query_costs_with_filters(
+            time_period=time_period,
+            filters=filters if filters else None,
+            group_by=group_by,
+        ),
+        finout_client.query_costs_with_filters(
+            time_period=time_period,
+            filters=filters if filters else None,
+            group_by=tag_group,
+        ),
     )
 
     if not total_data:
@@ -823,7 +672,9 @@ async def get_tag_coverage_impl(args: dict) -> dict:
 
         # tagged_data has both group_by + tag dimension columns.
         # The tag value column is the string column other than the group_by dimension.
-        tag_val_col = _find_tag_value_column(tagged_data[0], dim_col) if tagged_data else None
+        tag_val_col = (
+            _find_dimension_column(tagged_data[0], exclude_col=dim_col) if tagged_data else None
+        )
 
         # Sum tagged cost per group — skip rows where the tag value is empty/null.
         tagged_by_group: dict[str, float] = {}
@@ -908,8 +759,6 @@ async def get_budget_status_impl(args: dict) -> dict:
     if not finout_client.internal_api_url:
         return {"error": "Internal API not configured"}
 
-    from datetime import datetime
-
     if not period:
         now = datetime.now()
         period = f"{now.year}-{now.month}"
@@ -926,40 +775,35 @@ async def get_budget_status_impl(args: dict) -> dict:
 
     # Derive time_period for cost query from the budget period
     if not time_period:
-        # period is "YYYY-M", convert to this_month or last_month equivalent
         parts = period.split("-")
         year, month = int(parts[0]), int(parts[1])
         now = datetime.now()
         if year == now.year and month == now.month:
             time_period = "this_month"
         else:
-            # Use absolute range for the budget month
-            import calendar
-
             _, last_day = calendar.monthrange(year, month)
             time_period = f"{year}-{month:02d}-01 to {year}-{month:02d}-{last_day:02d}"
 
-    # Get actual spend per cost_type (plans may differ in cost_type).
-    # Group plans by cost_type and run one query per unique cost_type.
-    from collections import defaultdict
-
-    from ..finout_client import CostType
-
+    # Group plans by cost_type and run one query per unique cost_type in parallel
     plans_by_cost_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for plan in plans:
         ct = plan.get("cost_type") or "netAmortizedCost"
         plans_by_cost_type[ct].append(plan)
 
-    actual_by_cost_type: dict[str, float] = {}
-    for ct_str in plans_by_cost_type:
-        ct = CostType(ct_str) if ct_str in [e.value for e in CostType] else CostType.NET_AMORTIZED
-        actual_data = await finout_client.query_costs_with_filters(
-            time_period=time_period,
-            cost_type=ct,
-        )
-        actual_by_cost_type[ct_str] = sum(
+    ct_keys = list(plans_by_cost_type.keys())
+    ct_values = [CostType(k) if k in _VALID_COST_TYPES else CostType.NET_AMORTIZED for k in ct_keys]
+    actual_results = await asyncio.gather(
+        *[
+            finout_client.query_costs_with_filters(time_period=time_period, cost_type=ct)
+            for ct in ct_values
+        ]
+    )
+    actual_by_cost_type: dict[str, float] = {
+        ct_str: sum(
             row.get(col, 0) for row in actual_data for col in [_find_cost_column(row)] if col
         )
+        for ct_str, actual_data in zip(ct_keys, actual_results, strict=True)
+    }
 
     results: list[dict[str, Any]] = []
     for plan in plans:
@@ -974,8 +818,6 @@ async def get_budget_status_impl(args: dict) -> dict:
         now = datetime.now()
         parts = period.split("-")
         year, month = int(parts[0]), int(parts[1])
-        import calendar
-
         _, total_days = calendar.monthrange(year, month)
         if year == now.year and month == now.month:
             days_elapsed = now.day
@@ -1039,17 +881,9 @@ async def get_cost_statistics_impl(args: dict) -> dict:
     if not finout_client.internal_api_url:
         return {"error": "Internal API not configured"}
 
-    from ..validation import _validate_filter_metadata, _validate_filter_values
-
-    validation_warnings: list[str] = []
-    if filters:
-        filters, meta_warnings = await _validate_filter_metadata(finout_client, filters)
-        validation_warnings.extend(meta_warnings)
-        filters, value_warnings = await _validate_filter_values(finout_client, filters)
-        validation_warnings.extend(value_warnings)
-    if group_by:
-        group_by, gb_warnings = await _validate_filter_metadata(finout_client, group_by)
-        validation_warnings.extend(gb_warnings)
+    filters, group_by, validation_warnings = await _validate_filters_and_groupby(
+        finout_client, filters, group_by
+    )
 
     # Query with daily granularity to get per-day costs
     data = await finout_client.query_costs_with_filters(

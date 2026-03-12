@@ -19,6 +19,38 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.24.0",
+        "date": "2026-03-12",
+        "title": "Speed up analytics tools",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "Top movers, tag coverage, and budget status tools now run their data queries in parallel for faster responses"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
+        "version": "0.23.0",
+        "date": "2026-03-12",
+        "title": "Speed up analytics tools",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "Top movers, tag coverage, and budget status tools now run their data queries in parallel for faster responses"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
         "version": "0.22.0",
         "date": "2026-03-12",
         "title": "Fix get_cost_patterns for accounts without hourly billing data",
