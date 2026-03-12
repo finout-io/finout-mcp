@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Box, Button, Image, Skeleton, Stack, Text, Title } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { getSuggestedQueries } from '../../api/suggestions'
+import { billyWelcomeUrl } from '../../assets/images'
 
 const FALLBACK_QUESTIONS = [
   'What are my top 5 most expensive services this month?',
@@ -67,7 +68,7 @@ export function WelcomeScreen({ onQuestion, disabled, accountId, userName }: Pro
     >
       <Stack align="center" gap="xs">
         <Image
-          src="/billy-welcome.png"
+          src={billyWelcomeUrl}
           alt="Billy mascot"
           maw={260}
           radius="md"

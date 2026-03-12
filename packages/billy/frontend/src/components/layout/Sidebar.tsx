@@ -3,6 +3,7 @@ import { AccountSelector } from '../sidebar/AccountSelector'
 import { ModelSelector } from '../sidebar/ModelSelector'
 import { ConversationList } from '../sidebar/ConversationList'
 import type { Account, ConversationSummary, ModelId } from '../../types'
+import { billyBannerUrl } from '../../assets/images'
 
 interface Props {
   accounts: Account[]
@@ -102,7 +103,7 @@ export function Sidebar({
       <Stack gap="md" style={{ height: '100%', overflow: 'hidden' }} pt="lg">
         <Group justify="space-between" align="center">
         {!isEmbedded ? (
-          <img src="/billy-banner-transparent.png" alt="Billy" height={56} style={{ objectFit: 'contain' }} />
+          <img src={billyBannerUrl} alt="Billy" height={56} style={{ objectFit: 'contain' }} />
         ) : (
           <div />
         )}

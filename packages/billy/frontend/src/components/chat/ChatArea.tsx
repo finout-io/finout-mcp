@@ -4,6 +4,7 @@ import { ChatMessage } from './ChatMessage'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { WelcomeScreen } from './WelcomeScreen'
 import type { Message, ModelId } from '../../types'
+import { billyAvatarUrl } from '../../assets/images'
 
 function StreamingAssistantMessage({
   statusMessage,
@@ -24,7 +25,7 @@ function StreamingAssistantMessage({
   return (
     <Group align="flex-start" gap="xs" mb="md">
       <img
-        src="/billy-avatar.png"
+        src={billyAvatarUrl}
         alt="Billy"
         width={36}
         height={36}

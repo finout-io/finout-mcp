@@ -4,6 +4,7 @@ import { ChartPanel } from './ChartPanel'
 import { MermaidPanel } from './MermaidPanel'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import type { Message } from '../../types'
+import { billyAvatarUrl } from '../../assets/images'
 
 function modelLabel(model?: string): string {
   if (!model) return 'Assistant'
@@ -34,7 +35,7 @@ export function ChatMessage({ message }: Props) {
     </Center>
   ) : (
     <img
-      src="/billy-avatar.png"
+      src={billyAvatarUrl}
       alt="Billy"
       width={36}
       height={36}
