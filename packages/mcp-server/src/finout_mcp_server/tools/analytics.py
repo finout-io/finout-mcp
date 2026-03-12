@@ -281,28 +281,45 @@ async def get_unit_economics_impl(args: dict) -> dict:
 
         results.append(entry)
 
-    # Sort by total cost descending
-    results.sort(key=lambda r: r["total_cost"], reverse=True)
+    # Split: items with count=1 have no meaningful unit economics.
+    # They are typically flat-fee services (Support contracts, subscriptions) or aggregated
+    # billing line items that the API cannot subdivide further.
+    meaningful = [r for r in results if r["unique_count"] > 1]
+    no_unit = [r for r in results if r["unique_count"] <= 1]
+
+    # Sort meaningful results by cost_per_unit descending (most expensive per unit first)
+    meaningful.sort(key=lambda r: r["cost_per_unit"], reverse=True)
+    no_unit.sort(key=lambda r: r["total_cost"], reverse=True)
 
     total_cost = sum(r["total_cost"] for r in results)
-    total_count = sum(r["unique_count"] for r in results)
-    overall_cpu = (total_cost / total_count) if total_count > 0 else 0
+    meaningful_cost = sum(r["total_cost"] for r in meaningful)
+    meaningful_count = sum(r["unique_count"] for r in meaningful)
+    overall_cpu = (meaningful_cost / meaningful_count) if meaningful_count > 0 else 0
 
     result: dict[str, Any] = {
         "time_period": time_period,
         "count_dimension": count_dimension.get("key", "unknown"),
         "summary": {
             "total_cost": format_currency(total_cost),
-            "total_unique_count": total_count,
+            "meaningful_items": len(meaningful),
             "overall_cost_per_unit": format_currency(overall_cpu),
         },
-        "data": results[:50],
+        "data": meaningful[:50],
         "_presentation_hint": (
-            "Lead with the overall cost-per-unit, then highlight outliers — "
-            "which groups have the highest and lowest cost per unit. "
-            "Use render_chart with a bar chart showing cost_per_unit by group."
+            "Lead with overall cost-per-unit across meaningful items only. "
+            "Highlight which groups are most expensive per unit. "
+            "If no_unit_items is present, mention them separately as flat-fee or "
+            "unquantifiable services — do NOT compute cost-per-unit for them. "
+            "Use render_chart with a bar chart of cost_per_unit for the top groups."
         ),
     }
+    if no_unit:
+        result["no_unit_items"] = no_unit[:20]
+        result["_no_unit_note"] = (
+            f"{len(no_unit)} service(s) returned a unit count of 1 and are excluded from "
+            "unit economics — they are likely flat-fee services (support contracts, "
+            "subscriptions) or aggregated line items with no countable unit."
+        )
     if validation_warnings:
         result["_validation_warnings"] = validation_warnings
 

@@ -19,6 +19,22 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.25.0",
+        "date": "2026-03-12",
+        "title": "Fix unit economics for flat-fee services",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "Unit economics tool now separates flat-fee services (support contracts, subscriptions) from countable resources \u2014 items with no meaningful unit are excluded from cost-per-unit calculations and reported separately"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
         "version": "0.24.0",
         "date": "2026-03-12",
         "title": "Speed up analytics tools",

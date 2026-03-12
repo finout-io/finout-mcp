@@ -2359,14 +2359,17 @@ class TestUnitEconomicsImpl:
 
         assert "summary" in result
         assert "data" in result
-        assert result["summary"]["total_unique_count"] == 60
+        assert result["summary"]["meaningful_items"] == 2
+        # overall_cpu = (10000+8000) / (50+10) = 18000/60 = 300
         assert result["summary"]["overall_cost_per_unit"] == "$300.00"
 
-        # EC2: 10000/50 = 200, RDS: 8000/10 = 800
-        ec2_row = next(r for r in result["data"] if r["name"] == "EC2")
-        assert ec2_row["cost_per_unit"] == 200.0
-        rds_row = next(r for r in result["data"] if r["name"] == "RDS")
+        # EC2: 10000/50 = 200, RDS: 8000/10 = 800; sorted by cost_per_unit desc
+        rds_row = result["data"][0]
+        assert rds_row["name"] == "RDS"
         assert rds_row["cost_per_unit"] == 800.0
+        ec2_row = result["data"][1]
+        assert ec2_row["name"] == "EC2"
+        assert ec2_row["cost_per_unit"] == 200.0
 
     @pytest.mark.asyncio
     async def test_unit_economics_requires_count_dimension(self):

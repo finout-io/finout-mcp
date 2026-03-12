@@ -102,11 +102,24 @@ async def task(*, item: Any, **kwargs: Any) -> dict[str, Any]:
     input_data = item["input"] if isinstance(item, dict) else item.input
     result = await _run_pipeline(input_data["message"])
     tool_calls = result.get("tool_calls", [])
+    tool_trace = [
+        {
+            "index": idx,
+            "name": tc.get("name"),
+            "input": tc.get("input", {}),
+        }
+        for idx, tc in enumerate(tool_calls)
+        if isinstance(tc, dict) and tc.get("name")
+    ]
+    tool_inputs: Dict[str, Any] = {}
+    for entry in tool_trace:
+        tool_inputs.setdefault(entry["name"], entry["input"])
     return {
         "response": result.get("response", ""),
-        "tool_names": [tc["name"] for tc in tool_calls],
-        # Map tool name → first input dict for arg-level assertions
-        "tool_inputs": {tc["name"]: tc["input"] for tc in tool_calls},
+        "tool_names": [entry["name"] for entry in tool_trace],
+        "tool_trace": tool_trace,
+        # Map tool name → first input dict for backwards-compatible arg assertions
+        "tool_inputs": tool_inputs,
     }
 
 
@@ -124,7 +137,8 @@ def eval_tool_correctness(
     **kwargs: Any,
 ) -> Evaluation:
     """Did the model call the expected tool(s)?"""
-    expected_tools: List[str] = (expected_output or {}).get("tools", [])
+    expected = expected_output or {}
+    expected_tools: List[str] = expected.get("required_tools") or expected.get("tools", [])
     if not expected_tools:
         score = 1.0
     else:
@@ -132,6 +146,58 @@ def eval_tool_correctness(
         hits = sum(1 for t in expected_tools if t in called)
         score = hits / len(expected_tools)
     return Evaluation(name="tool_correctness", value=score)
+
+
+def eval_tool_orchestration(
+    *,
+    output: Any,
+    expected_output: Any,
+    input: Any = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Evaluation:
+    """Does the run reach the right downstream tool and only use allowed setup tools first?"""
+    expected = expected_output or {}
+    tool_trace: List[Dict[str, Any]] = output.get("tool_trace", [])
+    tool_names = [entry.get("name") for entry in tool_trace if entry.get("name")]
+    if not tool_names:
+        return Evaluation(name="tool_orchestration", value=0.0, comment="No tools called")
+
+    terminal_tool = expected.get("terminal_tool")
+    required_tools: List[str] = expected.get("required_tools") or expected.get("tools", [])
+    allowed_prefix_tools = set(expected.get("allowed_prefix_tools", []))
+
+    mismatches: list[str] = []
+
+    if terminal_tool:
+        if terminal_tool not in tool_names:
+            mismatches.append(f"terminal tool {terminal_tool} not called")
+        elif tool_names[-1] != terminal_tool:
+            mismatches.append(
+                f"last tool was {tool_names[-1]!r}, expected terminal tool {terminal_tool!r}"
+            )
+
+    if required_tools:
+        missing = [tool for tool in required_tools if tool not in tool_names]
+        if missing:
+            mismatches.append(f"missing required tools: {', '.join(missing)}")
+
+    if terminal_tool and terminal_tool in tool_names:
+        terminal_index = tool_names.index(terminal_tool)
+        disallowed_prefix = [
+            name for name in tool_names[:terminal_index] if name not in allowed_prefix_tools
+        ]
+        if disallowed_prefix:
+            mismatches.append(
+                "disallowed tools before terminal tool: " + ", ".join(disallowed_prefix)
+            )
+
+    score = 1.0 if not mismatches else 0.0
+    return Evaluation(
+        name="tool_orchestration",
+        value=score,
+        comment="; ".join(mismatches) if mismatches else "Tool sequence is acceptable",
+    )
 
 
 def eval_tool_args(
@@ -152,11 +218,10 @@ def eval_tool_args(
     if not expected_args:
         return Evaluation(name="tool_args", value=1.0, comment="No arg expectations")
 
-    tool_inputs: Dict[str, Any] = output.get("tool_inputs", {})
     mismatches = []
 
     for tool_name, expected in expected_args.items():
-        actual = tool_inputs.get(tool_name)
+        actual = _latest_tool_input(output, tool_name)
         if actual is None:
             mismatches.append(f"{tool_name} not called")
             continue
@@ -258,6 +323,16 @@ def _compare_expected_value(*, actual: Any, expected: Any, path: str) -> list[st
     return []
 
 
+def _latest_tool_input(output: Any, tool_name: str) -> Any:
+    tool_trace: List[Dict[str, Any]] = output.get("tool_trace", []) if isinstance(output, dict) else []
+    for entry in reversed(tool_trace):
+        if entry.get("name") == tool_name:
+            return entry.get("input", {})
+    if isinstance(output, dict):
+        return output.get("tool_inputs", {}).get(tool_name)
+    return None
+
+
 def eval_response_quality(
     *,
     input: Any,
@@ -270,17 +345,28 @@ def eval_response_quality(
     from anthropic import Anthropic
 
     question = input["message"] if isinstance(input, dict) else input
+    expected = expected_output or {}
     response_text = (
         output.get("response", "") if isinstance(output, dict) else str(output)
     )
-    tool_names = output.get("tool_names", []) if isinstance(output, dict) else []
+    tool_trace = output.get("tool_trace", []) if isinstance(output, dict) else []
+    response_checks = expected.get("response_checks", [])
+
+    trace_summary = "none"
+    if tool_trace:
+        trace_summary = " -> ".join(
+            entry.get("name", "unknown") for entry in tool_trace if entry.get("name")
+        )
 
     client = Anthropic()
     judge_prompt = (
         "You are evaluating an AI assistant that helps cloud cost analysts.\n"
         "The user asked a question and the assistant replied (after calling tools).\n\n"
         f"Question: {question}\n"
-        f"Tools called: {', '.join(tool_names) or 'none'}\n"
+        f"Tool sequence: {trace_summary}\n"
+        f"Expected tools: {', '.join(expected.get('required_tools') or expected.get('tools', [])) or 'none'}\n"
+        f"Expected terminal tool: {expected.get('terminal_tool', 'none')}\n"
+        f"Response requirements: {', '.join(response_checks) or 'none'}\n"
         f"Response:\n{response_text}\n\n"
         "Rate the response from 1 to 5:\n"
         "1 = Unusable (wrong, irrelevant, or empty)\n"
@@ -335,6 +421,7 @@ def run_experiment(name: str, source: str = "local") -> None:
         task=task,
         evaluators=[
             eval_tool_correctness,  # type: ignore[list-item]
+            eval_tool_orchestration,  # type: ignore[list-item]
             eval_tool_args,  # type: ignore[list-item]
             eval_no_fabrication,
             eval_response_quality,
