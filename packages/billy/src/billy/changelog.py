@@ -19,6 +19,22 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.22.0",
+        "date": "2026-03-12",
+        "title": "Fix get_cost_patterns for accounts without hourly billing data",
+        "sections": {
+            "external_mcp": [
+                "get_cost_patterns now works for all accounts \u2014 it falls back to daily granularity when hourly billing data isn't available, and still provides weekday vs weekend breakdown and day-of-week averages"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
         "version": "0.21.0",
         "date": "2026-03-12",
         "title": "Fix misleading partial-period cost comparisons",

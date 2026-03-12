@@ -1343,8 +1343,15 @@ class FinoutClient:
                 predefined_queries=predefined_queries,
             )
 
+            date_payload = self._build_date_payload(time_period)
+            # The date "type" must match the dateAggregation granularity.
+            # e.g. hourly aggregation requires type="hour", daily requires type="day".
+            if x_axis_group_by:
+                agg_type = self._GRANULARITY_MAP.get(x_axis_group_by, x_axis_group_by)
+                date_payload = {**date_payload, "type": agg_type}
+
             payload: dict[str, Any] = {
-                "date": self._build_date_payload(time_period),
+                "date": date_payload,
                 "columns": columns,
             }
 

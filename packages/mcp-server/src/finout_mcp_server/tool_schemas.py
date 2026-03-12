@@ -1436,14 +1436,16 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_cost_patterns",
             description=(
-                "Analyze hourly cost patterns — peak hours, off-peak, weekday vs weekend.\n\n"
-                "WHEN TO USE: When the user asks about 'peak hours', 'off-peak', "
-                "'hourly pattern', 'when is spending highest', 'weekday vs weekend costs', "
-                "or any time-of-day cost analysis.\n\n"
-                "HOW IT WORKS: Queries with hourly granularity, then computes hour-of-day "
-                "averages, peak/off-peak hours, weekday/weekend splits, and volatility.\n\n"
-                "BEST FOR: Short periods (last_7_days, this_week) where hourly data is meaningful. "
-                "Longer periods will have many data points."
+                "Analyze temporal cost patterns — weekday/weekend splits and hourly peaks.\n\n"
+                "WHEN TO USE: When the user asks about 'cost patterns', 'peak hours', "
+                "'when are costs highest?', 'weekday vs weekend', or any time-based analysis.\n\n"
+                "HOW IT WORKS: Tries hourly granularity first; falls back to daily if the "
+                "account's billing data is only available at daily granularity (very common). "
+                "Computes weekday/weekend averages and day-of-week breakdown in both cases. "
+                "The result includes granularity='hourly' or 'daily' — mention which was used.\n\n"
+                "PRESENTING RESULTS: Lead with weekday_vs_weekend. Show day_of_week_average. "
+                "If hourly data is available, also highlight peak and off-peak hours. "
+                "Use render_chart with a bar chart of day_of_week_average."
             ),
             inputSchema={
                 "type": "object",

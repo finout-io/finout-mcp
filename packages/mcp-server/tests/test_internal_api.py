@@ -2426,7 +2426,8 @@ class TestUnitEconomicsImpl:
 
 class TestCostPatternsImpl:
     @pytest.mark.asyncio
-    async def test_cost_patterns_basic(self):
+    async def test_cost_patterns_hourly_data(self):
+        """When the API has hourly data, hour-of-day analysis is included."""
         import importlib
 
         server_module = importlib.import_module("src.finout_mcp_server.server")
@@ -2441,11 +2442,57 @@ class TestCostPatternsImpl:
                 return []
 
             async def query_costs_with_filters(self, **kwargs):
-                assert kwargs.get("x_axis_group_by") == "hourly"
+                # Return hourly data for the hourly request; empty for daily fallback
+                if kwargs.get("x_axis_group_by") == "hourly":
+                    return [
+                        {"Day": "2026-03-10T08:00:00", "Sum(Net Amortized Cost)": 100},
+                        {"Day": "2026-03-10T14:00:00", "Sum(Net Amortized Cost)": 200},
+                        {"Day": "2026-03-10T22:00:00", "Sum(Net Amortized Cost)": 50},
+                    ]
+                return []
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_cost_patterns_impl({"time_period": "last_7_days"})
+        finally:
+            server_module.finout_client = original
+
+        assert result["granularity"] == "hourly"
+        assert "hourly_average" in result
+        assert "peak_hourly_cost" in result
+        assert result["total_hourly_periods_analyzed"] == 3
+
+    @pytest.mark.asyncio
+    async def test_cost_patterns_falls_back_to_daily(self):
+        """When hourly data is unavailable, falls back to daily and provides weekday/weekend."""
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        call_granularities: list[str] = []
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                g = kwargs.get("x_axis_group_by", "")
+                call_granularities.append(g)
+                if g == "hourly":
+                    return []  # No hourly data
+                # Daily data: Mon-Fri high, Sat-Sun low
                 return [
-                    {"Day": "2026-03-10T08:00:00", "Sum(Net Amortized Cost)": 100},
-                    {"Day": "2026-03-10T14:00:00", "Sum(Net Amortized Cost)": 200},
-                    {"Day": "2026-03-10T22:00:00", "Sum(Net Amortized Cost)": 50},
+                    {"Day": "2026-03-09", "Sum(Net Amortized Cost)": 700000},  # Mon
+                    {"Day": "2026-03-10", "Sum(Net Amortized Cost)": 720000},  # Tue
+                    {"Day": "2026-03-11", "Sum(Net Amortized Cost)": 710000},  # Wed
+                    {"Day": "2026-03-07", "Sum(Net Amortized Cost)": 650000},  # Sat
+                    {"Day": "2026-03-08", "Sum(Net Amortized Cost)": 630000},  # Sun
                 ]
 
         original = server_module.finout_client
@@ -2455,9 +2502,16 @@ class TestCostPatternsImpl:
         finally:
             server_module.finout_client = original
 
-        assert "hourly_average" in result
-        assert "peak_hourly_cost" in result
-        assert result["total_hours_analyzed"] == 3
+        # Should have tried hourly first, then fallen back to daily
+        assert "hourly" in call_granularities
+        assert "daily" in call_granularities
+        assert result["granularity"] == "daily"
+        assert "daily_average" in result
+        assert "weekday_vs_weekend" in result
+        assert "day_of_week_average" in result
+        # Weekday avg (~710K) should be higher than weekend avg (~640K)
+        wd_we = result["weekday_vs_weekend"]
+        assert wd_we["weekend_to_weekday_ratio"] < 1.0
 
 
 class TestSavingsCoverageImpl:
