@@ -177,13 +177,10 @@ jobs:
       - run:
           name: Configure kubeconfig for Billy deployment
           command: |
-            if [ -z "${EKS_CLUSTER_NAME:-}" ]; then
-              echo "EKS_CLUSTER_NAME is required"
-              exit 1
-            fi
+            CLUSTER_NAME="${BILLY_EKS_CLUSTER_NAME:-${EKS_CLUSTER_NAME:-prod-mirror-application}}"
 
             aws eks update-kubeconfig \
-              --name "${EKS_CLUSTER_NAME}" \
+              --name "${CLUSTER_NAME}" \
               --region "${AWS_DEFAULT_REGION}" \
               --role-arn arn:aws:iam::277411487094:role/k8sAdmin
       - run:
