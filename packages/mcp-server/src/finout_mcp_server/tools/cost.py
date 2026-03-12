@@ -11,53 +11,39 @@ def format_currency(amount: float) -> str:
     return f"${amount:,.2f}"
 
 
-def summarize_cost_data(data: dict | list, max_items: int = 25) -> dict | list:
+def _find_cost_column(row: dict[str, Any]) -> str | None:
+    """Find the primary cost measurement column in a data-explorer row."""
+    for key in row:
+        lower = key.lower()
+        if "cost" in lower and ("sum" in lower or "average" in lower):
+            return key
+    return None
+
+
+def summarize_cost_data(data: list[dict[str, Any]], max_items: int = 25) -> list[dict[str, Any]]:
     """
-    Reduce cost data to what Claude actually needs for analysis.
+    Reduce data-explorer rows to top items by cost.
 
-    For list responses (cost-service row array):
-      - Keeps Total row + top max_items service rows by totalCost
-      - Collapses the tail into a single "Other" row so totals still balance
-      - Strips display-only fields (dateRange, comparedRangeDate, percentOfTotalCost)
-
-    For legacy dict responses with a "breakdown" key: groups small items as before.
+    Keeps top max_items rows sorted by the cost column,
+    collapsing the tail into a single "Other" row.
     """
-    strip_keys = {"dateRange", "comparedRangeDate", "percentOfTotalCost"}
+    if not isinstance(data, list) or len(data) <= max_items:
+        return data
 
-    if isinstance(data, list):
-        total_rows = [r for r in data if isinstance(r, dict) and r.get("name") == "Total"]
-        service_rows = [r for r in data if isinstance(r, dict) and r.get("name") != "Total"]
+    cost_col = _find_cost_column(data[0]) if data else None
+    if not cost_col:
+        return data[:max_items]
 
-        service_rows.sort(key=lambda x: x.get("totalCost", 0), reverse=True)
+    sorted_data = sorted(data, key=lambda x: x.get(cost_col, 0), reverse=True)
+    top = sorted_data[:max_items]
+    tail = sorted_data[max_items:]
 
-        if len(service_rows) > max_items:
-            other_cost = sum(r.get("totalCost", 0) for r in service_rows[max_items:])
-            service_rows = service_rows[:max_items]
-            if other_cost > 0:
-                service_rows.append({"name": "Other", "totalCost": other_cost})
+    if tail:
+        other_cost = sum(r.get(cost_col, 0) for r in tail)
+        if other_cost > 0:
+            top.append({"_name": f"Other ({len(tail)} items)", cost_col: other_cost})
 
-        result = total_rows + service_rows
-        for row in result:
-            if isinstance(row, dict):
-                for key in strip_keys:
-                    row.pop(key, None)
-        return result
-
-    if "breakdown" in data and isinstance(data["breakdown"], list):
-        breakdown = data["breakdown"]
-        if len(breakdown) <= max_items:
-            return data
-        sorted_breakdown = sorted(breakdown, key=lambda x: x.get("cost", 0), reverse=True)
-        top_items = sorted_breakdown[:max_items]
-        other_items = sorted_breakdown[max_items:]
-        other_total = sum(item.get("cost", 0) for item in other_items)
-        if other_total > 0:
-            top_items.append({"name": f"Other ({len(other_items)} items)", "cost": other_total})
-        data["breakdown"] = top_items
-        data["_summarized"] = True
-        data["_total_items"] = len(breakdown)
-
-    return data
+    return top
 
 
 async def query_costs_impl(args: dict) -> dict:
@@ -180,6 +166,39 @@ async def query_costs_impl(args: dict) -> dict:
     return result
 
 
+def _extract_total(data: list[dict[str, Any]]) -> float:
+    """Extract total cost from data-explorer response rows."""
+    if not data:
+        return 0
+    cost_col = _find_cost_column(data[0])
+    if not cost_col:
+        return 0
+    return sum(row.get(cost_col, 0) for row in data)
+
+
+def _is_metric_column(key: str) -> bool:
+    """Check if a column name is a metric/measurement (not a dimension)."""
+    # Patterns from data-explorer response: "Sum(...)", "Average(...)",
+    # "Count Distinct(...)", "Resource Normalized Runtime", etc.
+    return bool(
+        key.startswith(("Sum(", "Average(", "Min(", "Max(", "Count Distinct(", "Count("))
+        or key in {"Resource Normalized Runtime"}
+    )
+
+
+_DATE_COLUMNS = {"Day", "Week", "Month", "Quarter", "Half Year", "Year"}
+
+
+def _find_dimension_column(row: dict[str, Any]) -> str | None:
+    """Find the dimension (group-by) column — the non-numeric, non-date column."""
+    for key, val in row.items():
+        if key in _DATE_COLUMNS:
+            continue
+        if isinstance(val, str) and not _is_metric_column(key):
+            return key
+    return None
+
+
 async def compare_costs_impl(args: dict) -> dict:
     """Implementation of compare_costs tool"""
     from ..server import finout_client
@@ -196,8 +215,7 @@ async def compare_costs_impl(args: dict) -> dict:
         return {
             "error": "Internal API not configured",
             "message": (
-                "This tool requires the internal cost-service API. "
-                "Set FINOUT_API_URL environment variable."
+                "This tool requires the internal API. Set FINOUT_API_URL environment variable."
             ),
         }
 
@@ -222,63 +240,43 @@ async def compare_costs_impl(args: dict) -> dict:
         group_by=group_by,
     )
 
-    # Extract totals from API response
-    # API returns a list of items, each with totalCost
-    def extract_total(data: Any) -> float:
-        """Extract total cost from API response"""
-        if isinstance(data, list):
-            if not data:
-                return 0
-            # If ungrouped, first item has the total
-            if len(data) == 1:
-                return data[0].get("totalCost", 0)
-            # If grouped, sum all items except "Total" row
-            return sum(item.get("totalCost", 0) for item in data if item.get("name") != "Total")
-        elif isinstance(data, dict):
-            # Fallback for dict format
-            return float(data.get("totalCost") or data.get("total") or 0)
-        return 0
-
-    current_total = extract_total(current_data)
-    comparison_total = extract_total(comparison_data)
+    current_total = _extract_total(current_data)
+    comparison_total = _extract_total(comparison_data)
 
     delta = current_total - comparison_total
     pct_change = ((delta / comparison_total) * 100) if comparison_total > 0 else 0
 
     # Format breakdown if grouped
     breakdown = None
-    if group_by and isinstance(current_data, list) and isinstance(comparison_data, list):
-        breakdown = []
-        # Create a dict for easy lookup
-        comparison_dict = {
-            item.get("name", "Unknown"): item.get("totalCost", 0)
-            for item in comparison_data
-            if item.get("name") != "Total"
-        }
+    if group_by and current_data and comparison_data:
+        cost_col = _find_cost_column(current_data[0])
+        dim_col = _find_dimension_column(current_data[0])
 
-        for curr_item in current_data:
-            name = curr_item.get("name", "Unknown")
-            if name == "Total":
-                continue
+        if cost_col and dim_col:
+            breakdown = []
+            comparison_dict = {
+                row.get(dim_col, "Unknown"): row.get(cost_col, 0) for row in comparison_data
+            }
 
-            curr_cost = curr_item.get("totalCost", 0)
-            comp_cost = comparison_dict.get(name, 0)
-            item_delta = curr_cost - comp_cost
-            item_pct = ((item_delta / comp_cost) * 100) if comp_cost > 0 else 0
+            for curr_item in current_data:
+                name = curr_item.get(dim_col, "Unknown")
+                curr_cost = curr_item.get(cost_col, 0)
+                comp_cost = comparison_dict.get(name, 0)
+                item_delta = curr_cost - comp_cost
+                item_pct = ((item_delta / comp_cost) * 100) if comp_cost > 0 else 0
 
-            breakdown.append(
-                {
-                    "name": name,
-                    "current_cost": format_currency(curr_cost),
-                    "comparison_cost": format_currency(comp_cost),
-                    "delta": format_currency(item_delta),
-                    "percent_change": round(item_pct, 2),
-                    "trend": "↑" if item_delta > 0 else "↓" if item_delta < 0 else "→",
-                }
-            )
+                breakdown.append(
+                    {
+                        "name": name,
+                        "current_cost": format_currency(curr_cost),
+                        "comparison_cost": format_currency(comp_cost),
+                        "delta": format_currency(item_delta),
+                        "percent_change": round(item_pct, 2),
+                        "trend": "↑" if item_delta > 0 else "↓" if item_delta < 0 else "→",
+                    }
+                )
 
-        # Sort by delta (largest changes first)
-        breakdown.sort(key=lambda x: abs(x["percent_change"]), reverse=True)
+            breakdown.sort(key=lambda x: abs(x["percent_change"]), reverse=True)
 
     result: dict[str, Any] = {
         "current_period": current_period,
@@ -297,7 +295,7 @@ async def compare_costs_impl(args: dict) -> dict:
     }
 
     if breakdown:
-        result["breakdown_by_group"] = breakdown[:10]  # Top 10 changes
+        result["breakdown_by_group"] = breakdown[:10]
 
     result["_presentation_hint"] = (
         "Lead with the trend (up/down), then the delta, then the breakdown. "

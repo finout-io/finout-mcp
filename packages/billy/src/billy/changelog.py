@@ -19,6 +19,22 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.18.0",
+        "date": "2026-03-12",
+        "title": "Data explorer costs and sidebar toggle polish",
+        "sections": {
+            "external_mcp": [
+                "Route cost queries through the data-explorer preview API and update grouped cost parsing/tests for flat row responses"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Make the sidebar expand/collapse control smaller, icon-based, and pinned to the upper-right without overlapping the new-conversation action"
+            ]
+        }
+    },
+    {
         "version": "0.17.0",
         "date": "2026-03-11",
         "title": "FOBO embedded mode",

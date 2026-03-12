@@ -1144,8 +1144,8 @@ class FinoutClient:
         """
         # Map time periods to relative ranges (API-native)
         relative_map = {
-            "today": {"relativeRange": "today", "type": "day"},
-            "yesterday": {"relativeRange": "yesterday", "type": "day"},
+            "today": {"relativeRange": "last::1::day", "type": "day"},
+            "yesterday": {"relativeRange": "last::2::day", "type": "day"},
             "last_7_days": {"relativeRange": "last7Days", "type": "day"},
             "last_30_days": {"relativeRange": "last30Days", "type": "day"},
             "this_month": {"relativeRange": "currentMonth", "type": "month"},
@@ -1166,6 +1166,76 @@ class FinoutClient:
             "type": "day",  # Use "day" granularity for custom ranges
         }
 
+    def _build_columns(
+        self,
+        cost_type: "CostType",
+        group_by: list[dict[str, Any]] | None = None,
+        x_axis_group_by: str | None = None,
+        usage_configuration: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build the columns array for data-explorer queries."""
+        columns: list[dict[str, Any]] = []
+
+        # Date aggregation column
+        if x_axis_group_by:
+            granularity_map = {
+                "daily": "day",
+                "weekly": "week",
+                "monthly": "month",
+                "quarterly": "quarter",
+                "day": "day",
+                "week": "week",
+                "month": "month",
+                "quarter": "quarter",
+            }
+            agg = granularity_map.get(x_axis_group_by, x_axis_group_by)
+            columns.append({"columnType": "dateAggregation", "aggregation": agg})
+
+        # Dimension columns (group-by)
+        if group_by:
+            if not isinstance(group_by, list):
+                raise ValueError("group_by must be a list")
+            for group in group_by:
+                if not isinstance(group, dict) or "costCenter" not in group:
+                    columns.append(
+                        {"columnType": "dimension", **(group if isinstance(group, dict) else {})}
+                    )
+                    continue
+                columns.append(
+                    {
+                        "columnType": "dimension",
+                        "costCenter": self._normalize_cost_center(group["costCenter"]),
+                        "key": group.get("key"),
+                        "type": group.get("type"),
+                        "path": group.get("path"),
+                    }
+                )
+
+        # Measurement column (cost) — always first measurement, gets orderBy
+        columns.append(
+            {
+                "columnType": "measurement",
+                "aggregation": "sum",
+                "type": cost_type.value,
+                "orderBy": "descending",
+            }
+        )
+
+        # Usage configuration → additional measurement column
+        if usage_configuration:
+            usage_col: dict[str, Any] = {
+                "columnType": "measurement",
+                "aggregation": "sum",
+                "type": usage_configuration.get("usageType", "usageAmount"),
+            }
+            if "costCenter" in usage_configuration:
+                usage_col["costCenter"] = usage_configuration["costCenter"]
+            if "units" in usage_configuration:
+                usage_col["units"] = usage_configuration["units"]
+            columns.append(usage_col)
+
+        return columns
+
     async def query_costs_with_filters(
         self,
         time_period: str = "last_30_days",
@@ -1174,9 +1244,10 @@ class FinoutClient:
         x_axis_group_by: str | None = None,
         cost_type: CostType = CostType.NET_AMORTIZED,
         usage_configuration: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
         """
-        Query costs/usage using internal API with flexible filters.
+        Query costs/usage via the data-explorer API.
 
         Args:
             time_period: Time period string (e.g., 'last_30_days')
@@ -1184,32 +1255,12 @@ class FinoutClient:
             group_by: List of group-by dimension objects (costCenter, key, path, type)
             x_axis_group_by: X-axis grouping (e.g., "daily", "monthly")
             cost_type: Type of cost metric to retrieve
-            usage_configuration: Usage config for querying usage instead of cost
-                Example: {"usageType": "usageAmount", "costCenter": "amazon-cur", "units": "Hrs"}
+            usage_configuration: Usage config for querying usage alongside cost
+            limit: Max rows to return (None = no limit, returns all rows)
 
         Returns:
-            Cost/usage query results
-
-        Raises:
-            ValueError: If internal API not configured or invalid parameters
-            httpx.HTTPStatusError: If API request fails
-            httpx.TimeoutException: If request times out
-
-        Example (cost query):
-            await client.query_costs_with_filters(
-                time_period="last_month",
-                filters=[
-                    {"key": "service", "value": ["ec2"], "operator": "eq"}
-                ],
-                x_axis_group_by="daily",
-            )
-
-        Example (usage query):
-            await client.query_costs_with_filters(
-                time_period="last_month",
-                filters=[{"key": "service", "value": ["ec2"], "operator": "eq"}],
-                usage_configuration={"usageType": "usageAmount", "costCenter": "amazon-cur", "units": "Hrs"}
-            )
+            List of flat row dicts with human-readable column names as keys.
+            Example: [{"Services": "AmazonEC2", "Sum(Amortized Cost)": 55216.95}]
         """
         if not self.internal_client:
             raise ValueError(
@@ -1217,59 +1268,31 @@ class FinoutClient:
                 "environment variable to your cost-service endpoint."
             )
 
-        # Get headers
         headers = self._get_internal_headers()
 
         try:
-            # Build payload with correct date format
+            columns = self._build_columns(
+                cost_type=cost_type,
+                group_by=group_by,
+                x_axis_group_by=x_axis_group_by,
+                usage_configuration=usage_configuration,
+            )
+
             payload: dict[str, Any] = {
                 "date": self._build_date_payload(time_period),
-                "costType": cost_type.value,
+                "columns": columns,
             }
 
-            # Add filters if provided
+            if limit is not None:
+                payload["limit"] = limit
+
             if filters:
                 payload["filters"] = self._build_filter_payload(filters)
 
-            # Add grouping if provided (needs full metadata like filters)
-            if group_by:
-                if not isinstance(group_by, list):
-                    raise ValueError("group_by must be a list")
-                # Normalize costCenter in group_by items
-                normalized_group_by = []
-                for group in group_by:
-                    if isinstance(group, dict) and "costCenter" in group:
-                        normalized_group = {**group}
-                        normalized_group["costCenter"] = self._normalize_cost_center(
-                            group["costCenter"]
-                        )
-                        normalized_group_by.append(normalized_group)
-                    else:
-                        normalized_group_by.append(group)
-                payload["groupBys"] = normalized_group_by  # Note: plural "groupBys"
-
-            if x_axis_group_by:
-                # Mapping from friendly names to API values
-                granularity_map = {
-                    "daily": "day",
-                    "weekly": "week",
-                    "monthly": "month",
-                    "quarterly": "quarter",
-                    "day": "day",
-                    "week": "week",
-                    "month": "month",
-                    "quarter": "quarter",
-                }
-                api_value = granularity_map.get(x_axis_group_by, x_axis_group_by)
-                payload["xAxisGroupBy"] = {"type": "time", "value": api_value}
-
-            # Add usage configuration if provided (for usage queries instead of cost)
-            if usage_configuration:
-                payload["usageConfiguration"] = usage_configuration
-
-            # Call internal cost API
             response = await self.internal_client.post(
-                "/cost-service/cost", json=payload, headers=headers
+                "/data-explorer-service/preview-data-explorer",
+                json=payload,
+                headers=headers,
             )
             response.raise_for_status()
 
@@ -1277,7 +1300,6 @@ class FinoutClient:
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 400:
-                # Parse error response to help Claude understand what's wrong
                 try:
                     error_body = e.response.json()
                     error_msg = (
@@ -1301,11 +1323,11 @@ class FinoutClient:
                 ) from e
             elif e.response.status_code == 403:
                 raise ValueError(
-                    "Access denied. Verify your credentials have permission to access the cost-service API."
+                    "Access denied. Verify your credentials have permission to access the data-explorer API."
                 ) from e
             elif e.response.status_code == 404:
                 raise ValueError(
-                    "Cost-service API endpoint not found. Verify FINOUT_API_URL is correct."
+                    "Data-explorer API endpoint not found. Verify FINOUT_API_URL is correct."
                 ) from e
             else:
                 raise

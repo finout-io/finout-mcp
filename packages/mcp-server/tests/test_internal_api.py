@@ -52,17 +52,13 @@ def sample_filters():
 
 @pytest.fixture
 def sample_cost_response():
-    """Sample cost query response"""
-    return {
-        "total": 15420.50,
-        "breakdown": [
-            {"name": "ec2", "cost": 8500.00},
-            {"name": "s3", "cost": 3200.25},
-            {"name": "rds", "cost": 2500.00},
-            {"name": "lambda", "cost": 1220.25},
-        ],
-        "currency": "USD",
-    }
+    """Sample cost query response (data-explorer flat row format)"""
+    return [
+        {"Services": "AmazonEC2", "Sum(Amortized Cost)": 8500.00},
+        {"Services": "AmazonS3", "Sum(Amortized Cost)": 3200.25},
+        {"Services": "AmazonRDS", "Sum(Amortized Cost)": 2500.00},
+        {"Services": "AWSLambda", "Sum(Amortized Cost)": 1220.25},
+    ]
 
 
 class TestFinoutClientInternalAPI:
@@ -330,14 +326,18 @@ class TestFinoutClientInternalAPI:
             # Verify API call
             mock_post.assert_called_once()
             call_args = mock_post.call_args
-            assert call_args[0][0] == "/cost-service/cost"
+            assert call_args[0][0] == "/data-explorer-service/preview-data-explorer"
 
             payload = call_args[1]["json"]
             assert "date" in payload
             assert "filters" in payload
-            assert "groupBys" in payload
-            # Must be an object {"type": "time", "value": "day"}, not a plain string
-            assert payload["xAxisGroupBy"] == {"type": "time", "value": "day"}
+            assert "columns" in payload
+
+            # Verify columns include dateAggregation, dimension, and measurement
+            col_types = [c["columnType"] for c in payload["columns"]]
+            assert "dateAggregation" in col_types
+            assert "dimension" in col_types
+            assert "measurement" in col_types
 
             # Verify result
             assert result == sample_cost_response
@@ -510,7 +510,7 @@ class TestDebugCurl:
         """Test POST request generates correct curl with masked secrets"""
         request = httpx.Request(
             "POST",
-            "http://internal-api:3000/cost-service/cost",
+            "http://internal-api:3000/data-explorer-service/preview-data-explorer",
             headers={
                 "Content-Type": "application/json",
                 "x-finout-client-id": "real-id",
@@ -530,7 +530,7 @@ class TestDebugCurl:
         assert "authorized-account-id: acct-123" in curl
         assert "-d '" in curl
         assert "last30Days" in curl
-        assert "http://internal-api:3000/cost-service/cost" in curl
+        assert "http://internal-api:3000/data-explorer-service/preview-data-explorer" in curl
 
     def test_request_to_curl_get(self):
         """Test GET request produces correct curl without -d"""
@@ -1859,7 +1859,7 @@ class TestCrossProviderGapDetection:
                 return ["val1", "val2"]
 
             async def query_costs_with_filters(self, **kwargs):
-                return [{"name": "Total", "totalCost": 1000}]
+                return [{"Sum(Net Amortized Cost)": 1000}]
 
         original_client = server_module.finout_client
         server_module.finout_client = StubClient()
@@ -1917,7 +1917,7 @@ class TestCrossProviderGapDetection:
                 return ["AmazonEC2"]
 
             async def query_costs_with_filters(self, **kwargs):
-                return [{"name": "Total", "totalCost": 500}]
+                return [{"Sum(Net Amortized Cost)": 500}]
 
         original_client = server_module.finout_client
         server_module.finout_client = StubClient()
