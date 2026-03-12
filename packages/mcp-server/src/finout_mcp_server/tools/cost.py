@@ -313,9 +313,25 @@ async def compare_costs_impl(args: dict) -> dict:
 
     result["_presentation_hint"] = (
         "Lead with the trend (up/down), then the delta, then the breakdown. "
-        "Always include both percentage and absolute dollar change."
+        "Always include both percentage and absolute dollar change. "
+        "If _partial_period_warning is present, surface it prominently — the comparison "
+        "may be misleading due to unequal period lengths."
     )
     if validation_warnings:
         result["_validation_warnings"] = validation_warnings
+
+    # Warn when comparing a partial period to a full one — raw totals are misleading
+    from .analytics import _constrain_comparison_period, _elapsed_days_in_period, _is_partial_period
+
+    if _is_partial_period(current_period):
+        elapsed = _elapsed_days_in_period(current_period)
+        constrained = _constrain_comparison_period(comparison_period, elapsed)
+        if constrained:
+            result["_partial_period_warning"] = (
+                f"⚠️ {current_period} covers only {elapsed} day(s) but {comparison_period} "
+                f"may cover a full period — totals are not directly comparable. "
+                f"For an apples-to-apples comparison use comparison_period='{constrained}' "
+                f"(first {elapsed} day(s) of {comparison_period})."
+            )
 
     return result

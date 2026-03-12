@@ -19,6 +19,40 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.21.0",
+        "date": "2026-03-12",
+        "title": "Fix misleading partial-period cost comparisons",
+        "sections": {
+            "external_mcp": [
+                "get_top_movers now automatically normalizes mid-month comparisons \u2014 asking 'what changed this month vs last month?' on day 12 now compares the first 12 days of each month, not 12 days vs a full month",
+                "compare_costs now warns when one period is partial (this_month, this_week, etc.) and suggests the equivalent normalized comparison period"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
+        "version": "0.20.0",
+        "date": "2026-03-12",
+        "title": "Fix misleading partial-period cost comparisons",
+        "sections": {
+            "external_mcp": [
+                "get_top_movers now automatically normalizes mid-month comparisons \u2014 asking 'what changed this month vs last month?' on day 12 now compares the first 12 days of each month, not 12 days vs a full month",
+                "compare_costs now warns when one period is partial (this_month, this_week, etc.) and suggests the equivalent normalized comparison period"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
         "version": "0.19.0",
         "date": "2026-03-12",
         "title": "Advanced cost analytics tools",

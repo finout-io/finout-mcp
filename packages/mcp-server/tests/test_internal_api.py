@@ -2232,10 +2232,64 @@ class TestTopMoversImpl:
         finally:
             server_module.finout_client = original_client
 
-        # Should have auto-inferred comparison_period as last_month
-        assert result["comparison_period"] == "last_month"
+        # this_month is partial — comparison should be normalized to an absolute range,
+        # not the full last_month
+        assert (
+            " to " in result["comparison_period"]
+        ), "Comparison period should be normalized to an absolute range for partial this_month"
+        assert "_normalization_note" in result
         assert periods_queried[0] == "this_month"
-        assert periods_queried[1] == "last_month"
+
+    @pytest.mark.asyncio
+    async def test_top_movers_partial_period_normalization(self):
+        """this_month vs last_month should normalize to equivalent elapsed days."""
+        import importlib
+        from datetime import date, timedelta
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        periods_queried: list[str] = []
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {"amazon-cur": {"col": [{"key": "svc", "path": "A/S", "type": "col"}]}}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def query_costs_with_filters(self, **kwargs):
+                periods_queried.append(kwargs.get("time_period", ""))
+                return [{"Services": "EC2", "Sum(Net Amortized Cost)": 100}]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_top_movers_impl(
+                {
+                    "time_period": "this_month",
+                    "comparison_period": "last_month",
+                    "group_by": [
+                        {"costCenter": "amazon-cur", "key": "svc", "path": "A/S", "type": "col"}
+                    ],
+                }
+            )
+        finally:
+            server_module.finout_client = original
+
+        # Comparison should be constrained to first N days of last_month
+        today = date.today()
+        elapsed = today.day
+        last_month_start = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+        expected_end = last_month_start + timedelta(days=elapsed - 1)
+        expected_range = f"{last_month_start.isoformat()} to {expected_end.isoformat()}"
+
+        assert result["comparison_period"] == expected_range
+        assert "_normalization_note" in result
+        assert str(elapsed) in result["_normalization_note"]
+        # The constrained range was used when querying — not raw "last_month"
+        assert "last_month" not in periods_queried
 
 
 class TestUnitEconomicsImpl:
