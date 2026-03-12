@@ -171,7 +171,7 @@ function buildOptions(chart: RenderChartData): Highcharts.Options {
       y: series[0]?.data[i] ?? 0,
     }))
     return {
-      chart: { type: 'pie', height: 320, backgroundColor: 'transparent' },
+      chart: { type: 'pie', height: 340, backgroundColor: 'transparent' },
       colors: palette,
       credits: { enabled: false },
       title: { text: title, style: { color: '#475569', fontSize: '13px' } },
@@ -236,7 +236,7 @@ function buildOptions(chart: RenderChartData): Highcharts.Options {
         }
 
     return {
-      chart: { type: 'line', height: 280, backgroundColor: 'transparent' },
+      chart: { type: 'line', height: 300, backgroundColor: 'transparent' },
       colors: palette,
       credits: { enabled: false },
       title: { text: title, style: { color: '#475569', fontSize: '13px' } },
@@ -270,8 +270,13 @@ function buildOptions(chart: RenderChartData): Highcharts.Options {
     color: s.color,
   }))
 
+  const barHeight =
+    chart_type === 'bar'
+      ? Math.max(280, categories.length * 36 + 80)
+      : 300
+
   return {
-    chart: { type: hcType, height: 280, backgroundColor: 'transparent' },
+    chart: { type: hcType, height: barHeight, marginRight: 20, backgroundColor: 'transparent' },
     colors: palette,
     credits: { enabled: false },
     title: { text: title, style: { color: '#475569', fontSize: '13px' } },
@@ -314,7 +319,7 @@ export function ChartPanel({ output }: { output: unknown }) {
     <Card
       withBorder
       mt="sm"
-      p="xs"
+      p="sm"
       style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}
     >
       <HighchartsReact highcharts={Highcharts} options={options} />
