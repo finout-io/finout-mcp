@@ -40,7 +40,8 @@ jobs:
             pytest -q
 
   billy_quality:
-    executor: node/default
+    docker:
+      - image: cimg/node:20.19
     steps:
       - checkout
       - run:

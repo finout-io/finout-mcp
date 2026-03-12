@@ -1,7 +1,7 @@
 # Stage 1: Build frontend on native builder platform to avoid
 # esbuild/runtime crashes under cross-arch emulation.
 ARG BUILDPLATFORM
-FROM --platform=$BUILDPLATFORM node:20-bookworm-slim AS frontend
+FROM --platform=$BUILDPLATFORM node:20.19-bookworm-slim AS frontend
 RUN corepack enable
 WORKDIR /app/frontend
 COPY packages/billy/frontend/package.json packages/billy/frontend/pnpm-lock.yaml ./
