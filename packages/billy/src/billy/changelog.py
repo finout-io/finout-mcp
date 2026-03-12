@@ -19,6 +19,38 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.27.0",
+        "date": "2026-03-12",
+        "title": "Fix unit economics \u2014 use real usage data",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "Unit economics now uses actual usage metrics (instance-hours, GB, requests) instead of resource counts \u2014 results show true cost per unit of consumption, with flat-fee services automatically separated out"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
+        "version": "0.26.0",
+        "date": "2026-03-12",
+        "title": "Fix unit economics \u2014 use real usage data",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "Unit economics now uses actual usage metrics (instance-hours, GB, requests) instead of resource counts \u2014 results show true cost per unit of consumption, with flat-fee services automatically separated out"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
         "version": "0.25.0",
         "date": "2026-03-12",
         "title": "Fix unit economics for flat-fee services",

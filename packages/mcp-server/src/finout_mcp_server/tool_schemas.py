@@ -1338,32 +1338,25 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_unit_economics",
             description=(
-                "Compute cost-per-unit by counting unique resources alongside cost.\n\n"
-                "WHEN TO USE: When the user asks 'cost per instance', 'cost per resource', "
-                "'average cost per X', 'how many unique Ys', 'unit economics', "
-                "or any question combining cost with resource counts.\n\n"
+                "Compute cost-per-unit using actual usage metrics (hours, GB, requests, etc.).\n\n"
+                "WHEN TO USE: When the user asks 'cost per hour', 'cost per GB', 'cost per request', "
+                "'unit economics', 'how efficient is my spend', or any question about cost relative "
+                "to actual consumption.\n\n"
                 "WORKFLOW:\n"
-                "1) search_filters to find the dimension to count (e.g., resource ID)\n"
-                "2) Optionally search_filters for group_by (e.g., service) and filters\n"
-                "3) Call this tool with count_dimension + optional group_by\n\n"
-                "HOW IT WORKS: Single query that returns both cost and Count Distinct(dimension) "
-                "in the same row, then computes cost / count for each group.\n\n"
-                "IMPORTANT — ALWAYS FILTER FIRST: Apply a service/provider filter before calling "
-                "this tool. Without a filter, flat-fee services (Support, subscriptions) and "
-                "aggregated line items pollute the results with count=1, making their "
-                "cost_per_unit equal to their full cost (meaningless). "
-                "Items with count=1 are automatically separated into no_unit_items.\n\n"
-                "count_dimension MUST match the billing granularity of the service:\n"
-                "- EC2 → resource_id (counts instances, NOT instance-hours)\n"
-                "- Lambda → function_name\n"
-                "- S3 → bucket_name\n"
-                "- RDS → db_instance_id\n"
-                "For usage-based cost-per-unit (e.g., cost per instance-hour), use query_costs "
-                "with usage_configuration instead.\n\n"
+                "1) Apply a service/provider filter (required for meaningful results)\n"
+                "2) Call get_usage_unit_types with the same filter to discover available units\n"
+                "3) Pick the unit that makes sense (e.g., 'Hour' for compute, 'GB' for storage)\n"
+                "4) Pass it as usage_configuration along with optional group_by\n\n"
+                "If usage_configuration is omitted, the tool auto-discovers units. "
+                "If exactly one unit type is found it proceeds automatically; "
+                "if multiple are found it returns them for you to choose from.\n\n"
+                "HOW IT WORKS: Queries cost + usage in one call, then computes cost/usage "
+                "for each row. Services with no usage data for the selected unit are "
+                "separated into no_usage_items.\n\n"
                 "EXAMPLES:\n"
-                "- Cost per EC2 instance: count_dimension=resource_id, filter=EC2\n"
-                "- Cost per region grouped by service: count_dimension=region, group_by=service\n"
-                "- Cost per Lambda function: count_dimension=function_name, filter=Lambda"
+                "- Cost per EC2 hour by instance type: filter=EC2, usage_configuration={costCenter, units=Hour}, group_by=instance_type\n"
+                "- Cost per GB by service: filter=S3, usage_configuration={costCenter, units=GB}\n"
+                "- Cost per request by Lambda function: filter=Lambda, usage_configuration={costCenter, units=Requests}"
             ),
             inputSchema={
                 "type": "object",
@@ -1373,19 +1366,19 @@ async def list_tools() -> list[Tool]:
                         "description": "Time period to analyze.",
                         "default": "last_30_days",
                     },
-                    "count_dimension": {
+                    "usage_configuration": {
                         "type": "object",
                         "properties": {
                             "costCenter": {"type": "string"},
-                            "key": {"type": "string"},
-                            "path": {"type": "string"},
-                            "type": {"type": "string"},
+                            "units": {"type": "string"},
                         },
-                        "required": ["costCenter", "key", "path", "type"],
+                        "required": ["costCenter", "units"],
                         "description": (
-                            "REQUIRED: Dimension to count unique values of. "
-                            "Use search_filters to find the right metadata. "
-                            "Example: to count EC2 instances, use the resource_id filter metadata."
+                            "Usage unit to measure against cost. "
+                            "Call get_usage_unit_types first to discover valid values. "
+                            'Example: {"costCenter": "amazon-cur", "units": "Hour"}. '
+                            "If omitted, the tool auto-discovers units — if only one type "
+                            "exists it proceeds automatically, otherwise returns options."
                         ),
                     },
                     "group_by": {
@@ -1442,7 +1435,7 @@ async def list_tools() -> list[Tool]:
                         "description": "Cost metric to use for unit economics calculation",
                     },
                 },
-                "required": ["count_dimension"],
+                "required": [],
             },
         ),
         Tool(

@@ -2297,6 +2297,7 @@ class TestUnitEconomicsImpl:
 
     @pytest.mark.asyncio
     async def test_unit_economics_basic(self):
+        """With explicit usage_configuration, computes cost-per-unit from usage data."""
         import importlib
 
         server_module = importlib.import_module("src.finout_mcp_server.server")
@@ -2307,28 +2308,24 @@ class TestUnitEconomicsImpl:
             async def get_filters_metadata(self):
                 return {
                     "amazon-cur": {
-                        "col": [
-                            {"key": "service", "path": "AWS/Services", "type": "col"},
-                            {"key": "resource_id", "path": "AWS/ResourceId", "type": "col"},
-                        ]
-                    },
+                        "col": [{"key": "service", "path": "AWS/Services", "type": "col"}]
+                    }
                 }
 
             async def get_filter_values(self, *a, **kw):
                 return []
 
             async def query_costs_with_filters(self, **kwargs):
-                # API returns count-distinct values as strings
                 return [
                     {
                         "Services": "EC2",
                         "Sum(Net Amortized Cost)": 10000,
-                        "Count Distinct(Resource ID)": "50",
+                        "Sum(usageAmount)": 5000,
                     },
                     {
                         "Services": "RDS",
                         "Sum(Net Amortized Cost)": 8000,
-                        "Count Distinct(Resource ID)": "10",
+                        "Sum(usageAmount)": 2000,
                     },
                 ]
 
@@ -2338,12 +2335,7 @@ class TestUnitEconomicsImpl:
             result = await server_module.get_unit_economics_impl(
                 {
                     "time_period": "last_30_days",
-                    "count_dimension": {
-                        "costCenter": "amazon-cur",
-                        "key": "resource_id",
-                        "path": "AWS/ResourceId",
-                        "type": "col",
-                    },
+                    "usage_configuration": {"costCenter": "amazon-cur", "units": "Hour"},
                     "group_by": [
                         {
                             "costCenter": "amazon-cur",
@@ -2359,20 +2351,18 @@ class TestUnitEconomicsImpl:
 
         assert "summary" in result
         assert "data" in result
-        assert result["summary"]["meaningful_items"] == 2
-        # overall_cpu = (10000+8000) / (50+10) = 18000/60 = 300
-        assert result["summary"]["overall_cost_per_unit"] == "$300.00"
-
-        # EC2: 10000/50 = 200, RDS: 8000/10 = 800; sorted by cost_per_unit desc
-        rds_row = result["data"][0]
-        assert rds_row["name"] == "RDS"
-        assert rds_row["cost_per_unit"] == 800.0
-        ec2_row = result["data"][1]
-        assert ec2_row["name"] == "EC2"
-        assert ec2_row["cost_per_unit"] == 200.0
+        assert result["units"] == "Hour"
+        # overall = 18000 / 7000 ≈ 2.5714
+        assert result["summary"]["total_Hour"] == 7000.0
+        # RDS: 8000/2000=4, EC2: 10000/5000=2 — sorted by cost_per_Hour desc
+        assert result["data"][0]["name"] == "RDS"
+        assert result["data"][0]["cost_per_Hour"] == 4.0
+        assert result["data"][1]["name"] == "EC2"
+        assert result["data"][1]["cost_per_Hour"] == 2.0
 
     @pytest.mark.asyncio
-    async def test_unit_economics_requires_count_dimension(self):
+    async def test_unit_economics_auto_discovers_single_unit(self):
+        """When usage_configuration is omitted and only one unit type exists, auto-selects it."""
         import importlib
 
         server_module = importlib.import_module("src.finout_mcp_server.server")
@@ -2380,13 +2370,60 @@ class TestUnitEconomicsImpl:
         class StubClient:
             internal_api_url = "http://localhost:3000"
 
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def get_usage_unit_types(self, **kwargs):
+                return [{"costCenter": "amazon-cur", "units": "Hour"}]
+
+            async def query_costs_with_filters(self, **kwargs):
+                return [{"Sum(Net Amortized Cost)": 1000, "Sum(usageAmount)": 500}]
+
         original_client = server_module.finout_client
         server_module.finout_client = StubClient()
         try:
-            with pytest.raises(ValueError, match="count_dimension is required"):
-                await server_module.get_unit_economics_impl({"time_period": "last_30_days"})
+            result = await server_module.get_unit_economics_impl({"time_period": "last_30_days"})
         finally:
             server_module.finout_client = original_client
+
+        assert result["units"] == "Hour"
+        assert result["usage_configuration"] == {"costCenter": "amazon-cur", "units": "Hour"}
+
+    @pytest.mark.asyncio
+    async def test_unit_economics_returns_options_when_multiple_units(self):
+        """When multiple unit types exist, returns them for the user to choose."""
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            async def get_usage_unit_types(self, **kwargs):
+                return [
+                    {"costCenter": "amazon-cur", "units": "Hour"},
+                    {"costCenter": "amazon-cur", "units": "GB"},
+                ]
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_unit_economics_impl({"time_period": "last_30_days"})
+        finally:
+            server_module.finout_client = original_client
+
+        assert "available_units" in result
+        assert len(result["available_units"]) == 2
+        assert "message" in result
 
     @pytest.mark.asyncio
     async def test_unit_economics_no_data(self):
@@ -2412,12 +2449,7 @@ class TestUnitEconomicsImpl:
             result = await server_module.get_unit_economics_impl(
                 {
                     "time_period": "last_30_days",
-                    "count_dimension": {
-                        "costCenter": "amazon-cur",
-                        "key": "resource_id",
-                        "path": "AWS/ResourceId",
-                        "type": "col",
-                    },
+                    "usage_configuration": {"costCenter": "amazon-cur", "units": "Hour"},
                 }
             )
         finally:

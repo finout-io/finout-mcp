@@ -203,7 +203,7 @@ async def get_top_movers_impl(args: dict) -> dict:
 
 
 async def get_unit_economics_impl(args: dict) -> dict:
-    """Compute cost-per-unit by combining cost with count_distinct."""
+    """Compute cost-per-unit using actual usage data (hours, GB, requests, etc.)."""
     from ..server import finout_client
 
     assert finout_client is not None
@@ -211,14 +211,8 @@ async def get_unit_economics_impl(args: dict) -> dict:
     time_period = args.get("time_period", "last_30_days")
     filters = args.get("filters", [])
     group_by = args.get("group_by")
-    count_dimension = args.get("count_dimension")
+    usage_configuration = args.get("usage_configuration")
     cost_type = args.get("cost_type", "netAmortizedCost")
-
-    if not count_dimension:
-        raise ValueError(
-            "count_dimension is required — specify the dimension to count unique values of "
-            "(e.g., resource ID, instance ID). Use search_filters to find the right metadata."
-        )
 
     if not finout_client.internal_api_url:
         return {
@@ -230,7 +224,39 @@ async def get_unit_economics_impl(args: dict) -> dict:
         finout_client, filters, group_by
     )
 
-    # Single query: cost + count_distinct in one call
+    # Auto-discover usage unit types if not provided
+    if not usage_configuration:
+        available_units = await finout_client.get_usage_unit_types(
+            time_period=time_period,
+            filters=filters if filters else None,
+        )
+        if not available_units:
+            return {
+                "time_period": time_period,
+                "error": "No usage data available",
+                "message": (
+                    "No usage unit types found for this combination of filters and time period. "
+                    "Apply a service filter first, or try a different time period."
+                ),
+            }
+        if len(available_units) > 1:
+            return {
+                "time_period": time_period,
+                "available_units": available_units,
+                "message": (
+                    f"Found {len(available_units)} usage unit types. "
+                    "Specify usage_configuration to select one and re-run. "
+                    'Example: {"costCenter": "'
+                    + available_units[0]["costCenter"]
+                    + '", "units": "'
+                    + available_units[0]["units"]
+                    + '"}'
+                ),
+            }
+        # Exactly one unit — auto-select it
+        unit = available_units[0]
+        usage_configuration = {"costCenter": unit["costCenter"], "units": unit["units"]}
+
     ct = CostType(cost_type) if cost_type in _VALID_COST_TYPES else CostType.NET_AMORTIZED
 
     data = await finout_client.query_costs_with_filters(
@@ -238,7 +264,7 @@ async def get_unit_economics_impl(args: dict) -> dict:
         filters=filters if filters else None,
         group_by=group_by,
         cost_type=ct,
-        count_distinct=count_dimension,
+        usage_configuration=usage_configuration,
     )
 
     if not data:
@@ -248,77 +274,77 @@ async def get_unit_economics_impl(args: dict) -> dict:
             "message": "No data returned for the given filters and time period.",
         }
 
-    # Find the cost column and count-distinct column
     cost_col = _find_cost_column(data[0])
-    count_col = _find_count_distinct_column(data[0])
+    usage_col = _find_usage_column(data[0])
     dim_col = _find_dimension_column(data[0])
 
     if not cost_col:
         return {"error": "No cost column found in response", "raw_columns": list(data[0].keys())}
 
-    if not count_col:
+    if not usage_col:
         return {
-            "error": "No count-distinct column found in response",
-            "hint": "Verify the count_dimension metadata is correct (costCenter, key, path, type).",
+            "error": "No usage column found in response",
+            "hint": "Verify usage_configuration is correct. Call get_usage_unit_types to discover valid units.",
             "raw_columns": list(data[0].keys()),
         }
 
-    # Compute cost-per-unit for each row
+    units_label = usage_configuration.get("units", "unit")
+
     results: list[dict[str, Any]] = []
+    no_usage: list[dict[str, Any]] = []
+
     for row in data:
         cost = _to_number(row.get(cost_col, 0))
-        count = _to_number(row.get(count_col, 0))
-        cost_per_unit = (cost / count) if count > 0 else 0
+        usage = _to_number(row.get(usage_col, 0))
+        name = row.get(dim_col, "Unknown") if dim_col else None
 
-        entry: dict[str, Any] = {
+        if usage <= 0:
+            entry: dict[str, Any] = {"total_cost": round(cost, 2), "usage": 0}
+            if name:
+                entry["name"] = name
+            no_usage.append(entry)
+            continue
+
+        cost_per_unit = cost / usage
+        entry = {
             "total_cost": round(cost, 2),
-            "unique_count": int(count),
-            "cost_per_unit": round(cost_per_unit, 2),
+            f"total_{units_label}": round(usage, 4),
+            f"cost_per_{units_label}": round(cost_per_unit, 4),
         }
-
-        if dim_col:
-            entry["name"] = row.get(dim_col, "Unknown")
-
+        if name:
+            entry["name"] = name
         results.append(entry)
 
-    # Split: items with count=1 have no meaningful unit economics.
-    # They are typically flat-fee services (Support contracts, subscriptions) or aggregated
-    # billing line items that the API cannot subdivide further.
-    meaningful = [r for r in results if r["unique_count"] > 1]
-    no_unit = [r for r in results if r["unique_count"] <= 1]
-
-    # Sort meaningful results by cost_per_unit descending (most expensive per unit first)
-    meaningful.sort(key=lambda r: r["cost_per_unit"], reverse=True)
-    no_unit.sort(key=lambda r: r["total_cost"], reverse=True)
+    results.sort(key=lambda r: r[f"cost_per_{units_label}"], reverse=True)
+    no_usage.sort(key=lambda r: r["total_cost"], reverse=True)
 
     total_cost = sum(r["total_cost"] for r in results)
-    meaningful_cost = sum(r["total_cost"] for r in meaningful)
-    meaningful_count = sum(r["unique_count"] for r in meaningful)
-    overall_cpu = (meaningful_cost / meaningful_count) if meaningful_count > 0 else 0
+    total_usage = sum(r[f"total_{units_label}"] for r in results)
+    overall_cpu = total_cost / total_usage if total_usage > 0 else 0
 
     result: dict[str, Any] = {
         "time_period": time_period,
-        "count_dimension": count_dimension.get("key", "unknown"),
+        "units": units_label,
+        "usage_configuration": usage_configuration,
         "summary": {
             "total_cost": format_currency(total_cost),
-            "meaningful_items": len(meaningful),
-            "overall_cost_per_unit": format_currency(overall_cpu),
+            f"total_{units_label}": round(total_usage, 2),
+            f"overall_cost_per_{units_label}": round(overall_cpu, 4),
         },
-        "data": meaningful[:50],
+        "data": results[:50],
         "_presentation_hint": (
-            "Lead with overall cost-per-unit across meaningful items only. "
-            "Highlight which groups are most expensive per unit. "
-            "If no_unit_items is present, mention them separately as flat-fee or "
-            "unquantifiable services — do NOT compute cost-per-unit for them. "
-            "Use render_chart with a bar chart of cost_per_unit for the top groups."
+            f"Lead with the overall cost per {units_label}. "
+            "Highlight which groups have the highest and lowest cost per unit — "
+            "outliers indicate inefficiency or over-provisioning. "
+            f"Use render_chart with a bar chart of cost_per_{units_label} by group."
         ),
     }
-    if no_unit:
-        result["no_unit_items"] = no_unit[:20]
-        result["_no_unit_note"] = (
-            f"{len(no_unit)} service(s) returned a unit count of 1 and are excluded from "
-            "unit economics — they are likely flat-fee services (support contracts, "
-            "subscriptions) or aggregated line items with no countable unit."
+    if no_usage:
+        result["no_usage_items"] = no_usage[:20]
+        result["_no_usage_note"] = (
+            f"{len(no_usage)} item(s) had no {units_label} usage data and are excluded — "
+            "they may be flat-fee services (support, subscriptions) or billing line items "
+            f"not measured in {units_label}."
         )
     if validation_warnings:
         result["_validation_warnings"] = validation_warnings
@@ -330,6 +356,15 @@ def _find_count_distinct_column(row: dict[str, Any]) -> str | None:
     """Find the count-distinct column in a data-explorer row."""
     for key in row:
         if key.startswith("Count Distinct(") or key.startswith("Count("):
+            return key
+    return None
+
+
+def _find_usage_column(row: dict[str, Any]) -> str | None:
+    """Find the usage amount column — a Sum column that is not cost."""
+    for key in row:
+        lower = key.lower()
+        if lower.startswith("sum(") and "cost" not in lower:
             return key
     return None
 
