@@ -8,6 +8,7 @@ separate from BILLY.
 from __future__ import annotations
 
 import html
+import json
 import os
 import pathlib
 import sys
@@ -250,7 +251,7 @@ def _embedded_login_page(
 
 def _authorization_complete_page(callback_url: str) -> str:
     """Render a success page that auto-redirects to the MCP client callback."""
-    safe_url = html.escape(callback_url, quote=True)
+    js_url = json.dumps(callback_url)  # safe for JS string literal; keeps & as & (not &amp;)
     return f"""\
 <!DOCTYPE html>
 <html lang="en">
@@ -300,7 +301,7 @@ def _authorization_complete_page(callback_url: str) -> str:
     <p>You can close this window and return to your MCP client.</p>
   </div>
   <script>
-    setTimeout(function() {{ window.location.href = "{safe_url}"; }}, 1000);
+    setTimeout(function() {{ window.location.href = {js_url}; }}, 1000);
   </script>
 </body>
 </html>"""
