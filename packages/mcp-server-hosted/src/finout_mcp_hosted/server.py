@@ -299,7 +299,9 @@ def _authorization_complete_page(callback_url: str) -> str:
     <h1>Authorization Successful</h1>
     <p>You can close this window and return to your MCP client.</p>
   </div>
-  <iframe src="{safe_url}" style="display:none" aria-hidden="true"></iframe>
+  <script>
+    setTimeout(function() {{ window.location.href = "{safe_url}"; }}, 1000);
+  </script>
 </body>
 </html>"""
 
