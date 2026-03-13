@@ -211,10 +211,12 @@ def test_authorize_post_valid_jwt_redirects_with_code():
                     "state": "mystate",
                 },
             )
-    assert response.status_code == 302
-    location = response.headers["location"]
-    assert "code=" in location
-    assert "state=mystate" in location
+    assert response.status_code == 200
+    body = response.text
+    assert "Authorization Successful" in body
+    # The callback URL with auth code is loaded in a hidden iframe
+    assert "code=" in body
+    assert "state=mystate" in body
 
 
 def test_authorize_post_invalid_jwt_returns_401():
@@ -265,9 +267,12 @@ def test_token_exchange_valid():
                     "state": "",
                 },
             )
-        assert post_resp.status_code == 302
-        location = post_resp.headers["location"]
-        code = location.split("code=")[1].split("&")[0]
+        assert post_resp.status_code == 200
+        # Extract the auth code from the iframe src in the HTML body
+        import re
+        match = re.search(r"code=([^&\"]+)", post_resp.text)
+        assert match, "auth code not found in response HTML"
+        code = match.group(1)
 
         with TestClient(module.app) as client:
             token_resp = client.post(

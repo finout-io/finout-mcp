@@ -248,6 +248,62 @@ def _embedded_login_page(
     return HTMLResponse(body)
 
 
+def _authorization_complete_page(callback_url: str) -> str:
+    """Render a success page that auto-redirects to the MCP client callback."""
+    safe_url = html.escape(callback_url, quote=True)
+    return f"""\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Finout — Authorized</title>
+  <style>
+    @font-face {{
+      font-family: 'Inter';
+      src: url('https://app.finout.io/app/assetsNew/inter-DNXbu9-7.woff2') format('woff2');
+      font-weight: 100 900; font-style: normal; font-display: swap;
+    }}
+    *, *::before, *::after {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #4fa882 url('https://fronteggprodeustorage.blob.core.windows.net/public-vendor-assets/d5069f33-9608-4141-9e1d-ebf8e9cf6582/assets/background-image-9fededda-593e-4749-ae93-2c8fd898b6f6.png') center / cover no-repeat fixed;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; flex-direction: column; padding: 24px;
+    }}
+    .card {{
+      background: #fff; border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+      max-width: 420px; width: 100%; text-align: center;
+      padding: 36px 32px;
+    }}
+    .checkmark {{
+      width: 56px; height: 56px; border-radius: 50%;
+      background: #4fa882; display: flex; align-items: center;
+      justify-content: center; margin: 0 auto 20px;
+    }}
+    .checkmark svg {{ width: 28px; height: 28px; fill: #fff; }}
+    h1 {{ margin: 0 0 8px; font-size: 18px; font-weight: 600; color: #3d4f63; }}
+    p {{ margin: 0; font-size: 14px; color: #7a8a9a; line-height: 1.5; }}
+  </style>
+</head>
+<body>
+  <img style="display:block;height:44px;filter:brightness(0) invert(1);margin-bottom:32px"
+    src="https://fronteggprodeustorage.blob.core.windows.net/public-vendor-assets/d5069f33-9608-4141-9e1d-ebf8e9cf6582/assets/logo-8fb6fff6-65f8-4040-afee-bc2daf5ab529.png"
+    alt="Finout">
+  <div class="card">
+    <div class="checkmark">
+      <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+    </div>
+    <h1>Authorization Successful</h1>
+    <p>You can close this window and return to your MCP client.</p>
+  </div>
+  <iframe src="{safe_url}" style="display:none" aria-hidden="true"></iframe>
+</body>
+</html>"""
+
+
 async def oauth_login_callback(request: Request) -> Response:
     """Handle Frontegg's post-login redirect (e.g. /account/login-callback).
 
@@ -307,7 +363,8 @@ async def oauth_authorize_post(request: Request) -> Response:
     query: dict[str, str] = {"code": code}
     if state:
         query["state"] = state
-    return RedirectResponse(f"{redirect_uri}?{urlencode(query)}", status_code=302)
+    callback_url = f"{redirect_uri}?{urlencode(query)}"
+    return HTMLResponse(_authorization_complete_page(callback_url))
 
 
 async def oauth_register(request: Request) -> JSONResponse:
