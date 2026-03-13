@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import os
+import pathlib
 import sys
 from contextlib import asynccontextmanager
 from hashlib import sha256
@@ -185,6 +186,7 @@ async def health(_: Request) -> JSONResponse:
     )
 
 
+
 def _sync_server_state_across_imports(client: FinoutClient | None, mode: str) -> None:
     """Keep runtime globals aligned even if server.py is imported under multiple module refs."""
     for module in list(sys.modules.values()):
@@ -216,111 +218,7 @@ def _extract_public_auth_from_scope(scope: Any) -> tuple[str, str, str]:
     return client_id, secret_key, api_url
 
 
-_EMBEDDED_LOGIN_HTML = """\
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Finout — Sign in</title>
-  <script src="https://cdn.jsdelivr.net/npm/@frontegg/js@latest/umd/frontegg.production.min.js"></script>
-  <style>
-    *,*::before,*::after{{box-sizing:border-box}}
-    body{{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-      background:#f5f7fa;display:flex;align-items:center;justify-content:center;
-      min-height:100vh;flex-direction:column}}
-    #frontegg-login-box{{width:100%;max-width:480px}}
-  </style>
-</head>
-<body>
-  <div id="frontegg-login-box"></div>
-  <script>
-    (function() {{
-      // Params may be embedded (first load) or restored from sessionStorage (post-redirect).
-      var embedded = {{
-        redirect_uri: "{redirect_uri}",
-        code_challenge: "{code_challenge}",
-        state: "{state}"
-      }};
-
-      var OAUTH_PARAMS;
-      if (embedded.redirect_uri) {{
-        // First load: save to sessionStorage to survive post-login redirect.
-        OAUTH_PARAMS = embedded;
-        sessionStorage.setItem("mcp_oauth_params", JSON.stringify(OAUTH_PARAMS));
-      }} else {{
-        // Post-redirect load: restore from sessionStorage.
-        var saved = sessionStorage.getItem("mcp_oauth_params");
-        if (saved) {{
-          try {{ OAUTH_PARAMS = JSON.parse(saved); }} catch (e) {{}}
-        }}
-      }}
-
-      if (!OAUTH_PARAMS || !OAUTH_PARAMS.redirect_uri) {{
-        document.body.innerHTML = "<p style='padding:2rem'>OAuth session expired. Please return to your MCP client and try again.</p>";
-        return;
-      }}
-
-      var app = Frontegg.initialize({{
-        contextOptions: {{
-          baseUrl: "{frontegg_base_url}",
-          clientId: "{frontegg_client_id}",
-          // Point post-login redirect back to this server, not the Frontegg portal app URL.
-          appUrl: window.location.origin
-        }},
-        hostedLoginBox: false
-      }});
-
-      var handled = false;
-
-      function completeOAuth(accessToken) {{
-        if (handled) return;
-        handled = true;
-        sessionStorage.removeItem("mcp_oauth_params");
-        var form = document.createElement("form");
-        form.method = "POST";
-        form.action = "/authorize";
-        form.style.display = "none";
-        var fields = {{
-          access_token: accessToken,
-          redirect_uri: OAUTH_PARAMS.redirect_uri,
-          code_challenge: OAUTH_PARAMS.code_challenge,
-          state: OAUTH_PARAMS.state
-        }};
-        for (var key in fields) {{
-          var input = document.createElement("input");
-          input.type = "hidden";
-          input.name = key;
-          input.value = fields[key] || "";
-          form.appendChild(input);
-        }}
-        document.body.appendChild(form);
-        form.submit();
-      }}
-
-      app.ready(function() {{
-        var s = app.store.getState();
-        if (s.auth.isAuthenticated && s.auth.user && s.auth.user.accessToken) {{
-          // Already authenticated (e.g. after post-login redirect back to this server).
-          completeOAuth(s.auth.user.accessToken);
-          return;
-        }}
-        // Navigate to /account/login so the SDK renders the login form.
-        history.pushState({{}}, "", "/account/login");
-      }});
-
-      app.store.subscribe(function() {{
-        if (handled) return;
-        var s = app.store.getState();
-        if (s.auth.isAuthenticated && s.auth.user && s.auth.user.accessToken) {{
-          completeOAuth(s.auth.user.accessToken);
-        }}
-      }});
-    }})();
-  </script>
-</body>
-</html>
-"""
+_LOGIN_HTML_TEMPLATE = (pathlib.Path(__file__).parent / "login.html").read_text()
 
 
 def _embedded_login_page(
@@ -339,12 +237,13 @@ def _embedded_login_page(
         return HTMLResponse(
             "<p>Server misconfiguration: Frontegg not configured.</p>", status_code=500
         )
-    body = _EMBEDDED_LOGIN_HTML.format(
-        redirect_uri=html.escape(redirect_uri, quote=True),
-        code_challenge=html.escape(code_challenge, quote=True),
-        state=html.escape(state, quote=True),
-        frontegg_base_url=html.escape(fe_base_url, quote=True),
-        frontegg_client_id=html.escape(fe_client_id, quote=True),
+    body = (
+        _LOGIN_HTML_TEMPLATE
+        .replace("__REDIRECT_URI__",    html.escape(redirect_uri,   quote=True))
+        .replace("__CODE_CHALLENGE__",  html.escape(code_challenge, quote=True))
+        .replace("__STATE__",           html.escape(state,          quote=True))
+        .replace("__FRONTEGG_BASE_URL__", html.escape(fe_base_url,  quote=True))
+        .replace("__FRONTEGG_CLIENT_ID__", html.escape(fe_client_id, quote=True))
     )
     return HTMLResponse(body)
 
@@ -754,6 +653,13 @@ def main() -> None:
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_PORT", "8080"))
     uvicorn.run("finout_mcp_hosted.server:app", host=host, port=port, lifespan="on")
+
+
+def dev() -> None:
+    """Run with auto-reload for local development."""
+    import uvicorn
+
+    uvicorn.run("finout_mcp_hosted.server:app", host="0.0.0.0", port=8080, reload=True)
 
 
 if __name__ == "__main__":

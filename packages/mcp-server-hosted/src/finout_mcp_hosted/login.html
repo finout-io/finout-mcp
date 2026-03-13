@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Finout — Authorize</title>
+  <script src="https://cdn.jsdelivr.net/npm/@frontegg/js@latest/umd/frontegg.production.min.js"></script>
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      src: url('https://app.finout.io/app/assetsNew/inter-DNXbu9-7.woff2') format('woff2');
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #4fa882 url('https://fronteggprodeustorage.blob.core.windows.net/public-vendor-assets/d5069f33-9608-4141-9e1d-ebf8e9cf6582/assets/background-image-9fededda-593e-4749-ae93-2c8fd898b6f6.png') center / cover no-repeat fixed;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      flex-direction: column;
+      padding: 24px;
+    }
+
+    #frontegg-login-box { width: 100%; max-width: 480px; }
+
+    .page-logo {
+      display: block;
+      height: 44px;
+      filter: brightness(0) invert(1);
+    }
+
+    /* Full-viewport overlay — shown instead of the login box after auth */
+    #consent-screen {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 999999;
+      background: #4fa882 url('https://fronteggprodeustorage.blob.core.windows.net/public-vendor-assets/d5069f33-9608-4141-9e1d-ebf8e9cf6582/assets/background-image-9fededda-593e-4749-ae93-2c8fd898b6f6.png') center / cover no-repeat;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    #consent-screen.active { display: flex; }
+
+    /* Wrapper is only as tall as the dialog — logo hangs above it absolutely */
+    #consent-layout {
+      position: relative;
+    }
+    #consent-layout .page-logo {
+      position: absolute;
+      bottom: calc(100% + 75px);
+      left: 50%;
+      transform: translateX(-50%);
+      width: 200px;
+      height: 50px;
+    }
+
+    #consent-dialog {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+      max-width: 420px;
+      width: 100%;
+      overflow: hidden;
+      text-align: center;
+    }
+
+    .dialog-body { padding: 28px 32px 24px; }
+
+    #consent-dialog h1 {
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 600;
+      color: #3d4f63;
+    }
+    #consent-dialog .subtitle {
+      margin: 0 0 20px;
+      font-size: 13px;
+      color: #7a8a9a;
+      line-height: 1.5;
+    }
+    #consent-dialog .subtitle strong {
+      font-weight: 600;
+      color: #3d4f63;
+    }
+    #consent-dialog hr {
+      border: none;
+      border-top: 1px solid #f0f2f5;
+      margin: 0 -32px 20px;
+    }
+    #consent-dialog .scopes {
+      list-style: none;
+      margin: 0 0 24px;
+      padding: 0;
+      text-align: left;
+    }
+    #consent-dialog .scopes li {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 8px 0;
+      font-size: 13px;
+      color: #3a4a5a;
+      border-bottom: 1px solid #f7f9fc;
+    }
+    #consent-dialog .scopes li:last-child { border-bottom: none; }
+    #consent-dialog .scopes li .dot {
+      width: 22px;
+      height: 22px;
+      flex-shrink: 0;
+      border-radius: 50%;
+      background: #4fa882;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #consent-dialog .scopes li .dot svg { width: 12px; height: 12px; fill: #fff; }
+
+    #consent-dialog .actions { display: flex; gap: 10px; margin-bottom: 14px; }
+    #consent-dialog .btn {
+      flex: 1;
+      padding: 11px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s;
+    }
+    #consent-dialog .btn:hover { opacity: 0.88; }
+    #btn-deny  { background: #f0f2f5; color: #7a8a9a; }
+    #btn-allow { background: #e87878; color: #fff; }
+  </style>
+</head>
+<body>
+
+  <!-- Login state -->
+  <img class="page-logo"
+    src="https://fronteggprodeustorage.blob.core.windows.net/public-vendor-assets/d5069f33-9608-4141-9e1d-ebf8e9cf6582/assets/logo-8fb6fff6-65f8-4040-afee-bc2daf5ab529.png"
+    alt="Finout">
+  <div id="frontegg-login-box"></div>
+
+  <!-- Consent state — fixed overlay shown after login -->
+  <div id="consent-screen">
+    <div id="consent-layout">
+      <img class="page-logo"
+        src="https://fronteggprodeustorage.blob.core.windows.net/public-vendor-assets/d5069f33-9608-4141-9e1d-ebf8e9cf6582/assets/logo-8fb6fff6-65f8-4040-afee-bc2daf5ab529.png"
+        alt="Finout">
+      <div id="consent-dialog">
+      <div class="dialog-body">
+        <h1>Authorize Finout MCP</h1>
+        <p class="subtitle">
+          <strong id="client-name">An application</strong> is requesting access to your Finout account.
+        </p>
+        <hr>
+        <ul class="scopes">
+          <li>
+            <span class="dot"><svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></span>
+            Read cost and usage data
+          </li>
+          <li>
+            <span class="dot"><svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></span>
+            View waste recommendations and anomalies
+          </li>
+          <li>
+            <span class="dot"><svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></span>
+            Access financial plans and budgets
+          </li>
+        </ul>
+        <div class="actions">
+          <button class="btn" id="btn-deny">Deny</button>
+          <button class="btn" id="btn-allow">Allow access</button>
+        </div>
+      </div>
+    </div>
+    </div><!-- #consent-layout -->
+  </div><!-- #consent-screen -->
+
+  <script>
+    (function() {
+      var embedded = {
+        redirect_uri:   "__REDIRECT_URI__",
+        code_challenge: "__CODE_CHALLENGE__",
+        state:          "__STATE__"
+      };
+
+      var OAUTH_PARAMS;
+      if (embedded.redirect_uri) {
+        OAUTH_PARAMS = embedded;
+        sessionStorage.setItem("mcp_oauth_params", JSON.stringify(OAUTH_PARAMS));
+      } else {
+        var saved = sessionStorage.getItem("mcp_oauth_params");
+        if (saved) {
+          try { OAUTH_PARAMS = JSON.parse(saved); } catch (e) {}
+        }
+      }
+
+      if (!OAUTH_PARAMS || !OAUTH_PARAMS.redirect_uri) {
+        document.body.innerHTML = "<p style='padding:2rem'>OAuth session expired. Please return to your MCP client and try again.</p>";
+        return;
+      }
+
+      var app = Frontegg.initialize({
+        contextOptions: {
+          baseUrl:  "__FRONTEGG_BASE_URL__",
+          clientId: "__FRONTEGG_CLIENT_ID__",
+          appUrl: window.location.origin
+        },
+        hostedLoginBox: false
+      });
+
+      var handled = false;
+      var pendingToken = null;
+
+      function buildForm(accessToken) {
+        var form = document.createElement("form");
+        form.method = "POST";
+        form.action = "/authorize";
+        form.style.display = "none";
+        var fields = {
+          access_token:   accessToken,
+          redirect_uri:   OAUTH_PARAMS.redirect_uri,
+          code_challenge: OAUTH_PARAMS.code_challenge,
+          state:          OAUTH_PARAMS.state
+        };
+        for (var key in fields) {
+          var input = document.createElement("input");
+          input.type  = "hidden";
+          input.name  = key;
+          input.value = fields[key] || "";
+          form.appendChild(input);
+        }
+        return form;
+      }
+
+      function showConsent(accessToken) {
+        pendingToken = accessToken;
+        try {
+          var host = new URL(OAUTH_PARAMS.redirect_uri).hostname;
+          document.getElementById("client-name").textContent = host;
+        } catch(e) {}
+        document.getElementById("consent-screen").classList.add("active");
+      }
+
+      document.getElementById("btn-allow").addEventListener("click", function() {
+        if (!pendingToken) return;
+        handled = true;
+        sessionStorage.removeItem("mcp_oauth_params");
+        var form = buildForm(pendingToken);
+        document.body.appendChild(form);
+        form.submit();
+      });
+
+      document.getElementById("btn-deny").addEventListener("click", function() {
+        handled = true;
+        sessionStorage.removeItem("mcp_oauth_params");
+        var url = OAUTH_PARAMS.redirect_uri + "?error=access_denied";
+        if (OAUTH_PARAMS.state) url += "&state=" + encodeURIComponent(OAUTH_PARAMS.state);
+        window.location.href = url;
+      });
+
+      app.ready(function() {
+        var s = app.store.getState();
+        if (s.auth.isAuthenticated && s.auth.user && s.auth.user.accessToken) {
+          showConsent(s.auth.user.accessToken);
+          return;
+        }
+        history.pushState({}, "", "/account/login");
+      });
+
+      app.store.subscribe(function() {
+        if (handled) return;
+        var s = app.store.getState();
+        if (s.auth.isAuthenticated && s.auth.user && s.auth.user.accessToken) {
+          showConsent(s.auth.user.accessToken);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -39,6 +39,37 @@ spec:
             configMapKeyRef:
               name: finout-mcp-hosted-public-config
               key: finout-api-url
+        - name: MCP_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: finout-mcp-hosted-public-config
+              key: mcp-base-url
+        - name: FRONTEGG_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: finout-mcp-hosted-public-config
+              key: frontegg-base-url
+        - name: FRONTEGG_MCP_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: finout-mcp-hosted-public-config
+              key: frontegg-mcp-client-id
+        - name: FINOUT_JWT_ISSUER
+          valueFrom:
+            configMapKeyRef:
+              name: finout-mcp-hosted-public-config
+              key: finout-jwt-issuer
+        - name: FINOUT_JWT_AUDIENCE
+          valueFrom:
+            configMapKeyRef:
+              name: finout-mcp-hosted-public-config
+              key: finout-jwt-audience
+        - name: FINOUT_LOGIN_JWT_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: finout-mcp-hosted-public-secret
+              key: finout-login-jwt-public-key
+              optional: true
         resources:
           requests:
             cpu: "250m"

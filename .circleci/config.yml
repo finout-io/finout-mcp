@@ -209,6 +209,46 @@ jobs:
           source_tag: "${CIRCLE_SHA1:0:7}"
           target_tag: "latest"
 
+  tag_hosted_public_production:
+    docker:
+      - image: cimg/aws:2022.06.1
+    steps:
+      - aws-cli/setup:
+          region: ${AWS_DEFAULT_REGION}
+      - aws-ecr/ecr_login
+      - aws-ecr/tag_image:
+          repo: finout-mcp
+          source_tag: "${CIRCLE_SHA1:0:7}"
+          target_tag: "production"
+
+  deploy_hosted_public_production:
+    docker:
+      - image: cimg/aws:2023.09
+    circleci_ip_ranges: true
+    steps:
+      - checkout
+      - aws-cli/setup:
+          region: ${AWS_DEFAULT_REGION}
+      - run:
+          name: Install kubectl
+          command: |
+            curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+            sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      - run:
+          name: Configure kubeconfig for prod-data-engine
+          command: |
+            aws eks update-kubeconfig \
+              --name prod-data-engine \
+              --region "${AWS_DEFAULT_REGION}" \
+              --role-arn arn:aws:iam::277411487094:role/k8sAdmin
+      - run:
+          name: Deploy hosted public MCP
+          command: |
+            IMAGE="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/finout-mcp:production"
+            kubectl -n mcp-public set image deployment/finout-mcp finout-mcp="${IMAGE}"
+            kubectl -n mcp-public rollout restart deployment/finout-mcp
+            kubectl -n mcp-public rollout status deployment/finout-mcp --timeout=5m
+
   publish_python_packages:
     executor: python
     steps:
@@ -276,6 +316,20 @@ workflows:
           context: finout
           requires:
             - build_and_push_hosted_public_image
+          filters:
+            branches:
+              only: main
+      - tag_hosted_public_production:
+          context: finout
+          requires:
+            - build_and_push_hosted_public_image
+          filters:
+            branches:
+              only: main
+      - deploy_hosted_public_production:
+          context: finout
+          requires:
+            - tag_hosted_public_production
           filters:
             branches:
               only: main
