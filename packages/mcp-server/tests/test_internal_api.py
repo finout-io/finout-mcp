@@ -696,8 +696,11 @@ class TestToolDescriptions:
         assert "compare" in tool_map["compare_costs"].lower()
         assert "trend" in tool_map["compare_costs"].lower()
 
-        # search_filters should emphasize it's the first step
-        assert "FIRST STEP" in tool_map["search_filters"]
+        # search_filters should tell the model to proceed to a terminal tool
+        assert (
+            "DO NOT STOP" in tool_map["search_filters"]
+            or "FIRST STEP" in tool_map["search_filters"]
+        )
 
         # get_filter_values should reference chaining
         assert "CHAIN" in tool_map["get_filter_values"]

@@ -103,12 +103,12 @@ async def search_filters_impl(args: dict) -> dict:
             if vals:
                 sample_values[sv_key] = vals
 
-    # Format for LLM
-    formatted = format_search_results(results, max_results=50, sample_values=sample_values)
+    # Format for LLM — keep compact for better routing
+    formatted = format_search_results(results, max_results=10, sample_values=sample_values)
 
     # Build copy-pasteable filter objects for top results
     copy_paste_filters = []
-    for r in results[:10]:
+    for r in results[:5]:
         cost_center_value = r.get("costCenter")
         key_value = r.get("key")
         path_value = r.get("path")
@@ -123,19 +123,23 @@ async def search_filters_impl(args: dict) -> dict:
                 }
             )
 
+    # Put instruction FIRST so the model sees it before the data
     response: dict[str, Any] = {
+        "next_step": (
+            "Use a filter object from 'filters' below to call the right tool NOW:\n"
+            "• Cost movers/changes → get_top_movers(group_by=[<filter>])\n"
+            "• Cost totals/breakdown → query_costs(group_by=[<filter>])\n"
+            "• Cost per unit → get_unit_economics\n"
+            "• SP/RI coverage → get_savings_coverage(group_by=[<filter>])\n"
+            "• Tag coverage → get_tag_coverage(tag_dimension=<filter>)\n"
+            "• Cost patterns → get_cost_patterns\n"
+            "• Statistics/volatility → get_cost_statistics(group_by=[<filter>])\n"
+            "For group_by: use the filter object as-is. Do NOT respond with text — call a tool."
+        ),
+        "filters": copy_paste_filters,
         "query": query,
-        "cost_center": cost_center,
         "result_count": len(results),
         "results": formatted,
-        "filters": copy_paste_filters,
-        "instruction": (
-            "To query costs, pick a filter from the 'filters' list above, "
-            "then add 'operator' and 'value'. "
-            "Values are often unintuitive — call get_filter_values first to verify. "
-            "Do NOT modify costCenter, key, path, or type."
-        ),
-        "_presentation_hint": ("Don't show raw results to user. Use them to build the next query."),
     }
 
     # Cross-provider gap detection (only for broad searches without cost_center)

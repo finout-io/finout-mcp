@@ -15,9 +15,11 @@ import os
 import pathlib
 from contextlib import asynccontextmanager
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
+from uuid import uuid4
 
 import anyio
+import httpx
 from dotenv import load_dotenv
 from mcp.server.streamable_http import StreamableHTTPServerTransport
 from starlette.applications import Starlette
@@ -33,6 +35,7 @@ from .client_pool import ClientPool
 from .oauth import consume_auth_code, generate_auth_code
 from finout_mcp_server.finout_client import InternalAuthMode
 from finout_mcp_server.server import MCPMode, _client_var, _runtime_mode_var, server, set_request_client, set_request_runtime_mode
+from finout_mcp_server.observability import reset_trace_context, set_trace_context
 
 load_dotenv(override=True)
 
@@ -186,6 +189,69 @@ def _extract_public_auth_from_scope(scope: Any) -> tuple[str, str, str]:
     if not client_id or not secret_key:
         raise ValueError("Unauthorized")
     return client_id, secret_key, api_url
+
+
+def _frontegg_host() -> str:
+    """Derive Frontegg host (scheme://netloc) from FRONTEGG_BASE_URL."""
+    base = os.getenv("FRONTEGG_BASE_URL", "").rstrip("/")
+    if not base:
+        return ""
+    parsed = urlparse(base)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+async def proxy_tenants(request: Request) -> JSONResponse:
+    """Proxy Frontegg user-tenants API to avoid CORS."""
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    fe_host = _frontegg_host()
+    if not fe_host:
+        return JSONResponse({"error": "Frontegg not configured"}, status_code=500)
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{fe_host}/identity/resources/users/v2/me/tenants",
+            headers={"authorization": auth},
+        )
+    try:
+        body = resp.json()
+    except Exception:
+        body = {"error": "Unexpected response from Frontegg"}
+    return JSONResponse(body, status_code=resp.status_code)
+
+
+async def proxy_tenant_switch(request: Request) -> JSONResponse:
+    """Proxy Frontegg tenant-switch API to avoid CORS."""
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    tenant_id = body.get("tenantId", "")
+    if not tenant_id:
+        return JSONResponse({"error": "tenantId required"}, status_code=400)
+
+    fe_host = _frontegg_host()
+    if not fe_host:
+        return JSONResponse({"error": "Frontegg not configured"}, status_code=500)
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.put(
+            f"{fe_host}/identity/resources/auth/v1/user/tenant",
+            headers={"authorization": auth, "content-type": "application/json"},
+            json={"tenantId": tenant_id},
+        )
+    try:
+        resp_body = resp.json()
+    except Exception:
+        resp_body = {"error": "Unexpected response from Frontegg"}
+    return JSONResponse(resp_body, status_code=resp.status_code)
 
 
 _LOGIN_HTML_TEMPLATE = (pathlib.Path(__file__).parent / "login.html").read_text()
@@ -391,6 +457,12 @@ async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
         auth_header = headers.get("authorization", "")
         base_url = os.getenv("MCP_BASE_URL", "").rstrip("/")
         pool: ClientPool = scope["app"].state.client_pool
+        request_id = headers.get("x-request-id", "").strip() or str(uuid4())
+        session_id = (
+            headers.get("mcp-session-id", "").strip()
+            or headers.get("x-session-id", "").strip()
+            or request_id
+        )
 
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
@@ -460,9 +532,20 @@ async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
             # Set per-coroutine context so tool impls see this client.
             client_token = set_request_client(client)
             mode_token = set_request_runtime_mode(MCPMode.PUBLIC.value)
+            trace_token = set_trace_context(
+                {
+                    "origin": "direct_mcp",
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "account_id": account_id,
+                    "user_id": payload.get("email") or payload.get("sub") or account_id,
+                    "auth_mode": "cookie_jwt" if use_cookie_auth else "bearer_token",
+                }
+            )
             try:
                 await _handle_with_transport(scope, receive, send)
             finally:
+                reset_trace_context(trace_token)
                 _client_var.reset(client_token)
                 _runtime_mode_var.reset(mode_token)
             return
@@ -491,9 +574,20 @@ async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
 
         client_token = set_request_client(client)
         mode_token = set_request_runtime_mode(MCPMode.PUBLIC.value)
+        trace_token = set_trace_context(
+            {
+                "origin": "direct_mcp",
+                "request_id": request_id,
+                "session_id": session_id,
+                "client_id": client_id,
+                "user_id": f"client:{client_id}",
+                "auth_mode": "key_secret",
+            }
+        )
         try:
             await _handle_with_transport(scope, receive, send)
         finally:
+            reset_trace_context(trace_token)
             _client_var.reset(client_token)
             _runtime_mode_var.reset(mode_token)
         return
@@ -563,6 +657,8 @@ app = Starlette(
         Route("/debug/sso", endpoint=debug_sso, methods=["GET"]),
         Route("/debug/cookies", endpoint=debug_cookies, methods=["GET"]),
         Route("/debug/verify-token", endpoint=debug_verify_token, methods=["GET"]),
+        Route("/api/tenants", endpoint=proxy_tenants, methods=["GET"]),
+        Route("/api/tenant-switch", endpoint=proxy_tenant_switch, methods=["PUT"]),
         Route("/authorize", endpoint=oauth_authorize_get, methods=["GET"]),
         Route("/authorize", endpoint=oauth_authorize_post, methods=["POST"]),
         # Frontegg redirects to {appUrl}/account/login-callback after embedded login.

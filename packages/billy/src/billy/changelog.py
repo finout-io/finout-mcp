@@ -19,6 +19,22 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.29.0",
+        "date": "2026-03-14",
+        "title": "Multi-tenant account picker during OAuth login",
+        "sections": {
+            "external_mcp": [
+                "Users with access to multiple Finout accounts can now choose which account to connect during MCP authorization"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
         "version": "0.28.0",
         "date": "2026-03-14",
         "title": "Concurrent multi-user hosted MCP server",

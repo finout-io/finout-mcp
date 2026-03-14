@@ -93,7 +93,10 @@ async def test_trace_tool_creates_span_when_langfuse_available():
     mock_lf.start_as_current_span.assert_called_once_with(
         name="tool:search_filters", input={"query": "ec2"}
     )
-    mock_lf.update_current_trace.assert_not_called()
+    mock_lf.update_current_trace.assert_called_once()
+    update_trace_kwargs = mock_lf.update_current_trace.call_args.kwargs
+    assert update_trace_kwargs["tags"] == ["origin:direct_mcp", "mode:unknown", "channel:mcp"]
+    assert update_trace_kwargs["metadata"] == {}
     mock_span.update.assert_called_once()
     update_kwargs = mock_span.update.call_args[1]
     assert update_kwargs["output"] == {"status": "success", "count": 5}
@@ -111,7 +114,24 @@ async def test_trace_tool_sets_user_id_when_provided():
     ) as ctx:
         ctx["output"] = {"status": "success"}
 
-    mock_lf.update_current_trace.assert_called_once_with(user_id="acct-123")
+    mock_lf.update_current_trace.assert_called_once()
+    update_trace_kwargs = mock_lf.update_current_trace.call_args.kwargs
+    assert update_trace_kwargs["user_id"] == "acct-123"
+    assert update_trace_kwargs["tags"] == ["origin:direct_mcp", "mode:unknown", "channel:mcp"]
+
+
+@pytest.mark.asyncio
+async def test_trace_tool_noop_for_billy_internal():
+    mock_lf, _ = _make_mock_langfuse()
+    observability._langfuse_instance = mock_lf
+    observability._langfuse_checked = True
+
+    with patch("finout_mcp_server.server.get_runtime_mode", return_value="billy-internal"):
+        async with observability.trace_tool("query_costs", {"period": "last_7_days"}) as ctx:
+            ctx["output"] = {"status": "success"}
+
+    mock_lf.start_as_current_span.assert_not_called()
+    mock_lf.update_current_trace.assert_not_called()
 
 
 @pytest.mark.asyncio

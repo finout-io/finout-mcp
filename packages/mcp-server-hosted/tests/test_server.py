@@ -347,6 +347,117 @@ def test_register_returns_static_client_id():
     assert "http://localhost:6274/oauth/callback" in data["redirect_uris"]
 
 
+# ── /api/tenants ──────────────────────────────────────────────────────────────
+
+
+def test_proxy_tenants_requires_auth():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with TestClient(module.app) as client:
+        response = client.get("/api/tenants")
+    assert response.status_code == 401
+
+
+def test_proxy_tenants_returns_frontegg_response(monkeypatch):
+    module = importlib.import_module("finout_mcp_hosted.server")
+    monkeypatch.setenv("FRONTEGG_BASE_URL", "https://app-test.frontegg.com/oauth")
+
+    tenants = [
+        {"tenantId": "t1", "name": "Acme Corp"},
+        {"tenantId": "t2", "name": "Beta Inc"},
+    ]
+
+    with patch("finout_mcp_hosted.server.httpx.AsyncClient") as mock_cls:
+        mock_resp = type("R", (), {"status_code": 200, "json": lambda self: tenants})()
+        mock_client = mock_cls.return_value.__aenter__ = lambda self: self
+        mock_ctx = type("Ctx", (), {
+            "__aenter__": lambda self: mock_resp,
+            "__aexit__": lambda self, *a: None,
+            "get": lambda self, *a, **kw: mock_resp,
+        })()
+        # Simpler: just mock the whole function
+    with patch("finout_mcp_hosted.server.httpx.AsyncClient") as mock_cls:
+        mock_resp = type("R", (), {"status_code": 200, "json": lambda self: tenants})()
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
+
+            async def get(self, url, **kwargs):
+                return mock_resp
+
+        mock_cls.return_value = FakeClient()
+
+        with TestClient(module.app) as client:
+            response = client.get(
+                "/api/tenants",
+                headers={"authorization": "Bearer some-jwt"},
+            )
+    assert response.status_code == 200
+    assert response.json() == tenants
+
+
+# ── /api/tenant-switch ────────────────────────────────────────────────────────
+
+
+def test_proxy_tenant_switch_requires_auth():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with TestClient(module.app) as client:
+        response = client.put(
+            "/api/tenant-switch",
+            json={"tenantId": "t2"},
+        )
+    assert response.status_code == 401
+
+
+def test_proxy_tenant_switch_requires_tenant_id():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with TestClient(module.app) as client:
+        response = client.put(
+            "/api/tenant-switch",
+            json={},
+            headers={"authorization": "Bearer some-jwt"},
+        )
+    assert response.status_code == 400
+    assert "tenantId" in response.json()["error"]
+
+
+def test_proxy_tenant_switch_returns_new_token(monkeypatch):
+    module = importlib.import_module("finout_mcp_hosted.server")
+    monkeypatch.setenv("FRONTEGG_BASE_URL", "https://app-test.frontegg.com/oauth")
+
+    switch_resp_body = {"accessToken": "new-jwt-for-t2", "refreshToken": "rt"}
+
+    with patch("finout_mcp_hosted.server.httpx.AsyncClient") as mock_cls:
+        mock_resp = type("R", (), {
+            "status_code": 200,
+            "json": lambda self: switch_resp_body,
+        })()
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
+
+            async def put(self, url, **kwargs):
+                return mock_resp
+
+        mock_cls.return_value = FakeClient()
+
+        with TestClient(module.app) as client:
+            response = client.put(
+                "/api/tenant-switch",
+                json={"tenantId": "t2"},
+                headers={"authorization": "Bearer original-jwt"},
+            )
+    assert response.status_code == 200
+    assert response.json()["accessToken"] == "new-jwt-for-t2"
+
+
 # ── Client pool ──────────────────────────────────────────────────────────────
 
 

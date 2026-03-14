@@ -47,11 +47,21 @@ repo_root = package_root.parent.parent
 
 # Langfuse observability — auto-instrument Anthropic SDK calls.
 _langfuse: Any = None
-if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
+
+
+def _langfuse_env(name: str) -> str | None:
+    return os.getenv(f"LANGFUSE_BILLY_{name}") or os.getenv(f"LANGFUSE_{name}")
+
+
+if _langfuse_env("PUBLIC_KEY") and _langfuse_env("SECRET_KEY"):
     try:
         from langfuse import Langfuse as _Langfuse
 
-        candidate = _Langfuse()  # Registers OTel TracerProvider
+        candidate = _Langfuse(
+            public_key=_langfuse_env("PUBLIC_KEY"),
+            secret_key=_langfuse_env("SECRET_KEY"),
+            host=_langfuse_env("HOST"),
+        )  # Registers OTel TracerProvider
         if hasattr(candidate, "start_as_current_span") and hasattr(candidate, "update_current_trace"):
             _langfuse = candidate
         else:
@@ -97,6 +107,7 @@ class MCPBridge:
         # Prepare environment with account ID
         env = os.environ.copy()
         env["FINOUT_ACCOUNT_ID"] = self.current_account_id
+        env["LANGFUSE_TRACE_ORIGIN"] = "billy"
 
         # Start internal MCP runtime using the dedicated launcher when available.
         # Fallback to uv-run launcher so mcp-server dependencies are resolved automatically.
@@ -720,6 +731,13 @@ async def _run_chat_pipeline_traced(
 ) -> Dict[str, Any]:
     account_id = session_mcp.current_account_id or ""
     session_id = request.conversation_id or str(uuid4())
+    base_metadata: Dict[str, Any] = {
+        "account_id": account_id,
+        "conversation_id": session_id,
+        "conversation_length": len(request.conversation_history),
+        "origin": "billy",
+        "channel": "chat",
+    }
     with _langfuse.start_as_current_span(
         name="chat_pipeline",
         input={
@@ -731,12 +749,8 @@ async def _run_chat_pipeline_traced(
     ) as span:
         trace_kwargs: Dict[str, Any] = {
             "session_id": session_id,
-            "tags": [request.model],
-            "metadata": {
-                "account_id": account_id,
-                "conversation_id": session_id,
-                "conversation_length": len(request.conversation_history),
-            },
+            "tags": [request.model, "origin:billy", "channel:chat"],
+            "metadata": base_metadata,
         }
         if request.user_email:
             trace_kwargs["user_id"] = request.user_email
@@ -744,11 +758,49 @@ async def _run_chat_pipeline_traced(
         result = await _run_chat_pipeline_inner(
             request, session_mcp, status_callback, token_callback
         )
+        tool_names = [tc.get("name") for tc in result.get("tool_calls", []) if tc.get("name")]
+        has_chart = "render_chart" in tool_names
+        has_text = bool((result.get("response") or "").strip())
+        if has_text and has_chart:
+            response_mode = "text_and_chart"
+        elif has_text:
+            response_mode = "text_only"
+        elif has_chart:
+            response_mode = "chart_only"
+        else:
+            response_mode = "none"
+        _langfuse.update_current_trace(
+            metadata={
+                **base_metadata,
+                "request_id": result.get("request_id"),
+                "response_mode": response_mode,
+                "tool_sequence": tool_names,
+                "tool_count": len(tool_names),
+                "response_length": len(result.get("response", "")),
+            }
+        )
+        _langfuse.score_current_trace(
+            name="visible_answer_present",
+            value=1 if (has_text or has_chart) else 0,
+            data_type="NUMERIC",
+        )
+        _langfuse.score_current_trace(
+            name="final_text_present",
+            value=1 if has_text else 0,
+            data_type="NUMERIC",
+        )
+        _langfuse.score_current_trace(
+            name="chart_answer_present",
+            value=1 if has_chart else 0,
+            data_type="NUMERIC",
+        )
         span.update(
             output={
                 "tool_count": len(result.get("tool_calls", [])),
                 "tool_time": result.get("tool_time"),
                 "usage": result.get("usage"),
+                "response_mode": response_mode,
+                "request_id": result.get("request_id"),
             },
         )
         return result
@@ -775,7 +827,19 @@ async def _build_system_prompt(
         "NEVER state specific cost figures, resource names, service names, or any data "
         "without first calling the appropriate tool. "
         "If you are unsure which filter to use, call search_filters first. "
-        "If the user asks about cost for any service, tag, or resource, call query_costs. "
+        "ALWAYS follow through with the appropriate terminal tool after search_filters — "
+        "never stop at search_filters alone.\n\n"
+        "TOOL ROUTING — pick the right tool for the question:\n"
+        "• Cost totals, breakdowns, trends → query_costs\n"
+        "• Cost changes, what drove increase/decrease, biggest movers → get_top_movers\n"
+        "• Cost per unit, per resource, per hour, efficiency → get_unit_economics\n"
+        "• Average daily cost, volatility, peak day → get_cost_statistics\n"
+        "• Peak hours, weekday vs weekend patterns → get_cost_patterns\n"
+        "• Savings plan / RI coverage → get_savings_coverage\n"
+        "• Tag coverage, untagged spend, governance → get_tag_coverage\n"
+        "• Period-over-period comparison → compare_costs\n"
+        "If you need filter/group_by metadata for any tool, call search_filters first, "
+        "then immediately call the terminal tool with the metadata. "
         "Violating this rule — generating numbers or names from memory — is a critical failure.\n\n"
         "CHARTS: The UI automatically renders interactive charts from tool call data — "
         "pie charts for single-dimension breakdowns, stacked bar charts for time-series. "
@@ -837,6 +901,50 @@ async def _build_system_prompt(
     return base
 
 
+async def _call_mcp_tool_traced(
+    session_mcp: MCPBridge,
+    tool_name: str,
+    tool_input: Dict[str, Any],
+    *,
+    request_id: str,
+) -> Any:
+    if not _langfuse:
+        return await session_mcp.call_tool(tool_name, tool_input)
+
+    with _langfuse.start_as_current_span(
+        name=f"mcp:{tool_name}",
+        input=tool_input,
+    ) as tool_span:
+        try:
+            result = await session_mcp.call_tool(tool_name, tool_input)
+            tool_span.update(
+                output={"status": "success", "preview": str(result)[:400]},
+                metadata={
+                    "origin": "billy",
+                    "channel": "chat",
+                    "account_id": session_mcp.current_account_id,
+                    "request_id": request_id,
+                },
+            )
+            return result
+        except Exception as exc:
+            tool_span.update(
+                output={
+                    "status": "error",
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
+                level="ERROR",
+                metadata={
+                    "origin": "billy",
+                    "channel": "chat",
+                    "account_id": session_mcp.current_account_id,
+                    "request_id": request_id,
+                },
+            )
+            raise
+
+
 async def _run_chat_pipeline_inner(
     request: ChatRequest,
     session_mcp: MCPBridge,
@@ -844,6 +952,8 @@ async def _run_chat_pipeline_inner(
     token_callback: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Dict[str, Any]:
     """Execute chat + MCP tool loop, optionally emitting progress status events."""
+    request_id = str(uuid4())
+
     if status_callback:
         await status_callback({"phase": "thinking", "message": "Thinking..."})
 
@@ -925,7 +1035,12 @@ async def _run_chat_pipeline_inner(
                     else:
                         result = "Memory not saved (missing user email or account)."
                 else:
-                    result = await session_mcp.call_tool(tool_name, tool_input)
+                    result = await _call_mcp_tool_traced(
+                        session_mcp,
+                        tool_name,
+                        tool_input,
+                        request_id=request_id,
+                    )
 
                 tool_duration = (datetime.now() - tool_start).total_seconds()
                 total_tool_time += tool_duration
@@ -936,13 +1051,13 @@ async def _run_chat_pipeline_inner(
                     if _langfuse:
                         try:
                             _langfuse.score_current_trace(
-                                name="user_rating",
+                                name="assistant_self_rating",
                                 value=tool_input.get("rating", 0),
                                 data_type="NUMERIC",
                                 comment="; ".join(tool_input.get("friction_points", [])),
                             )
                             _langfuse.score_current_trace(
-                                name="query_type",
+                                name="assistant_query_type",
                                 value=tool_input.get("query_type", "unknown"),
                                 data_type="CATEGORICAL",
                             )
@@ -1006,7 +1121,6 @@ async def _run_chat_pipeline_inner(
 
     # Store full outputs out-of-band so the frontend can fetch them without
     # bloating the SSE final event.
-    request_id = str(uuid4())
     _tool_output_store[request_id] = {"calls": all_tool_calls, "created_at": datetime.now()}
 
     return {

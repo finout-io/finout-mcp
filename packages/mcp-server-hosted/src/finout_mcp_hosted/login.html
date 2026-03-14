@@ -148,6 +148,124 @@
       justify-content: center; margin: 0 auto 20px;
     }
     .success-icon svg { width: 28px; height: 28px; fill: #fff; }
+
+    /* ── Tenant picker overlay ─────────────────────────────────── */
+    #tenant-screen {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 999999;
+      background: #4fa882 url('https://fronteggprodeustorage.blob.core.windows.net/public-vendor-assets/d5069f33-9608-4141-9e1d-ebf8e9cf6582/assets/background-image-9fededda-593e-4749-ae93-2c8fd898b6f6.png') center / cover no-repeat;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    #tenant-screen.active { display: flex; }
+
+    #tenant-layout { position: relative; }
+    #tenant-layout .page-logo {
+      position: absolute;
+      bottom: calc(100% + 75px);
+      left: 50%;
+      transform: translateX(-50%);
+      width: 200px;
+      height: 50px;
+    }
+
+    #tenant-dialog {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+      max-width: 420px;
+      width: 100%;
+      overflow: hidden;
+      text-align: center;
+    }
+    #tenant-dialog .dialog-body { padding: 28px 32px 24px; }
+    #tenant-dialog h1 {
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 600;
+      color: #3d4f63;
+    }
+    #tenant-dialog .subtitle {
+      margin: 0 0 20px;
+      font-size: 13px;
+      color: #7a8a9a;
+      line-height: 1.5;
+    }
+    #tenant-dialog hr {
+      border: none;
+      border-top: 1px solid #f0f2f5;
+      margin: 0 -32px 16px;
+    }
+
+    .tenant-list {
+      list-style: none;
+      margin: 0 0 20px;
+      padding: 0;
+      text-align: left;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+    .tenant-list li {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 10px 12px;
+      font-size: 14px;
+      color: #3a4a5a;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .tenant-list li:hover { background: #f7f9fc; }
+    .tenant-list li.selected { background: #edf7f2; }
+
+    .tenant-radio {
+      width: 18px; height: 18px; flex-shrink: 0;
+      border-radius: 50%;
+      border: 2px solid #c4cdd6;
+      display: flex; align-items: center; justify-content: center;
+      transition: border-color 0.12s;
+    }
+    .tenant-list li.selected .tenant-radio {
+      border-color: #4fa882;
+    }
+    .tenant-radio-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #4fa882;
+      display: none;
+    }
+    .tenant-list li.selected .tenant-radio-dot { display: block; }
+
+    #btn-tenant-continue {
+      width: 100%;
+      padding: 11px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      background: #e87878;
+      color: #fff;
+      transition: opacity 0.15s;
+    }
+    #btn-tenant-continue:hover { opacity: 0.88; }
+    #btn-tenant-continue:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .tenant-spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 2px solid #c4cdd6;
+      border-top-color: #4fa882;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin: 20px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -157,6 +275,24 @@
     src="https://fronteggprodeustorage.blob.core.windows.net/public-vendor-assets/d5069f33-9608-4141-9e1d-ebf8e9cf6582/assets/logo-8fb6fff6-65f8-4040-afee-bc2daf5ab529.png"
     alt="Finout">
   <div id="frontegg-login-box"></div>
+
+  <!-- Tenant picker state — shown if user belongs to multiple tenants -->
+  <div id="tenant-screen">
+    <div id="tenant-layout">
+      <img class="page-logo"
+        src="https://fronteggprodeustorage.blob.core.windows.net/public-vendor-assets/d5069f33-9608-4141-9e1d-ebf8e9cf6582/assets/logo-8fb6fff6-65f8-4040-afee-bc2daf5ab529.png"
+        alt="Finout">
+      <div id="tenant-dialog">
+        <div class="dialog-body">
+          <h1>Select Account</h1>
+          <p class="subtitle">You have access to multiple Finout accounts. Choose which one to connect.</p>
+          <hr>
+          <ul class="tenant-list" id="tenant-list"></ul>
+          <button id="btn-tenant-continue" disabled>Continue</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Consent state — fixed overlay shown after login -->
   <div id="consent-screen">
@@ -258,13 +394,99 @@
         return form;
       }
 
-      function showConsent(accessToken) {
+      function decodeJwtTenantId(token) {
+        try {
+          var parts = token.split(".");
+          var payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+          return payload.tenantId || "";
+        } catch(e) { return ""; }
+      }
+
+      function showConsentScreen(accessToken) {
         pendingToken = accessToken;
         try {
           var host = new URL(OAUTH_PARAMS.redirect_uri).hostname;
           document.getElementById("client-name").textContent = host;
         } catch(e) {}
+        document.getElementById("tenant-screen").classList.remove("active");
         document.getElementById("consent-screen").classList.add("active");
+      }
+
+      function showTenantPicker(accessToken, tenants, currentTenantId) {
+        var list = document.getElementById("tenant-list");
+        var btn = document.getElementById("btn-tenant-continue");
+        var selectedId = currentTenantId;
+        list.innerHTML = "";
+
+        tenants.forEach(function(t) {
+          var li = document.createElement("li");
+          if (t.tenantId === currentTenantId) li.classList.add("selected");
+          li.innerHTML =
+            '<span class="tenant-radio"><span class="tenant-radio-dot"></span></span>' +
+            '<span>' + (t.name || t.tenantId) + '</span>';
+          li.dataset.tenantId = t.tenantId;
+          li.addEventListener("click", function() {
+            list.querySelectorAll("li").forEach(function(el) { el.classList.remove("selected"); });
+            li.classList.add("selected");
+            selectedId = t.tenantId;
+            btn.disabled = false;
+          });
+          list.appendChild(li);
+        });
+
+        btn.disabled = false;
+        document.getElementById("tenant-screen").classList.add("active");
+
+        btn.addEventListener("click", function() {
+          btn.disabled = true;
+          btn.textContent = "Switching…";
+          if (selectedId === currentTenantId) {
+            showConsentScreen(accessToken);
+            return;
+          }
+          fetch("/api/tenant-switch", {
+            method: "PUT",
+            headers: {
+              "authorization": "Bearer " + accessToken,
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({ tenantId: selectedId })
+          })
+          .then(function(resp) {
+            if (!resp.ok) throw new Error("Switch failed: " + resp.status);
+            return resp.json();
+          })
+          .then(function(data) {
+            var newToken = data.accessToken || data.token || accessToken;
+            showConsentScreen(newToken);
+          })
+          .catch(function(err) {
+            btn.disabled = false;
+            btn.textContent = "Continue";
+            alert("Failed to switch account: " + err.message);
+          });
+        });
+      }
+
+      function showConsent(accessToken) {
+        var currentTenantId = decodeJwtTenantId(accessToken);
+        fetch("/api/tenants", {
+          headers: { "authorization": "Bearer " + accessToken }
+        })
+        .then(function(resp) {
+          if (!resp.ok) throw new Error("Failed to fetch tenants");
+          return resp.json();
+        })
+        .then(function(tenants) {
+          if (Array.isArray(tenants) && tenants.length > 1) {
+            showTenantPicker(accessToken, tenants, currentTenantId);
+          } else {
+            showConsentScreen(accessToken);
+          }
+        })
+        .catch(function() {
+          showConsentScreen(accessToken);
+        });
       }
 
       document.getElementById("btn-allow").addEventListener("click", function() {
