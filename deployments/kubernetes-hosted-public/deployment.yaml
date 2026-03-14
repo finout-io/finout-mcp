@@ -70,6 +70,11 @@ spec:
               name: finout-mcp-hosted-public-secret
               key: finout-login-jwt-public-key
               optional: true
+        - name: MCP_CODE_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: finout-mcp-hosted-public-secret
+              key: mcp-code-secret
         resources:
           requests:
             cpu: "250m"

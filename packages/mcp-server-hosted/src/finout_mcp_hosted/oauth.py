@@ -1,56 +1,85 @@
-"""PKCE utilities and in-memory authorization code store."""
+"""PKCE utilities and stateless HMAC-signed authorization codes.
+
+Codes are self-contained signed tokens, so any pod can verify them
+without shared in-memory state.
+"""
 
 from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
+import json
+import os
 import secrets
 import time
-from dataclasses import dataclass
 
 _CODE_TTL = 600  # 10 minutes
 
 
-# ── Auth code store ────────────────────────────────────────────────────────────
+def _signing_key() -> bytes:
+    """Return the HMAC signing key for auth codes.
+
+    Uses MCP_CODE_SECRET env var. Each pod must share the same value.
+    Falls back to a per-process random key (only works with 1 replica).
+    """
+    key = os.getenv("MCP_CODE_SECRET", "")
+    if not key:
+        global _FALLBACK_KEY
+        key = _FALLBACK_KEY
+    return key.encode()
 
 
-@dataclass
-class AuthCodeEntry:
-    jwt: str
-    code_challenge: str
-    redirect_uri: str
-    expires_at: float
+_FALLBACK_KEY: str = secrets.token_hex(32)
 
 
-_store: dict[str, AuthCodeEntry] = {}
+# ── Auth code generation / consumption ────────────────────────────────────────
 
 
 def generate_auth_code(jwt: str, code_challenge: str, redirect_uri: str) -> str:
-    code = secrets.token_urlsafe(32)
-    _store[code] = AuthCodeEntry(
-        jwt=jwt,
-        code_challenge=code_challenge,
-        redirect_uri=redirect_uri,
-        expires_at=time.time() + _CODE_TTL,
+    """Create a signed, self-contained authorization code."""
+    payload = json.dumps(
+        {
+            "jwt": jwt,
+            "cc": code_challenge,
+            "ru": redirect_uri,
+            "exp": time.time() + _CODE_TTL,
+            "n": secrets.token_hex(8),  # nonce, makes each code unique
+        },
+        separators=(",", ":"),
     )
-    return code
+    b64 = base64.urlsafe_b64encode(payload.encode()).rstrip(b"=").decode()
+    sig = hmac.new(key=_signing_key(), msg=b64.encode(), digestmod=hashlib.sha256).hexdigest()
+    return f"{b64}.{sig}"
 
 
 def consume_auth_code(code: str, code_verifier: str) -> str:
-    """Look up code, verify PKCE, delete entry, and return JWT.
+    """Verify signature, check expiry, verify PKCE, and return the JWT.
 
-    Raises ValueError on invalid code, expiry, or PKCE mismatch.
+    Raises ValueError on any failure.
     """
-    entry = _store.get(code)
-    if entry is None:
+    try:
+        b64, sig = code.rsplit(".", 1)
+    except ValueError:
         raise ValueError("Invalid authorization code")
-    if time.time() > entry.expires_at:
-        del _store[code]
+
+    expected = hmac.new(key=_signing_key(), msg=b64.encode(), digestmod=hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        raise ValueError("Invalid authorization code")
+
+    try:
+        padding = "=" * (-len(b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(b64 + padding))
+    except Exception:
+        raise ValueError("Invalid authorization code")
+
+    if time.time() > payload["exp"]:
         raise ValueError("Authorization code expired")
-    if not _verify_pkce(code_verifier, entry.code_challenge):
+
+    if not _verify_pkce(code_verifier, payload["cc"]):
         raise ValueError("PKCE verification failed")
-    del _store[code]
-    return entry.jwt
+
+    return payload["jwt"]
 
 
 # ── PKCE helpers ───────────────────────────────────────────────────────────────

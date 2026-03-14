@@ -1,11 +1,10 @@
 import base64
 import hashlib
-import time
+from unittest.mock import patch
 
 import pytest
 
 from finout_mcp_hosted.oauth import (
-    _store,
     _verify_pkce,
     consume_auth_code,
     generate_auth_code,
@@ -41,22 +40,24 @@ def test_consume_auth_code_expired_raises():
     verifier = "some-verifier-abcdefghij1234567890abcdef01"
     challenge = _make_challenge(verifier)
 
+    # Generate the code, then consume it with time far in the future
     code = generate_auth_code("jwt", challenge, "http://localhost/cb")
-    _store[code].expires_at = time.time() - 1
 
-    with pytest.raises(ValueError, match="expired"):
-        consume_auth_code(code, verifier)
+    with patch("finout_mcp_hosted.oauth.time") as mock_time:
+        mock_time.time.return_value = 9_999_999_999  # far future
+        with pytest.raises(ValueError, match="expired"):
+            consume_auth_code(code, verifier)
 
 
-def test_consume_auth_code_once_only():
-    verifier = "once-only-verifier-abcdefghij1234567890ab"
+def test_consume_auth_code_tampered_signature_raises():
+    verifier = "tamper-verifier-abcdefghij1234567890abcdef"
     challenge = _make_challenge(verifier)
 
     code = generate_auth_code("jwt", challenge, "http://localhost/cb")
-    consume_auth_code(code, verifier)
+    tampered = code[:-4] + "xxxx"
 
     with pytest.raises(ValueError, match="Invalid"):
-        consume_auth_code(code, verifier)
+        consume_auth_code(tampered, verifier)
 
 
 def test_verify_pkce_correct_sha256():
