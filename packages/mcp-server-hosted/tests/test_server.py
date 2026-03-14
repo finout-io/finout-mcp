@@ -7,6 +7,23 @@ import pytest
 from starlette.testclient import TestClient
 
 
+def _make_fake_httpx_client(method: str, response):
+    """Create a fake httpx.AsyncClient that returns *response* for the given HTTP method."""
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+    async def _handler(self, *a, **kw):
+        return response
+
+    setattr(_FakeClient, method, _handler)
+    return _FakeClient()
+
+
 def _make_challenge(verifier: str) -> str:
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
@@ -368,27 +385,8 @@ def test_proxy_tenants_returns_frontegg_response(monkeypatch):
 
     with patch("finout_mcp_hosted.server.httpx.AsyncClient") as mock_cls:
         mock_resp = type("R", (), {"status_code": 200, "json": lambda self: tenants})()
-        mock_client = mock_cls.return_value.__aenter__ = lambda self: self
-        mock_ctx = type("Ctx", (), {
-            "__aenter__": lambda self: mock_resp,
-            "__aexit__": lambda self, *a: None,
-            "get": lambda self, *a, **kw: mock_resp,
-        })()
-        # Simpler: just mock the whole function
-    with patch("finout_mcp_hosted.server.httpx.AsyncClient") as mock_cls:
-        mock_resp = type("R", (), {"status_code": 200, "json": lambda self: tenants})()
 
-        class FakeClient:
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *a):
-                pass
-
-            async def get(self, url, **kwargs):
-                return mock_resp
-
-        mock_cls.return_value = FakeClient()
+        mock_cls.return_value = _make_fake_httpx_client("get", mock_resp)
 
         with TestClient(module.app) as client:
             response = client.get(
@@ -405,7 +403,7 @@ def test_proxy_tenants_returns_frontegg_response(monkeypatch):
 def test_proxy_tenant_switch_requires_auth():
     module = importlib.import_module("finout_mcp_hosted.server")
     with TestClient(module.app) as client:
-        response = client.post(
+        response = client.put(
             "/api/tenant-switch",
             json={"tenantId": "t2"},
         )
@@ -415,7 +413,7 @@ def test_proxy_tenant_switch_requires_auth():
 def test_proxy_tenant_switch_requires_tenant_id():
     module = importlib.import_module("finout_mcp_hosted.server")
     with TestClient(module.app) as client:
-        response = client.post(
+        response = client.put(
             "/api/tenant-switch",
             json={},
             headers={"authorization": "Bearer some-jwt"},
@@ -436,20 +434,10 @@ def test_proxy_tenant_switch_returns_new_token(monkeypatch):
             "json": lambda self: switch_resp_body,
         })()
 
-        class FakeClient:
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *a):
-                pass
-
-            async def post(self, url, **kwargs):
-                return mock_resp
-
-        mock_cls.return_value = FakeClient()
+        mock_cls.return_value = _make_fake_httpx_client("put", mock_resp)
 
         with TestClient(module.app) as client:
-            response = client.post(
+            response = client.put(
                 "/api/tenant-switch",
                 json={"tenantId": "t2"},
                 headers={"authorization": "Bearer original-jwt"},

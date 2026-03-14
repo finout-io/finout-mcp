@@ -242,8 +242,8 @@ async def proxy_tenant_switch(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Frontegg not configured"}, status_code=500)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(
-            f"{fe_host}/identity/resources/auth/v1/user/token/tenant",
+        resp = await client.put(
+            f"{fe_host}/identity/resources/users/v1/tenant",
             headers={"authorization": auth, "content-type": "application/json"},
             json={"tenantId": tenant_id},
         )
