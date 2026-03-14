@@ -245,38 +245,52 @@ async def proxy_tenant_switch(request: Request) -> JSONResponse:
     if not refresh_token:
         return JSONResponse({"error": "refreshToken required"}, status_code=400)
 
-    async with httpx.AsyncClient(timeout=10.0) as http:
-        # Step 1: Switch the active tenant.
-        switch_resp = await http.put(
-            f"{fe_host}/identity/resources/users/v1/tenant",
-            headers={"authorization": auth, "content-type": "application/json"},
-            json={"tenantId": tenant_id},
-        )
-        if switch_resp.status_code != 200:
-            try:
-                err = switch_resp.json()
-            except Exception:
-                err = {"error": "Tenant switch failed"}
-            return JSONResponse(err, status_code=switch_resp.status_code)
-
-        # Step 2: Refresh the token to get a new JWT with the new tenantId.
-        refresh_resp = await http.post(
-            f"{fe_host}/identity/resources/auth/v1/user/token/refresh",
-            headers={"content-type": "application/json"},
-            json={"refreshToken": refresh_token},
-        )
-        if refresh_resp.status_code != 200:
-            try:
-                err = refresh_resp.json()
-            except Exception:
-                err = {"error": "Token refresh failed after tenant switch"}
-            return JSONResponse(err, status_code=refresh_resp.status_code)
+    import logging
+    logger = logging.getLogger("finout_mcp_hosted.tenant_switch")
 
     try:
-        tokens = refresh_resp.json()
-    except Exception:
-        return JSONResponse({"error": "Unexpected refresh response"}, status_code=502)
-    return JSONResponse(tokens)
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            # Step 1: Switch the active tenant.
+            switch_url = f"{fe_host}/identity/resources/users/v1/tenant"
+            logger.info("PUT %s for tenant %s", switch_url, tenant_id)
+            switch_resp = await http.put(
+                switch_url,
+                headers={"authorization": auth, "content-type": "application/json"},
+                json={"tenantId": tenant_id},
+            )
+            logger.info("Switch response: %s", switch_resp.status_code)
+            if switch_resp.status_code != 200:
+                try:
+                    err = switch_resp.json()
+                except Exception:
+                    err = {"error": f"Tenant switch failed: HTTP {switch_resp.status_code}"}
+                return JSONResponse(err, status_code=switch_resp.status_code)
+
+            # Step 2: Refresh the token to get a new JWT with the new tenantId.
+            refresh_url = f"{fe_host}/identity/resources/auth/v1/user/token/refresh"
+            logger.info("POST %s", refresh_url)
+            refresh_resp = await http.post(
+                refresh_url,
+                headers={"content-type": "application/json"},
+                json={"refreshToken": refresh_token},
+            )
+            logger.info("Refresh response: %s", refresh_resp.status_code)
+            if refresh_resp.status_code != 200:
+                try:
+                    err = refresh_resp.json()
+                except Exception:
+                    err = {"error": f"Token refresh failed: HTTP {refresh_resp.status_code}"}
+                return JSONResponse(err, status_code=refresh_resp.status_code)
+
+        try:
+            tokens = refresh_resp.json()
+        except Exception:
+            return JSONResponse({"error": "Unexpected refresh response"}, status_code=502)
+        return JSONResponse(tokens)
+
+    except Exception as exc:
+        logger.exception("Tenant switch failed")
+        return JSONResponse({"error": f"Tenant switch error: {exc}"}, status_code=500)
 
 
 _LOGIN_HTML_TEMPLATE = (pathlib.Path(__file__).parent / "login.html").read_text()
