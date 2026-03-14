@@ -19,6 +19,22 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.28.0",
+        "date": "2026-03-14",
+        "title": "Concurrent multi-user hosted MCP server",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "Hosted MCP server now handles multiple simultaneous users concurrently (removes 1-request-per-pod limit)"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
         "version": "0.27.0",
         "date": "2026-03-12",
         "title": "Fix unit economics \u2014 use real usage data",

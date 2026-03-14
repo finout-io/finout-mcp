@@ -345,3 +345,25 @@ def test_register_returns_static_client_id():
     data = response.json()
     assert data["client_id"] == "finout-mcp"
     assert "http://localhost:6274/oauth/callback" in data["redirect_uris"]
+
+
+# ── Client pool ──────────────────────────────────────────────────────────────
+
+
+def test_lifespan_creates_client_pool():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with TestClient(module.app) as client:
+        pool = module.app.state.client_pool
+        assert pool is not None
+        assert len(pool) == 0
+
+        # A request with key/secret auth should create a pooled client.
+        client.post(
+            "/mcp",
+            headers={
+                "x-finout-client-id": "cid",
+                "x-finout-secret-key": "sk",
+            },
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}},
+        )
+        assert len(pool) >= 1

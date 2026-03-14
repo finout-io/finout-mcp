@@ -49,9 +49,9 @@ def summarize_cost_data(data: list[dict[str, Any]], max_items: int = 25) -> list
 
 async def query_costs_impl(args: dict) -> dict:
     """Implementation of query_costs tool"""
-    from ..server import _auto_granularity, finout_client
+    from ..server import _auto_granularity, get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     time_period = args.get("time_period", "last_30_days")
     filters = args.get("filters", [])
@@ -323,9 +323,9 @@ def _infer_previous_period(time_period: str) -> str:
 
 async def compare_costs_impl(args: dict) -> dict:
     """Implementation of compare_costs tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     current_period = args["current_period"]
     comparison_period = args["comparison_period"]

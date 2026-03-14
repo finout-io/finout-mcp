@@ -3,6 +3,9 @@ Hosted public MCP service (Streamable HTTP transport).
 
 This service runs the same MCP tool core in fixed PUBLIC mode and is intentionally
 separate from BILLY.
+
+Supports concurrent multi-user requests via per-request ContextVar isolation and
+a pooled FinoutClient cache.
 """
 
 from __future__ import annotations
@@ -10,9 +13,7 @@ from __future__ import annotations
 import html
 import os
 import pathlib
-import sys
 from contextlib import asynccontextmanager
-from hashlib import sha256
 from typing import Any
 from urllib.parse import urlencode
 
@@ -28,42 +29,27 @@ from starlette.routing import Route
 import finout_mcp_server.server as server_module
 
 from .auth import _get_login_cookie_public_key, _get_public_key, check_sso, check_sso_debug, frontegg_base_url, verify_cookie_jwt, verify_login_jwt
+from .client_pool import ClientPool
 from .oauth import consume_auth_code, generate_auth_code
-from finout_mcp_server.finout_client import FinoutClient, InternalAuthMode
-from finout_mcp_server.server import MCPMode, server
+from finout_mcp_server.finout_client import InternalAuthMode
+from finout_mcp_server.server import MCPMode, _client_var, _runtime_mode_var, server, set_request_client, set_request_runtime_mode
 
 load_dotenv(override=True)
 
 
 @asynccontextmanager
 async def lifespan(app: Starlette):
-    """Initialize MCP core in fixed public mode and expose it over HTTP transport."""
+    """Initialize MCP core in fixed public mode."""
     server_module.runtime_mode = MCPMode.PUBLIC.value
-    # Hosted public mode receives Finout credentials per HTTP call.
     server_module.finout_client = None
 
-    transport = StreamableHTTPServerTransport(
-        mcp_session_id=None,
-        is_json_response_enabled=True,
-    )
-    app.state.transport = transport
-    app.state.client_lock = anyio.Lock()
-    app.state.client_fingerprint = None
+    pool = ClientPool(max_size=50, ttl=3600)
+    app.state.client_pool = pool
 
     try:
-        async with transport.connect() as (read_stream, write_stream):
-            async with anyio.create_task_group() as task_group:
-                task_group.start_soon(
-                    server.run,
-                    read_stream,
-                    write_stream,
-                    server.create_initialization_options(),
-                )
-                yield
-                task_group.cancel_scope.cancel()
+        yield
     finally:
-        if server_module.finout_client:
-            await server_module.finout_client.close()
+        await pool.close_all()
 
 
 def _debug_enabled() -> bool:
@@ -184,22 +170,6 @@ async def health(_: Request) -> JSONResponse:
             "transport": "streamable-http",
         }
     )
-
-
-
-def _sync_server_state_across_imports(client: FinoutClient | None, mode: str) -> None:
-    """Keep runtime globals aligned even if server.py is imported under multiple module refs."""
-    for module in list(sys.modules.values()):
-        if module is None:
-            continue
-        module_any: Any = module
-        module_file = getattr(module, "__file__", "") or ""
-        if module_file.endswith("/finout_mcp_server/server.py"):
-            try:
-                module_any.finout_client = client
-                module_any.runtime_mode = mode
-            except Exception:
-                pass
 
 
 def _extract_public_auth_from_scope(scope: Any) -> tuple[str, str, str]:
@@ -390,14 +360,37 @@ def _oauth_challenge_headers(base_url: str, error: str | None = None) -> dict[st
     return {"WWW-Authenticate": value}
 
 
-async def mcp_asgi(scope, receive, send) -> None:
-    """ASGI mount for Streamable HTTP MCP transport."""
+async def _handle_with_transport(scope: Any, receive: Any, send: Any) -> None:
+    """Create a per-request transport, wire it to the MCP server, and process."""
+    transport = StreamableHTTPServerTransport(
+        mcp_session_id=None,
+        is_json_response_enabled=True,
+    )
+    async with transport.connect() as (read_stream, write_stream):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(
+                server.run,
+                read_stream,
+                write_stream,
+                server.create_initialization_options(),
+            )
+            await transport.handle_request(scope, receive, send)
+            tg.cancel_scope.cancel()
+
+
+async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
+    """ASGI mount for Streamable HTTP MCP transport.
+
+    Each request gets its own transport + ContextVar-isolated client from the pool.
+    No serialization lock — concurrent requests run in parallel.
+    """
     if scope.get("method") == "POST":
         headers = {
             k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])
         }
         auth_header = headers.get("authorization", "")
         base_url = os.getenv("MCP_BASE_URL", "").rstrip("/")
+        pool: ClientPool = scope["app"].state.client_pool
 
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
@@ -433,8 +426,6 @@ async def mcp_asgi(scope, receive, send) -> None:
                 await response(scope, receive, send)
                 return
 
-            token_fingerprint = sha256(token.encode("utf-8")).hexdigest()
-
             if use_cookie_auth:
                 # Cookie JWT path: use AUTHORIZED_HEADERS mode via internal API URL.
                 internal_api_url = os.getenv("FINOUT_INTERNAL_API_URL", "")
@@ -445,57 +436,35 @@ async def mcp_asgi(scope, receive, send) -> None:
                     )
                     await response(scope, receive, send)
                     return
-                fingerprint: tuple[str, ...] = ("cookie", account_id, internal_api_url, token_fingerprint)
-                async with scope["app"].state.client_lock:
-                    if scope["app"].state.client_fingerprint != fingerprint:
-                        if server_module.finout_client:
-                            await server_module.finout_client.close()
-                        server_module.runtime_mode = MCPMode.PUBLIC.value
-                        server_module.finout_client = FinoutClient(
-                            internal_api_url=internal_api_url,
-                            account_id=account_id,
-                            internal_auth_mode=InternalAuthMode.AUTHORIZED_HEADERS,
-                            allow_missing_credentials=True,
-                        )
-                        _sync_server_state_across_imports(
-                            server_module.finout_client,
-                            MCPMode.PUBLIC.value,
-                        )
-                        scope["app"].state.client_fingerprint = fingerprint
-                    else:
-                        _sync_server_state_across_imports(
-                            server_module.finout_client,
-                            MCPMode.PUBLIC.value,
-                        )
-                    await scope["app"].state.transport.handle_request(scope, receive, send)
-                return
+                fingerprint: tuple[str, ...] = ("cookie", account_id, internal_api_url)
+                client = await pool.get_or_create(
+                    fingerprint,
+                    internal_api_url=internal_api_url,
+                    account_id=account_id,
+                    internal_auth_mode=InternalAuthMode.AUTHORIZED_HEADERS,
+                    allow_missing_credentials=True,
+                )
+            else:
+                # Frontegg JWT path: use BEARER_TOKEN mode via public API URL.
+                api_url = os.getenv("FINOUT_API_URL", "https://app.finout.io")
+                fingerprint = ("jwt", account_id, api_url)
+                client = await pool.get_or_create(
+                    fingerprint,
+                    bearer_token=token,
+                    internal_api_url=api_url,
+                    account_id=account_id,
+                    internal_auth_mode=InternalAuthMode.BEARER_TOKEN,
+                    allow_missing_credentials=True,
+                )
 
-            # Frontegg JWT path: use BEARER_TOKEN mode via public API URL.
-            api_url = os.getenv("FINOUT_API_URL", "https://app.finout.io")
-            fingerprint = ("jwt", account_id, api_url, token_fingerprint)
-            async with scope["app"].state.client_lock:
-                if scope["app"].state.client_fingerprint != fingerprint:
-                    if server_module.finout_client:
-                        await server_module.finout_client.close()
-                    server_module.runtime_mode = MCPMode.PUBLIC.value
-                    server_module.finout_client = FinoutClient(
-                        bearer_token=token,
-                        internal_api_url=api_url,
-                        account_id=account_id,
-                        internal_auth_mode=InternalAuthMode.BEARER_TOKEN,
-                        allow_missing_credentials=True,
-                    )
-                    _sync_server_state_across_imports(
-                        server_module.finout_client,
-                        MCPMode.PUBLIC.value,
-                    )
-                    scope["app"].state.client_fingerprint = fingerprint
-                else:
-                    _sync_server_state_across_imports(
-                        server_module.finout_client,
-                        MCPMode.PUBLIC.value,
-                    )
-                await scope["app"].state.transport.handle_request(scope, receive, send)
+            # Set per-coroutine context so tool impls see this client.
+            client_token = set_request_client(client)
+            mode_token = set_request_runtime_mode(MCPMode.PUBLIC.value)
+            try:
+                await _handle_with_transport(scope, receive, send)
+            finally:
+                _client_var.reset(client_token)
+                _runtime_mode_var.reset(mode_token)
             return
 
         # Key/secret header auth path (backward compatible)
@@ -510,30 +479,23 @@ async def mcp_asgi(scope, receive, send) -> None:
             await response(scope, receive, send)
             return
 
-        fingerprint = (client_id, secret_key, api_url)
-        async with scope["app"].state.client_lock:
-            if scope["app"].state.client_fingerprint != fingerprint:
-                if server_module.finout_client:
-                    await server_module.finout_client.close()
-                server_module.runtime_mode = MCPMode.PUBLIC.value
-                server_module.finout_client = FinoutClient(
-                    client_id=client_id,
-                    secret_key=secret_key,
-                    internal_api_url=api_url,
-                    internal_auth_mode=InternalAuthMode.KEY_SECRET,
-                    allow_missing_credentials=False,
-                )
-                _sync_server_state_across_imports(
-                    server_module.finout_client,
-                    MCPMode.PUBLIC.value,
-                )
-                scope["app"].state.client_fingerprint = fingerprint
-            else:
-                _sync_server_state_across_imports(
-                    server_module.finout_client,
-                    MCPMode.PUBLIC.value,
-                )
-            await scope["app"].state.transport.handle_request(scope, receive, send)
+        fingerprint = ("key", client_id, api_url)
+        client = await pool.get_or_create(
+            fingerprint,
+            client_id=client_id,
+            secret_key=secret_key,
+            internal_api_url=api_url,
+            internal_auth_mode=InternalAuthMode.KEY_SECRET,
+            allow_missing_credentials=False,
+        )
+
+        client_token = set_request_client(client)
+        mode_token = set_request_runtime_mode(MCPMode.PUBLIC.value)
+        try:
+            await _handle_with_transport(scope, receive, send)
+        finally:
+            _client_var.reset(client_token)
+            _runtime_mode_var.reset(mode_token)
         return
 
     # For non-POST requests (GET/DELETE), require valid auth as well.
@@ -568,7 +530,7 @@ async def mcp_asgi(scope, receive, send) -> None:
         )
         await response(scope, receive, send)
         return
-    await scope["app"].state.transport.handle_request(scope, receive, send)
+    await _handle_with_transport(scope, receive, send)
 
 
 async def _invoke_asgi_as_response(request: Request) -> Response:

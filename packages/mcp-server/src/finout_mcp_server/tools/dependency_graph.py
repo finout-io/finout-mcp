@@ -653,9 +653,9 @@ def _find_by_name(
 
 
 async def get_object_usages_impl(args: dict) -> dict:  # type: ignore[type-arg]
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     name = args["name"]
     entity_type = args.get("entity_type")
@@ -688,9 +688,9 @@ async def get_object_usages_impl(args: dict) -> dict:  # type: ignore[type-arg]
 
 
 async def check_delete_safety_impl(args: dict) -> dict:  # type: ignore[type-arg]
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     name = args["name"]
     entity_type = args.get("entity_type")

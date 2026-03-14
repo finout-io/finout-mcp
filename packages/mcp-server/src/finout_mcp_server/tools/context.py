@@ -5,9 +5,9 @@ from typing import Any
 
 async def discover_context_impl(args: dict) -> dict:
     """Implementation of discover_context tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     query = args.get("query", "").lower()
     include_dashboards = args.get("include_dashboards", True)
@@ -211,9 +211,9 @@ async def discover_context_impl(args: dict) -> dict:
 
 async def list_data_explorers_impl(args: dict) -> dict:
     """List saved data explorer configurations."""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     query = args.get("query", "").lower()
 
@@ -268,8 +268,8 @@ async def list_data_explorers_impl(args: dict) -> dict:
 
 async def get_account_context_impl() -> dict:
     """Implementation of get_account_context tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     return await finout_client.get_account_context()

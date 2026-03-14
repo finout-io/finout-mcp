@@ -7,7 +7,7 @@ Web-based chat interface for testing the Finout MCP Server with multi-account su
 ## Features
 
 - 💬 **Clean Chat Interface** - Simple, intuitive web UI
-- 🤖 **Multi-Model Support** - Switch between Haiku 4.5, Sonnet 4.5, and Opus 4.6
+- 🤖 **Multi-Model Support** - Switch between Haiku 4.5, Sonnet 4.6, and Opus 4.6
 - 🏢 **Multi-Account** - Instant account switching (159+ accounts supported)
 - 🔧 **Full MCP Integration** - Uses the same MCP server as Claude Desktop
 - ⚡ **Real-Time Progress** - See what the model is doing with phase tracking
@@ -107,7 +107,7 @@ See `.env.example` for a template.
 Switch between three Claude models on the fly:
 
 - **Haiku 4.5** (⚡) - Fast & cost-effective for simple queries
-- **Sonnet 4.5** (🤖) - Balanced performance (default)
+- **Sonnet 4.6** (🤖) - Balanced performance (default)
 - **Opus 4.6** (👑) - Most capable for complex analysis
 
 Each model has a unique avatar in the chat. No need to restart - just select and go!
@@ -129,7 +129,7 @@ Enhanced loading animation shows:
 ### 📊 Performance Metrics
 
 After each response, see:
-- **Model used** (e.g., "Sonnet 4.5")
+- **Model used** (e.g., "Sonnet 4.6")
 - **Tool count** (e.g., "3 tools")
 - **Total duration** (e.g., "8.7s")
 
@@ -416,7 +416,7 @@ Send a chat message and get response.
   "message": "What were my AWS costs last month?",
   "conversation_history": [],
   "account_id": "account-123",
-  "model": "claude-sonnet-4-5-20250929"
+  "model": "claude-sonnet-4-6"
 }
 ```
 

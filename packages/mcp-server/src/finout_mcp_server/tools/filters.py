@@ -6,9 +6,9 @@ from typing import Any
 
 async def list_available_filters_impl(args: dict) -> dict:
     """Implementation of list_available_filters tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     cost_center = args.get("cost_center")
 
@@ -58,9 +58,9 @@ async def list_available_filters_impl(args: dict) -> dict:
 
 async def search_filters_impl(args: dict) -> dict:
     """Implementation of search_filters tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     query = args["query"]
     cost_center = args.get("cost_center")
@@ -170,9 +170,9 @@ async def search_filters_impl(args: dict) -> dict:
 
 async def debug_filters_impl(args: dict) -> dict:
     """Debug tool to inspect raw filter metadata"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     cost_center_filter = args.get("cost_center")
     type_filter = args.get("filter_type")
@@ -220,9 +220,9 @@ async def debug_filters_impl(args: dict) -> dict:
 
 async def get_filter_values_impl(args: dict) -> dict:
     """Implementation of get_filter_values tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     filter_key = args["filter_key"]
     cost_center = args.get("cost_center")
@@ -300,9 +300,9 @@ async def get_filter_values_impl(args: dict) -> dict:
 
 async def get_usage_unit_types_impl(args: dict) -> dict:
     """Implementation of get_usage_unit_types tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     time_period = args.get("time_period", "last_30_days")
     filters = args.get("filters", [])

@@ -5,9 +5,9 @@ from ..finout_client import CostType
 
 async def create_view_impl(args: dict) -> dict:
     """Implementation of create_view tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     name = args["name"]
     filters = args.get("filters")
@@ -38,9 +38,9 @@ async def create_view_impl(args: dict) -> dict:
 
 async def create_dashboard_impl(args: dict) -> dict:
     """Implementation of create_dashboard tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
     name = args["name"]
     widgets = args["widgets"]
 

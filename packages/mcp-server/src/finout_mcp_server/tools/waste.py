@@ -7,9 +7,9 @@ from .cost import format_currency
 
 async def get_waste_recommendations_impl(args: dict) -> dict:
     """Implementation of get_waste_recommendations tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     scan_type = args.get("scan_type")
     service = args.get("service")

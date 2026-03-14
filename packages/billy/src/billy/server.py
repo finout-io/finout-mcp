@@ -74,7 +74,7 @@ class ChatRequest(BaseModel):
     message: str
     conversation_history: List[ChatMessage] = []
     account_id: Optional[str] = None
-    model: Optional[str] = "claude-sonnet-4-5-20250929"  # Model to use for this request
+    model: Optional[str] = "claude-sonnet-4-6"  # Model to use for this request
     user_email: Optional[str] = None
     conversation_id: Optional[str] = None
 
@@ -460,7 +460,7 @@ anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 # Approximate model pricing in USD per 1M tokens.
 MODEL_PRICING_PER_MTOKEN = {
     "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0},
-    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
     "claude-opus-4-6": {"input": 15.0, "output": 75.0},
 }
 
@@ -882,6 +882,7 @@ async def _run_chat_pipeline_inner(
     # Track tool calls for display
     all_tool_calls = []
     total_tool_time = 0.0
+    all_response_texts: list[str] = []
 
     # Handle tool calls
     while llm_response.stop_reason == "tool_use":
@@ -932,18 +933,6 @@ async def _run_chat_pipeline_inner(
                 all_tool_calls.append({"name": tool_name, "input": tool_input, "output": result})
 
                 if tool_name == "submit_feedback":
-                    try:
-                        await db.save_feedback(
-                            account_id=session_mcp.current_account_id,
-                            rating=tool_input.get("rating"),
-                            query_type=tool_input.get("query_type"),
-                            tools_used=tool_input.get("tools_used"),
-                            friction_points=tool_input.get("friction_points"),
-                            suggestion=tool_input.get("suggestion"),
-                            session_id=session_mcp.current_account_id or "",
-                        )
-                    except Exception as e:
-                        print(f"Failed to save feedback to database: {e}")
                     if _langfuse:
                         try:
                             _langfuse.score_current_trace(
@@ -982,6 +971,11 @@ async def _run_chat_pipeline_inner(
                     }
                 )
 
+        # Capture text from mixed (text + tool_use) responses before they're lost
+        for cb in llm_response.content:
+            if hasattr(cb, "text") and cb.text.strip():
+                all_response_texts.append(cb.text)
+
         messages.append({"role": "assistant", "content": llm_response.content})
         messages.append({"role": "user", "content": tool_results})
 
@@ -1004,10 +998,11 @@ async def _run_chat_pipeline_inner(
         if getattr(llm_response, "usage", None):
             _accumulate_usage(usage_totals, llm_response.usage)
 
-    response_text = ""
-    for content_block in llm_response.content:
-        if hasattr(content_block, "text"):
-            response_text += content_block.text
+    # Capture text from the final response too
+    for cb in llm_response.content:
+        if hasattr(cb, "text") and cb.text.strip():
+            all_response_texts.append(cb.text)
+    response_text = "\n\n".join(all_response_texts)
 
     # Store full outputs out-of-band so the frontend can fetch them without
     # bloating the SSE final event.
@@ -1348,40 +1343,6 @@ async def get_shared_conversation(share_token: str):
         raise
     except Exception as e:
         print(f"Error getting shared conversation: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Feedback Management Endpoints
-
-@app.get("/api/feedback/list")
-async def list_feedback(
-    account_id: Optional[str] = None,
-    min_rating: Optional[int] = None,
-    max_rating: Optional[int] = None,
-    query_type: Optional[str] = None,
-    limit: int = 100
-):
-    """List feedback with optional filters"""
-    try:
-        feedback = await db.list_feedback(
-            account_id=account_id,
-            min_rating=min_rating,
-            max_rating=max_rating,
-            query_type=query_type,
-            limit=limit
-        )
-        return {"feedback": feedback}
-    except Exception as e:
-        print(f"Error listing feedback: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/feedback/stats")
-async def get_feedback_stats(account_id: Optional[str] = None):
-    """Get aggregate feedback statistics"""
-    try:
-        stats = await db.get_feedback_stats(account_id=account_id)
-        return stats
-    except Exception as e:
-        print(f"Error getting feedback stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ── User Memories Endpoints ───────────────────────────────────────────────────

@@ -8,9 +8,9 @@ from .cost import format_currency
 
 async def get_anomalies_impl(args: dict) -> dict:
     """Implementation of get_anomalies tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     time_period = args.get("time_period", "last_7_days")
     severity = args.get("severity")
@@ -57,9 +57,9 @@ async def get_anomalies_impl(args: dict) -> dict:
 
 async def get_financial_plans_impl(args: dict) -> dict:
     """Implementation of get_financial_plans tool"""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     name = args.get("name")
     period = args.get("period")

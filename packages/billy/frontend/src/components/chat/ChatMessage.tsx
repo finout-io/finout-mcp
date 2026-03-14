@@ -10,7 +10,7 @@ function modelLabel(model?: string): string {
   if (!model) return 'Assistant'
   if (model.includes('haiku')) return 'Haiku 4.5'
   if (model.includes('opus')) return 'Opus 4.6'
-  return 'Sonnet 4.5'
+  return 'Sonnet 4.6'
 }
 
 interface Props {

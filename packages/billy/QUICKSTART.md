@@ -5,7 +5,7 @@
 **BILLY** (Ask the Smart AI of Finout) is a web-based chat interface for your Finout MCP Server.
 
 - 🌐 **Web-based** - No Claude Desktop installation needed
-- 🤖 **Same AI** - Uses Claude Sonnet 4.5 via Anthropic API
+- 🤖 **Same AI** - Uses Claude Sonnet 4.6 via Anthropic API
 - 🔧 **Same Tools** - Uses your exact MCP server code
 - ✅ **Test & Ship** - What works here, works in Claude Desktop
 

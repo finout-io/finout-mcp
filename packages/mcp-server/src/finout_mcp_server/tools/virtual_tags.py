@@ -597,9 +597,9 @@ async def _fetch_virtual_tag_live_values(
 
 
 async def analyze_virtual_tags_impl(args: dict) -> dict:
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     tags = await finout_client.get_virtual_tags()
     if not tags:

@@ -42,9 +42,9 @@ async def _validate_filters_and_groupby(
 
 async def get_top_movers_impl(args: dict) -> dict:
     """Identify dimensions with the largest cost changes between two periods."""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     time_period = args.get("time_period", "last_30_days")
     comparison_period = args.get("comparison_period")
@@ -203,15 +203,16 @@ async def get_top_movers_impl(args: dict) -> dict:
 
 
 async def get_unit_economics_impl(args: dict) -> dict:
-    """Compute cost-per-unit using actual usage data (hours, GB, requests, etc.)."""
-    from ..server import finout_client
+    """Compute cost-per-unit using usage data or resource counts."""
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     time_period = args.get("time_period", "last_30_days")
     filters = args.get("filters", [])
     group_by = args.get("group_by")
     usage_configuration = args.get("usage_configuration")
+    count_distinct = args.get("count_distinct")
     cost_type = args.get("cost_type", "netAmortizedCost")
 
     if not finout_client.internal_api_url:
@@ -224,7 +225,19 @@ async def get_unit_economics_impl(args: dict) -> dict:
         finout_client, filters, group_by
     )
 
-    # Auto-discover usage unit types if not provided
+    # count_distinct mode: cost ÷ number of distinct resources
+    if count_distinct:
+        return await _unit_economics_count_distinct(
+            finout_client=finout_client,
+            time_period=time_period,
+            filters=filters,
+            group_by=group_by,
+            count_distinct=count_distinct,
+            cost_type=cost_type,
+            validation_warnings=validation_warnings,
+        )
+
+    # Usage-metric mode: cost ÷ usage (hours, GB, requests)
     if not usage_configuration:
         available_units = await finout_client.get_usage_unit_types(
             time_period=time_period,
@@ -352,6 +365,125 @@ async def get_unit_economics_impl(args: dict) -> dict:
     return result
 
 
+async def _unit_economics_count_distinct(
+    *,
+    finout_client: Any,
+    time_period: str,
+    filters: list,
+    group_by: list | None,
+    count_distinct: dict,
+    cost_type: str,
+    validation_warnings: list[str],
+) -> dict:
+    """Cost-per-resource mode: queries with count_distinct, aggregates daily rows,
+    and computes cost ÷ avg(distinct count) per group."""
+
+    ct = CostType(cost_type) if cost_type in _VALID_COST_TYPES else CostType.NET_AMORTIZED
+
+    data = await finout_client.query_costs_with_filters(
+        time_period=time_period,
+        filters=filters if filters else None,
+        group_by=group_by,
+        cost_type=ct,
+        count_distinct=count_distinct,
+    )
+
+    if not data:
+        return {
+            "time_period": time_period,
+            "data": [],
+            "message": "No data returned for the given filters and time period.",
+        }
+
+    cost_col = _find_cost_column(data[0])
+    count_col = _find_count_distinct_column(data[0])
+    dim_col = _find_dimension_column(data[0])
+
+    if not cost_col:
+        return {"error": "No cost column found in response", "raw_columns": list(data[0].keys())}
+    if not count_col:
+        return {
+            "error": "No count-distinct column found in response",
+            "raw_columns": list(data[0].keys()),
+        }
+
+    # The API returns daily rows. Aggregate per group: sum cost, average resource count.
+    group_agg: dict[str, dict[str, Any]] = {}
+    for row in data:
+        name = row.get(dim_col, "(all)") if dim_col else "(all)"
+        # Skip the "Other (N items)" overflow bucket
+        if isinstance(name, str) and name.startswith("Other ("):
+            continue
+        cost = _to_number(row.get(cost_col, 0))
+        count = _to_number(row.get(count_col, 0))
+
+        if name not in group_agg:
+            group_agg[name] = {"total_cost": 0.0, "counts": [], "days": 0}
+        group_agg[name]["total_cost"] += cost
+        if count > 0:
+            group_agg[name]["counts"].append(count)
+        group_agg[name]["days"] += 1
+
+    count_dim_label = count_distinct.get("key", "resource")
+    units_label = f"{count_dim_label}s"
+
+    results: list[dict[str, Any]] = []
+    no_count: list[dict[str, Any]] = []
+
+    for name, agg in group_agg.items():
+        total_cost = round(agg["total_cost"], 2)
+        counts = agg["counts"]
+        if not counts:
+            no_count.append({"name": name, "total_cost": total_cost, "resource_count": 0})
+            continue
+        avg_count = sum(counts) / len(counts)
+        cost_per = total_cost / avg_count if avg_count > 0 else 0
+        results.append(
+            {
+                "name": name,
+                "total_cost": total_cost,
+                f"avg_{count_dim_label}_count": round(avg_count, 1),
+                f"cost_per_{count_dim_label}": round(cost_per, 2),
+            }
+        )
+
+    results.sort(key=lambda r: r[f"cost_per_{count_dim_label}"], reverse=True)
+    no_count.sort(key=lambda r: r["total_cost"], reverse=True)
+
+    total_cost = sum(r["total_cost"] for r in results)
+    total_resources = sum(r[f"avg_{count_dim_label}_count"] for r in results)
+    overall_cpu = total_cost / total_resources if total_resources > 0 else 0
+
+    result: dict[str, Any] = {
+        "time_period": time_period,
+        "mode": "count_distinct",
+        "units": units_label,
+        "count_distinct": count_distinct,
+        "summary": {
+            "total_cost": format_currency(total_cost),
+            f"total_{count_dim_label}_count": round(total_resources, 1),
+            f"overall_cost_per_{count_dim_label}": round(overall_cpu, 2),
+        },
+        "data": results[:50],
+        "_presentation_hint": (
+            f"Lead with the overall cost per {count_dim_label}. "
+            "Highlight which groups have the highest and lowest cost per resource — "
+            "outliers indicate inefficiency or over-provisioning. "
+            f"Use render_chart with a bar chart of cost_per_{count_dim_label} by group."
+        ),
+    }
+    if no_count:
+        result["no_count_items"] = no_count[:20]
+        result["_no_count_note"] = (
+            f"{len(no_count)} group(s) had zero tracked resources and are excluded — "
+            "they may be flat-fee services (support, subscriptions)."
+        )
+    if validation_warnings:
+        result["_validation_warnings"] = validation_warnings
+
+    return result
+
+
 def _find_count_distinct_column(row: dict[str, Any]) -> str | None:
     """Find the count-distinct column in a data-explorer row."""
     for key in row:
@@ -395,9 +527,9 @@ def _is_empty_tag_value(val: Any) -> bool:
 
 async def get_cost_patterns_impl(args: dict) -> dict:
     """Analyze hourly cost patterns — peak hours, weekday/weekend splits."""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     time_period = args.get("time_period", "last_7_days")
     filters = args.get("filters", [])
@@ -569,9 +701,9 @@ async def get_cost_patterns_impl(args: dict) -> dict:
 
 async def get_savings_coverage_impl(args: dict) -> dict:
     """Analyze savings plan and reservation coverage."""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     time_period = args.get("time_period", "last_30_days")
     filters = args.get("filters", [])
@@ -668,9 +800,9 @@ async def get_savings_coverage_impl(args: dict) -> dict:
 
 async def get_tag_coverage_impl(args: dict) -> dict:
     """Analyze what percentage of spend is tagged by a given dimension."""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     time_period = args.get("time_period", "last_30_days")
     tag_dimension = args.get("tag_dimension")
@@ -800,9 +932,9 @@ async def get_tag_coverage_impl(args: dict) -> dict:
 
 async def get_budget_status_impl(args: dict) -> dict:
     """Compare actual spend against financial plan budgets."""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     plan_name = args.get("plan_name")
     period = args.get("period")
@@ -922,9 +1054,9 @@ async def get_budget_status_impl(args: dict) -> dict:
 
 async def get_cost_statistics_impl(args: dict) -> dict:
     """Compute daily cost statistics — mean, median, peak, trough, volatility."""
-    from ..server import finout_client
+    from ..server import get_client
 
-    assert finout_client is not None
+    finout_client = get_client()
 
     time_period = args.get("time_period", "last_30_days")
     filters = args.get("filters", [])

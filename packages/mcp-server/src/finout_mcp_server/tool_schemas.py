@@ -4,9 +4,9 @@ from mcp.types import Tool
 
 
 def _allowed_tools_for_runtime() -> set[str]:
-    from .server import BILLY_INTERNAL_TOOLS, PUBLIC_TOOLS, MCPMode, runtime_mode
+    from .server import BILLY_INTERNAL_TOOLS, PUBLIC_TOOLS, MCPMode, get_runtime_mode
 
-    if runtime_mode == MCPMode.BILLY_INTERNAL.value:
+    if get_runtime_mode() == MCPMode.BILLY_INTERNAL.value:
         return BILLY_INTERNAL_TOOLS
     return PUBLIC_TOOLS
 
@@ -1338,25 +1338,33 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_unit_economics",
             description=(
-                "Compute cost-per-unit using actual usage metrics (hours, GB, requests, etc.).\n\n"
+                "Compute cost-per-unit using usage metrics or resource counts.\n\n"
                 "WHEN TO USE: When the user asks 'cost per hour', 'cost per GB', 'cost per request', "
-                "'unit economics', 'how efficient is my spend', or any question about cost relative "
-                "to actual consumption.\n\n"
-                "WORKFLOW:\n"
-                "1) Apply a service/provider filter (required for meaningful results)\n"
-                "2) Call get_usage_unit_types with the same filter to discover available units\n"
-                "3) Pick the unit that makes sense (e.g., 'Hour' for compute, 'GB' for storage)\n"
-                "4) Pass it as usage_configuration along with optional group_by\n\n"
-                "If usage_configuration is omitted, the tool auto-discovers units. "
-                "If exactly one unit type is found it proceeds automatically; "
-                "if multiple are found it returns them for you to choose from.\n\n"
-                "HOW IT WORKS: Queries cost + usage in one call, then computes cost/usage "
-                "for each row. Services with no usage data for the selected unit are "
-                "separated into no_usage_items.\n\n"
+                "'cost per instance', 'cost per Lambda function', 'unit economics', "
+                "'how efficient is my spend', or any question about cost divided by usage or quantity.\n\n"
+                "USE THIS INSTEAD OF query_costs when the question involves cost divided by anything.\n\n"
+                "TWO MODES:\n"
+                "A) USAGE MODE (cost ÷ hours/GB/requests): Pass usage_configuration.\n"
+                "   Best for efficiency/unit-cost questions. Each service has its own natural unit "
+                "   (Hour for EC2, GB for S3, Requests for Lambda, etc.).\n"
+                "   1) Apply a service filter\n"
+                "   2) Call get_usage_unit_types to discover available units\n"
+                "   3) Pass the right unit as usage_configuration\n"
+                "   For cross-service efficiency ('cost per resource by service'), make separate "
+                "   usage-mode calls per service — each service needs its own unit.\n"
+                "B) COUNT MODE (cost ÷ number of resources): Pass count_distinct.\n"
+                "   Best for inventory questions about discrete countable things: 'how many Lambda "
+                "   functions do I have and what does each cost?', 'cost per RDS database'.\n"
+                "   WARNING: Do NOT use count_distinct grouped by service — different services have "
+                "   different resource granularities (S3 counts buckets, EC2 counts instance IDs) "
+                "   making cross-service comparisons meaningless. Use usage mode instead.\n\n"
+                "If neither is provided, the tool auto-discovers usage units.\n\n"
                 "EXAMPLES:\n"
-                "- Cost per EC2 hour by instance type: filter=EC2, usage_configuration={costCenter, units=Hour}, group_by=instance_type\n"
-                "- Cost per GB by service: filter=S3, usage_configuration={costCenter, units=GB}\n"
-                "- Cost per request by Lambda function: filter=Lambda, usage_configuration={costCenter, units=Requests}"
+                "- Cost per EC2 hour: filter=EC2, usage_configuration={costCenter: amazon-cur, units: Hour}\n"
+                "- Cost per Lambda function: filter=Lambda, count_distinct={costCenter: amazon-cur, "
+                "key: lambda_name, path: AWS/Resources Name/lambda_name, type: resource}\n"
+                "- Cost efficiency by service: call this tool once per service with the right usage unit "
+                "(e.g., EC2→Hour, S3→GB, Lambda→Requests)"
             ),
             inputSchema={
                 "type": "object",
@@ -1374,11 +1382,29 @@ async def list_tools() -> list[Tool]:
                         },
                         "required": ["costCenter", "units"],
                         "description": (
-                            "Usage unit to measure against cost. "
+                            "USAGE MODE: Unit to measure against cost. "
                             "Call get_usage_unit_types first to discover valid values. "
                             'Example: {"costCenter": "amazon-cur", "units": "Hour"}. '
-                            "If omitted, the tool auto-discovers units — if only one type "
-                            "exists it proceeds automatically, otherwise returns options."
+                            "If omitted and count_distinct is also omitted, auto-discovers units."
+                        ),
+                    },
+                    "count_distinct": {
+                        "type": "object",
+                        "properties": {
+                            "costCenter": {"type": "string"},
+                            "key": {"type": "string"},
+                            "path": {"type": "string"},
+                            "type": {"type": "string"},
+                        },
+                        "required": ["costCenter", "key", "path", "type"],
+                        "description": (
+                            "COUNT MODE: Resource dimension to count distinct values of. "
+                            "Computes cost ÷ avg(distinct count). Use for discrete inventory "
+                            "questions within a single service (e.g., cost per Lambda function). "
+                            "Do NOT group by service — use usage mode for cross-service comparisons. "
+                            "Use search_filters to find the right dimension. "
+                            'Example: {"costCenter": "amazon-cur", "key": "lambda_name", '
+                            '"path": "AWS/Resources Name/lambda_name", "type": "resource"}'
                         ),
                     },
                     "group_by": {
@@ -1626,14 +1652,15 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Compute daily cost statistics — mean, median, peak, trough, volatility.\n\n"
                 "WHEN TO USE: When the user asks about 'average daily cost', 'cost volatility', "
-                "'peak day', 'most expensive day', 'cost variability', 'cost distribution', "
-                "or statistical analysis of spending.\n\n"
+                "'peak day', 'most expensive day', 'which day cost the most', 'cost variability', "
+                "'cost distribution', or statistical analysis of spending.\n\n"
                 "HOW IT WORKS: Queries with daily granularity, aggregates all groups into "
                 "daily totals, then computes mean, median, min, max, standard deviation, "
-                "and coefficient of variation. Peak and trough days reflect the true total "
-                "daily spend, not individual group rows.\n\n"
+                "and coefficient of variation. Returns peak_day and trough_day with both "
+                "date and cost — these are derived from actual per-day totals.\n\n"
                 "PRESENTING RESULTS: Lead with daily average and highlight volatility. "
-                "Call out peak and trough days. Compare variability across groups if grouped."
+                "Call out peak and trough days with their dates and costs. "
+                "Compare variability across groups if grouped."
             ),
             inputSchema={
                 "type": "object",

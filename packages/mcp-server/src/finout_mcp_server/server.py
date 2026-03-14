@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ruff: noqa: E402
+import contextvars
 import json
 import logging
 from datetime import datetime
@@ -38,6 +39,39 @@ server = Server("finout-mcp")
 # Global client instance (will be initialized on startup)
 finout_client: FinoutClient | None = None
 runtime_mode: str | None = None
+
+# ContextVar overrides — set per-request in hosted multi-user mode.
+# When unset, get_client() / get_runtime_mode() fall back to the globals above.
+_client_var: contextvars.ContextVar[FinoutClient | None] = contextvars.ContextVar(
+    "finout_client_ctx", default=None
+)
+_runtime_mode_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "runtime_mode_ctx", default=None
+)
+
+
+def get_client() -> FinoutClient:
+    """Return the active FinoutClient (contextvar first, then global)."""
+    client = _client_var.get(None) or finout_client
+    if client is None:
+        raise RuntimeError("No FinoutClient available")
+    return client
+
+
+def set_request_client(client: FinoutClient) -> contextvars.Token[FinoutClient | None]:
+    """Set the per-request FinoutClient via contextvar."""
+    return _client_var.set(client)
+
+
+def get_runtime_mode() -> str | None:
+    """Return the active runtime mode (contextvar first, then global)."""
+    return _runtime_mode_var.get(None) or runtime_mode
+
+
+def set_request_runtime_mode(mode: str) -> contextvars.Token[str | None]:
+    """Set the per-request runtime mode via contextvar."""
+    return _runtime_mode_var.set(mode)
+
 
 # In-memory feedback storage
 feedback_log: list[dict[str, Any]] = []
@@ -148,7 +182,7 @@ logger = logging.getLogger(__name__)
 
 def _allowed_tools_for_runtime() -> set[str]:
     """Used by call_tool to check access. Also re-exported in tool_schemas."""
-    if runtime_mode == MCPMode.BILLY_INTERNAL.value:
+    if get_runtime_mode() == MCPMode.BILLY_INTERNAL.value:
         return BILLY_INTERNAL_TOOLS
     return PUBLIC_TOOLS
 
@@ -189,9 +223,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     """Handle tool execution"""
     global finout_client, runtime_mode
 
-    # Hosted transport can load multiple module references in some runtimes.
-    # Recover shared state from the canonical module before failing auth.
-    if finout_client is None:
+    # Resolve the active client — contextvar (hosted) or global (stdio/billy).
+    try:
+        active_client = get_client()
+    except RuntimeError:
+        # Hosted transport can load multiple module references in some runtimes.
+        # Recover shared state from the canonical module before failing auth.
         try:
             import finout_mcp_server.server as canonical_server
 
@@ -199,37 +236,39 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 finout_client = canonical_server.finout_client
             if runtime_mode is None and canonical_server.runtime_mode is not None:
                 runtime_mode = canonical_server.runtime_mode
+            active_client = get_client()
         except Exception:
-            # Keep normal unauthorized flow below.
-            pass
+            return [
+                TextContent(
+                    type="text",
+                    text="Unauthorized.",
+                )
+            ]
 
-    if not finout_client:
-        return [
-            TextContent(
-                type="text",
-                text="Unauthorized.",
-            )
-        ]
+    active_mode = get_runtime_mode()
 
     # Recover from stale/closed HTTP clients in long-lived hosted processes.
     # Keep this attribute-safe for test doubles that are not full FinoutClient instances.
-    public_client = getattr(finout_client, "client", None)
-    internal_client = getattr(finout_client, "internal_client", None)
+    public_client = getattr(active_client, "client", None)
+    internal_client = getattr(active_client, "internal_client", None)
     public_closed = bool(public_client is not None and getattr(public_client, "is_closed", False))
     internal_closed = bool(
         internal_client is not None and getattr(internal_client, "is_closed", False)
     )
     if public_closed or internal_closed:
-        finout_client = FinoutClient(
-            client_id=finout_client.client_id,
-            secret_key=finout_client.secret_key,
-            internal_api_url=finout_client.internal_api_url,
-            account_id=finout_client.account_id,
-            internal_auth_mode=finout_client.internal_auth_mode,
-            allow_missing_credentials=(runtime_mode == MCPMode.BILLY_INTERNAL.value),
+        active_client = FinoutClient(
+            client_id=active_client.client_id,
+            secret_key=active_client.secret_key,
+            internal_api_url=active_client.internal_api_url,
+            account_id=active_client.account_id,
+            internal_auth_mode=active_client.internal_auth_mode,
+            allow_missing_credentials=(active_mode == MCPMode.BILLY_INTERNAL.value),
         )
-
-    assert finout_client is not None  # Type checker hint
+        # Update whichever storage layer is active
+        if _client_var.get(None) is not None:
+            _client_var.set(active_client)
+        else:
+            finout_client = active_client
 
     allowed_tools = _allowed_tools_for_runtime()
     if name not in allowed_tools:
@@ -243,7 +282,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             )
         ]
 
-    if name in INTERNAL_API_TOOLS and not finout_client.internal_api_url:
+    if name in INTERNAL_API_TOOLS and not active_client.internal_api_url:
         return [
             TextContent(
                 type="text",
@@ -255,7 +294,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             )
         ]
 
-    if name in KEY_SECRET_TOOLS and (not finout_client.client_id or not finout_client.secret_key):
+    if name in KEY_SECRET_TOOLS and (not active_client.client_id or not active_client.secret_key):
         return [
             TextContent(
                 type="text",
@@ -266,11 +305,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     from .observability import trace_tool
 
     async with trace_tool(
-        name, arguments or {}, user_id=getattr(finout_client, "account_id", None)
+        name, arguments or {}, user_id=getattr(active_client, "account_id", None)
     ) as trace_ctx:
         try:
             # Clear stale curls before each tool call
-            finout_client.collect_curls()
+            active_client.collect_curls()
 
             if name == "query_costs":
                 result = await query_costs_impl(arguments)
@@ -330,8 +369,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
             # Attach debug curl commands only for internal BILLY mode.
-            curls = finout_client.collect_curls()
-            if runtime_mode == MCPMode.BILLY_INTERNAL.value and curls and isinstance(result, dict):
+            curls = active_client.collect_curls()
+            if active_mode == MCPMode.BILLY_INTERNAL.value and curls and isinstance(result, dict):
                 result["_debug_curl"] = curls
 
             trace_ctx["output"] = {"status": "success"}

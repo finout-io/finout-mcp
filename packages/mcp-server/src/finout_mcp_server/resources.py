@@ -38,12 +38,12 @@ async def list_resources() -> list[Resource]:
 
 async def read_resource(uri: str) -> str:
     """Read a resource by URI"""
-    from .server import finout_client
+    from .server import get_client
 
-    if not finout_client:
+    try:
+        finout_client = get_client()
+    except RuntimeError:
         return json.dumps({"error": "Client not initialized"})
-
-    assert finout_client is not None  # Type checker hint
 
     try:
         if uri == "finout://how-to-query":

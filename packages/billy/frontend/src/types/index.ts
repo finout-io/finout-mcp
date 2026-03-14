@@ -70,7 +70,7 @@ export interface ChatResponse {
 
 export type ModelId =
   | 'claude-haiku-4-5-20251001'
-  | 'claude-sonnet-4-5-20250929'
+  | 'claude-sonnet-4-6'
   | 'claude-opus-4-6'
 
 export interface ModelOption {
@@ -80,17 +80,9 @@ export interface ModelOption {
 
 export const MODEL_OPTIONS: ModelOption[] = [
   { value: 'claude-haiku-4-5-20251001', label: 'Haiku' },
-  { value: 'claude-sonnet-4-5-20250929', label: 'Sonnet' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet' },
   { value: 'claude-opus-4-6', label: 'Opus' },
 ]
-
-export interface FeedbackStats {
-  total_count: number
-  avg_rating: number
-  positive_count: number
-  negative_count: number
-  by_query_type: Record<string, number>
-}
 
 export interface WhatsNewEntry {
   version: string
