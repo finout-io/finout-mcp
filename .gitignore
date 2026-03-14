@@ -121,6 +121,9 @@ packages/mcp-server-hosted/*.pem
 deployments/kubernetes/billy-secret.yaml
 deployments/kubernetes/langfuse-secret.yaml
 
-# Frontend dependencies/build artifacts
-**/frontend/node_modules/
+# Node / pnpm
+node_modules/
+.pnpm-store/
+
+# Frontend build artifacts
 **/frontend/dist/
