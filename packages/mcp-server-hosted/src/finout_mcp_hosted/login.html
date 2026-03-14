@@ -401,6 +401,8 @@
 
       function showConsentScreen(accessToken) {
         pendingToken = accessToken;
+        var tid = decodeJwtTenantId(accessToken);
+        console.log("[mcp-auth] showConsentScreen — tenantId:", tid, "token first 20:", accessToken.substring(0, 20));
         try {
           var host = new URL(OAUTH_PARAMS.redirect_uri).hostname;
           document.getElementById("client-name").textContent = host;
@@ -442,47 +444,58 @@
 
           btn.disabled = true;
           btn.textContent = "Switching…";
-          console.log("[mcp-auth] switching tenant to:", selectedId);
+          console.log("[mcp-auth] switching tenant via SDK to:", selectedId);
 
-          // Get refresh token from Frontegg SDK state.
-          var refreshToken = "";
-          try {
+          // Use Frontegg SDK's switchTenant — our /frontegg/* proxy
+          // forwards the calls to the real Frontegg host.
+          var switchDone = false;
+          var unsubSwitch = app.store.subscribe(function() {
+            if (switchDone) return;
             var s = app.store.getState();
-            refreshToken = (s.auth && s.auth.user && s.auth.user.refreshToken) || "";
-            console.log("[mcp-auth] refreshToken present:", !!refreshToken);
-          } catch(e) {
-            console.warn("[mcp-auth] could not read refreshToken from SDK:", e);
-          }
+            console.log("[mcp-auth] store update — switchingTenant:", s.auth && s.auth.tenantsState && s.auth.tenantsState.switchingTenant);
+            if (s.auth && s.auth.tenantsState && !s.auth.tenantsState.switchingTenant
+                && s.auth.isAuthenticated && s.auth.user && s.auth.user.accessToken) {
+              var newTenantId = decodeJwtTenantId(s.auth.user.accessToken);
+              console.log("[mcp-auth] new tenantId in token:", newTenantId);
+              if (newTenantId === selectedId) {
+                switchDone = true;
+                unsubSwitch();
+                showConsentScreen(s.auth.user.accessToken);
+              }
+            }
+          });
 
-          fetch("/api/tenant-switch", {
-            method: "PUT",
-            headers: {
-              "authorization": "Bearer " + accessToken,
-              "content-type": "application/json"
-            },
-            body: JSON.stringify({ tenantId: selectedId, refreshToken: refreshToken })
-          })
-          .then(function(resp) {
-            console.log("[mcp-auth] /api/tenant-switch status:", resp.status);
-            if (!resp.ok) return resp.text().then(function(t) { throw new Error("HTTP " + resp.status + ": " + t); });
-            return resp.json();
-          })
-          .then(function(data) {
-            console.log("[mcp-auth] switch response keys:", Object.keys(data));
-            var newToken = data.accessToken || data.token || accessToken;
-            showConsentScreen(newToken);
-          })
-          .catch(function(err) {
-            console.error("[mcp-auth] tenant switch failed:", err);
+          try {
+            app.switchTenant({ tenantId: selectedId });
+          } catch(e) {
+            console.error("[mcp-auth] switchTenant threw:", e);
+            switchDone = true;
+            unsubSwitch();
             btn.disabled = false;
             btn.textContent = "Continue";
-            alert("Failed to switch account: " + err.message);
-          });
+            alert("Failed to switch account: " + e.message);
+          }
+
+          // Timeout after 15s.
+          setTimeout(function() {
+            if (!switchDone) {
+              switchDone = true;
+              unsubSwitch();
+              console.warn("[mcp-auth] SDK switch timed out");
+              btn.disabled = false;
+              btn.textContent = "Continue";
+              alert("Account switch timed out. Please try again.");
+            }
+          }, 15000);
         });
       }
 
       function handleTenantList(accessToken, tenants, currentTenantId) {
-        console.log("[mcp-auth] tenants:", tenants);
+        console.log("[mcp-auth] tenants count:", tenants.length);
+        if (tenants.length > 0) {
+          console.log("[mcp-auth] tenant[0] keys:", Object.keys(tenants[0]));
+          console.log("[mcp-auth] tenant[0] full:", JSON.stringify(tenants[0], null, 2));
+        }
         if (Array.isArray(tenants) && tenants.length > 1) {
           showTenantPicker(accessToken, tenants, currentTenantId);
         } else {
@@ -531,10 +544,16 @@
       document.getElementById("btn-allow").addEventListener("click", function() {
         if (!pendingToken) return;
         handled = true;
+        var tid = decodeJwtTenantId(pendingToken);
+        console.log("[mcp-auth] ALLOW clicked — tenantId:", tid, "token first 20:", pendingToken.substring(0, 20));
+        console.log("[mcp-auth] ALLOW — redirect_uri:", OAUTH_PARAMS.redirect_uri);
+        console.log("[mcp-auth] ALLOW — code_challenge:", OAUTH_PARAMS.code_challenge);
+        console.log("[mcp-auth] ALLOW — state:", OAUTH_PARAMS.state);
         sessionStorage.removeItem("mcp_oauth_params");
         document.getElementById("consent-dialog").classList.add("authorized");
         var form = buildForm(pendingToken);
         document.body.appendChild(form);
+        console.log("[mcp-auth] ALLOW — submitting form to POST /authorize");
         form.submit();
       });
 

@@ -13,6 +13,7 @@ import json
 import os
 import secrets
 import time
+import zlib
 
 _CODE_TTL = 600  # 10 minutes
 
@@ -37,7 +38,11 @@ _FALLBACK_KEY: str = secrets.token_hex(32)
 
 
 def generate_auth_code(jwt: str, code_challenge: str, redirect_uri: str) -> str:
-    """Create a signed, self-contained authorization code."""
+    """Create a signed, self-contained authorization code.
+
+    The payload is zlib-compressed before base64 encoding to keep codes
+    under URL length limits (Frontegg JWTs can be 7000+ chars).
+    """
     payload = json.dumps(
         {
             "jwt": jwt,
@@ -48,7 +53,8 @@ def generate_auth_code(jwt: str, code_challenge: str, redirect_uri: str) -> str:
         },
         separators=(",", ":"),
     )
-    b64 = base64.urlsafe_b64encode(payload.encode()).rstrip(b"=").decode()
+    compressed = zlib.compress(payload.encode(), level=9)
+    b64 = base64.urlsafe_b64encode(compressed).rstrip(b"=").decode()
     sig = hmac.new(key=_signing_key(), msg=b64.encode(), digestmod=hashlib.sha256).hexdigest()
     return f"{b64}.{sig}"
 
@@ -69,7 +75,13 @@ def consume_auth_code(code: str, code_verifier: str) -> str:
 
     try:
         padding = "=" * (-len(b64) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(b64 + padding))
+        raw = base64.urlsafe_b64decode(b64 + padding)
+        # Try decompressing (new format), fall back to plain JSON (old format).
+        try:
+            raw = zlib.decompress(raw)
+        except zlib.error:
+            pass
+        payload = json.loads(raw)
     except Exception:
         raise ValueError("Invalid authorization code")
 

@@ -364,6 +364,45 @@ def test_register_returns_static_client_id():
     assert "http://localhost:6274/oauth/callback" in data["redirect_uris"]
 
 
+# ── /frontegg/* proxy ─────────────────────────────────────────────────────────
+
+
+def test_frontegg_proxy_forwards_to_frontegg_host(monkeypatch):
+    module = importlib.import_module("finout_mcp_hosted.server")
+    monkeypatch.setenv("FRONTEGG_BASE_URL", "https://app-test.frontegg.com/oauth")
+
+    captured = {}
+
+    with patch("finout_mcp_hosted.server.httpx.AsyncClient") as mock_cls:
+        mock_resp = type("R", (), {
+            "status_code": 200,
+            "content": b'{"ok":true}',
+            "headers": {"content-type": "application/json"},
+        })()
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *a):
+                pass
+            async def request(self, method, url, **kwargs):
+                captured["method"] = method
+                captured["url"] = url
+                return mock_resp
+
+        mock_cls.return_value = FakeClient()
+
+        with TestClient(module.app) as client:
+            resp = client.put(
+                "/frontegg/identity/resources/users/v1/tenant",
+                json={"tenantId": "t2"},
+                headers={"authorization": "Bearer some-jwt"},
+            )
+    assert resp.status_code == 200
+    assert captured["method"] == "PUT"
+    assert captured["url"] == "https://app-test.frontegg.com/identity/resources/users/v1/tenant"
+
+
 # ── /api/tenants ──────────────────────────────────────────────────────────────
 
 

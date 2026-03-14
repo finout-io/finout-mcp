@@ -19,6 +19,23 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.31.0",
+        "date": "2026-03-14",
+        "title": "Multi-tenant account switching and auth code compression",
+        "sections": {
+            "external_mcp": [
+                "Users with multiple Finout accounts can now choose which account to connect during OAuth authorization",
+                "Fixed authorization failures caused by oversized auth codes exceeding URL length limits"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
         "version": "0.30.0",
         "date": "2026-03-14",
         "title": "Observability, eval coverage, and tool routing improvements",

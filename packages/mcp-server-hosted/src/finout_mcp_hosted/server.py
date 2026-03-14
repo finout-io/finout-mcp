@@ -26,7 +26,7 @@ from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from starlette.routing import Mount, Route
+from starlette.routing import Route
 
 import finout_mcp_server.server as server_module
 
@@ -38,6 +38,9 @@ from finout_mcp_server.server import MCPMode, _client_var, _runtime_mode_var, se
 from finout_mcp_server.observability import reset_trace_context, set_trace_context
 
 load_dotenv(override=True)
+
+import logging as _logging
+_logging.basicConfig(level=_logging.INFO, format="%(name)s %(levelname)s %(message)s")
 
 
 @asynccontextmanager
@@ -392,36 +395,48 @@ async def oauth_authorize_get(request: Request) -> Response:
 
 
 async def oauth_authorize_post(request: Request) -> Response:
-    """Complete OAuth after Frontegg embedded login.
+    """Complete OAuth after Frontegg embedded login."""
+    import logging
+    _log = logging.getLogger("finout_mcp_hosted.oauth")
 
-    Receives the Frontegg JWT from the client-side SDK, validates it,
-    generates an auth code, and redirects to the MCP client's redirect_uri.
-    """
     form = await request.form()
     access_token = str(form.get("access_token", "")).strip()
     redirect_uri = str(form.get("redirect_uri", "")).strip()
     code_challenge = str(form.get("code_challenge", "")).strip()
     state = str(form.get("state", "")).strip()
 
+    _log.info("POST /authorize — token_len=%d redirect_uri=%s challenge=%s state=%s",
+              len(access_token), redirect_uri, code_challenge[:10] + "...", state[:10])
+    _log.info("POST /authorize — token first 30: %s", access_token[:30])
+    _log.info("POST /authorize — token dots: %d (JWT has 2)", access_token.count("."))
+
     if not access_token or not redirect_uri or not code_challenge:
+        _log.warning("POST /authorize — missing params")
         return JSONResponse(
             {"error": "invalid_request", "error_description": "Missing required parameters"},
             status_code=400,
         )
 
     try:
-        verify_login_jwt(access_token)
-    except Exception:
+        payload = verify_login_jwt(access_token)
+        _log.info("POST /authorize — JWT valid, tenantId=%s email=%s",
+                  payload.get("tenantId"), payload.get("email"))
+    except Exception as exc:
+        _log.warning("POST /authorize — JWT validation failed: %s", exc)
         return JSONResponse(
             {"error": "invalid_token", "error_description": "Invalid or expired Frontegg token"},
             status_code=401,
         )
 
     code = generate_auth_code(access_token, code_challenge, redirect_uri)
+    _log.info("POST /authorize — generated code len=%d first 30: %s", len(code), code[:30])
+    _log.info("POST /authorize — code dots: %d (should be 1)", code.count("."))
     query: dict[str, str] = {"code": code}
     if state:
         query["state"] = state
-    return RedirectResponse(f"{redirect_uri}?{urlencode(query)}", status_code=302)
+    redirect_url = f"{redirect_uri}?{urlencode(query)}"
+    _log.info("POST /authorize — redirecting to %s", redirect_url[:100] + "...")
+    return RedirectResponse(redirect_url, status_code=302)
 
 
 async def oauth_register(request: Request) -> JSONResponse:
@@ -467,6 +482,9 @@ async def oauth_authorization_server(request: Request) -> JSONResponse:
 
 async def oauth_token(request: Request) -> JSONResponse:
     """Token endpoint: exchange authorization code + PKCE verifier for access token."""
+    import logging
+    _log = logging.getLogger("finout_mcp_hosted.oauth")
+
     body = await request.body()
     from urllib.parse import parse_qs
     params = parse_qs(body.decode("utf-8"), keep_blank_values=True)
@@ -476,15 +494,24 @@ async def oauth_token(request: Request) -> JSONResponse:
         return vals[0] if vals else ""
 
     grant_type = _get("grant_type")
+    _log.info("POST /token — grant_type=%s", grant_type)
     if grant_type != "authorization_code":
         return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
 
     code = _get("code")
     code_verifier = _get("code_verifier")
+    _log.info("POST /token — code len=%d code dots=%d first 30: %s",
+              len(code), code.count("."), code[:30])
+    _log.info("POST /token — verifier len=%d", len(code_verifier))
 
     try:
         access_token = consume_auth_code(code, code_verifier)
+        _log.info("POST /token — code consumed OK, jwt len=%d dots=%d tenantId=%s",
+                  len(access_token), access_token.count("."),
+                  decodeJwtTenantId(access_token))
     except ValueError as exc:
+        _log.warning("POST /token — consume failed: %s", exc)
+        _log.info("POST /token — code first 50: %s", code[:50])
         return JSONResponse({"error": "invalid_grant", "error_description": str(exc)}, status_code=400)
 
     return JSONResponse(
@@ -494,6 +521,18 @@ async def oauth_token(request: Request) -> JSONResponse:
             "expires_in": 3600,
         }
     )
+
+
+def decodeJwtTenantId(token: str) -> str:
+    """Decode tenantId from JWT for logging."""
+    import base64, json as _json
+    try:
+        parts = token.split(".")
+        pad = "=" * (-len(parts[1]) % 4)
+        payload = _json.loads(base64.urlsafe_b64decode(parts[1] + pad))
+        return payload.get("tenantId", "")
+    except Exception:
+        return "(decode-failed)"
 
 
 def _oauth_challenge_headers(base_url: str, error: str | None = None) -> dict[str, str]:
@@ -547,16 +586,27 @@ async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
 
+            import logging
+            _mcp_log = logging.getLogger("finout_mcp_hosted.mcp_asgi")
+            _mcp_log.info("POST /mcp — Bearer token len=%d dots=%d first 20: %s",
+                          len(token), token.count("."), token[:20])
+
             # Try Frontegg JWT first, then fall back to Finout login cookie JWT.
             payload: dict | None = None
             use_cookie_auth = False
             try:
                 payload = verify_login_jwt(token)
-            except Exception:
+                _mcp_log.info("POST /mcp — Frontegg JWT OK, tenantId=%s",
+                              payload.get("tenantId"))
+            except Exception as exc:
+                _mcp_log.info("POST /mcp — Frontegg JWT failed: %s, trying cookie", exc)
                 try:
                     payload = verify_cookie_jwt(token)
                     use_cookie_auth = True
-                except Exception:
+                    _mcp_log.info("POST /mcp — Cookie JWT OK, tenantId=%s",
+                                  payload.get("tenantId"))
+                except Exception as exc2:
+                    _mcp_log.warning("POST /mcp — Both JWT checks failed: %s", exc2)
                     pass
 
             if payload is None:
@@ -740,7 +790,7 @@ app = Starlette(
         Route("/api/tenants", endpoint=proxy_tenants, methods=["GET"]),
         Route("/api/tenant-switch", endpoint=proxy_tenant_switch, methods=["POST", "PUT"]),
         # Catch-all proxy for Frontegg SDK calls (e.g. switchTenant).
-        Mount("/frontegg", app=frontegg_proxy),
+        Route("/frontegg/{path:path}", endpoint=frontegg_proxy, methods=["GET", "POST", "PUT", "DELETE", "PATCH"]),
         Route("/authorize", endpoint=oauth_authorize_get, methods=["GET"]),
         Route("/authorize", endpoint=oauth_authorize_post, methods=["POST"]),
         # Frontegg redirects to {appUrl}/account/login-callback after embedded login.
@@ -786,10 +836,23 @@ app.add_middleware(
 )
 
 
+class _HealthFilter(_logging.Filter):
+    """Suppress noisy GET /health access log lines."""
+
+    def filter(self, record: _logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "GET /health" in msg:
+            return False
+        if "com.chrome.devtools" in msg:
+            return False
+        return True
+
+
 def main() -> None:
     """Run hosted public MCP service."""
     import uvicorn
 
+    _logging.getLogger("uvicorn.access").addFilter(_HealthFilter())
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_PORT", "8080"))
     uvicorn.run("finout_mcp_hosted.server:app", host=host, port=port, lifespan="on")
@@ -799,6 +862,7 @@ def dev() -> None:
     """Run with auto-reload for local development."""
     import uvicorn
 
+    _logging.getLogger("uvicorn.access").addFilter(_HealthFilter())
     uvicorn.run("finout_mcp_hosted.server:app", host="0.0.0.0", port=8080, reload=True)
 
 
