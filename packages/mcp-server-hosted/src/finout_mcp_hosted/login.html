@@ -137,6 +137,17 @@
     #consent-dialog .btn:hover { opacity: 0.88; }
     #btn-deny  { background: #f0f2f5; color: #7a8a9a; }
     #btn-allow { background: #e87878; color: #fff; }
+
+    /* Success state shown after clicking Allow */
+    #consent-dialog .success-body { display: none; padding: 36px 32px; }
+    #consent-dialog.authorized .dialog-body { display: none; }
+    #consent-dialog.authorized .success-body { display: block; }
+    .success-icon {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: #4fa882; display: flex; align-items: center;
+      justify-content: center; margin: 0 auto 20px;
+    }
+    .success-icon svg { width: 28px; height: 28px; fill: #fff; }
   </style>
 </head>
 <body>
@@ -178,6 +189,13 @@
           <button class="btn" id="btn-deny">Deny</button>
           <button class="btn" id="btn-allow">Allow access</button>
         </div>
+      </div>
+      <div class="success-body">
+        <div class="success-icon">
+          <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        </div>
+        <h1>Authorization Successful</h1>
+        <p class="subtitle">You can close this window and return to your MCP client.</p>
       </div>
     </div>
     </div><!-- #consent-layout -->
@@ -253,6 +271,7 @@
         if (!pendingToken) return;
         handled = true;
         sessionStorage.removeItem("mcp_oauth_params");
+        document.getElementById("consent-dialog").classList.add("authorized");
         var form = buildForm(pendingToken);
         document.body.appendChild(form);
         form.submit();
