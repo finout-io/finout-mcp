@@ -242,8 +242,8 @@ async def proxy_tenant_switch(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Frontegg not configured"}, status_code=500)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.put(
-            f"{fe_host}/identity/resources/auth/v1/user/tenant",
+        resp = await client.post(
+            f"{fe_host}/identity/resources/auth/v1/user/token/tenant",
             headers={"authorization": auth, "content-type": "application/json"},
             json={"tenantId": tenant_id},
         )
@@ -658,7 +658,7 @@ app = Starlette(
         Route("/debug/cookies", endpoint=debug_cookies, methods=["GET"]),
         Route("/debug/verify-token", endpoint=debug_verify_token, methods=["GET"]),
         Route("/api/tenants", endpoint=proxy_tenants, methods=["GET"]),
-        Route("/api/tenant-switch", endpoint=proxy_tenant_switch, methods=["PUT"]),
+        Route("/api/tenant-switch", endpoint=proxy_tenant_switch, methods=["POST", "PUT"]),
         Route("/authorize", endpoint=oauth_authorize_get, methods=["GET"]),
         Route("/authorize", endpoint=oauth_authorize_post, methods=["POST"]),
         # Frontegg redirects to {appUrl}/account/login-callback after embedded login.

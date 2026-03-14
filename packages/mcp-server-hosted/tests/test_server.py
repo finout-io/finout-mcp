@@ -405,7 +405,7 @@ def test_proxy_tenants_returns_frontegg_response(monkeypatch):
 def test_proxy_tenant_switch_requires_auth():
     module = importlib.import_module("finout_mcp_hosted.server")
     with TestClient(module.app) as client:
-        response = client.put(
+        response = client.post(
             "/api/tenant-switch",
             json={"tenantId": "t2"},
         )
@@ -415,7 +415,7 @@ def test_proxy_tenant_switch_requires_auth():
 def test_proxy_tenant_switch_requires_tenant_id():
     module = importlib.import_module("finout_mcp_hosted.server")
     with TestClient(module.app) as client:
-        response = client.put(
+        response = client.post(
             "/api/tenant-switch",
             json={},
             headers={"authorization": "Bearer some-jwt"},
@@ -443,13 +443,13 @@ def test_proxy_tenant_switch_returns_new_token(monkeypatch):
             async def __aexit__(self, *a):
                 pass
 
-            async def put(self, url, **kwargs):
+            async def post(self, url, **kwargs):
                 return mock_resp
 
         mock_cls.return_value = FakeClient()
 
         with TestClient(module.app) as client:
-            response = client.put(
+            response = client.post(
                 "/api/tenant-switch",
                 json={"tenantId": "t2"},
                 headers={"authorization": "Bearer original-jwt"},

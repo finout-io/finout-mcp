@@ -438,33 +438,90 @@
         document.getElementById("tenant-screen").classList.add("active");
 
         btn.addEventListener("click", function() {
-          btn.disabled = true;
-          btn.textContent = "Switching…";
           if (selectedId === currentTenantId) {
             showConsentScreen(accessToken);
             return;
           }
-          fetch("/api/tenant-switch", {
-            method: "PUT",
-            headers: {
-              "authorization": "Bearer " + accessToken,
-              "content-type": "application/json"
-            },
-            body: JSON.stringify({ tenantId: selectedId })
-          })
-          .then(function(resp) {
-            if (!resp.ok) throw new Error("Switch failed: " + resp.status);
-            return resp.json();
-          })
-          .then(function(data) {
-            var newToken = data.accessToken || data.token || accessToken;
-            showConsentScreen(newToken);
-          })
-          .catch(function(err) {
-            btn.disabled = false;
-            btn.textContent = "Continue";
-            alert("Failed to switch account: " + err.message);
+
+          btn.disabled = true;
+          btn.textContent = "Switching…";
+
+          // Use Frontegg SDK to switch tenant — it refreshes the JWT internally.
+          console.log("[mcp-auth] switching tenant via SDK to:", selectedId);
+          console.log("[mcp-auth] app methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(app)).filter(function(k) { return typeof app[k] === "function"; }));
+
+          // Subscribe to store to get the new token after switch.
+          var switchDone = false;
+          var unsubSwitch = app.store.subscribe(function() {
+            if (switchDone) return;
+            var s = app.store.getState();
+            if (s.auth.isAuthenticated && s.auth.user && s.auth.user.accessToken) {
+              var newTenantId = decodeJwtTenantId(s.auth.user.accessToken);
+              console.log("[mcp-auth] store updated, tenantId now:", newTenantId);
+              if (newTenantId === selectedId) {
+                switchDone = true;
+                unsubSwitch();
+                showConsentScreen(s.auth.user.accessToken);
+              }
+            }
           });
+
+          // Try SDK switchTenant method, then dispatch, then REST fallback.
+          var switched = false;
+          if (typeof app.switchTenant === "function") {
+            console.log("[mcp-auth] using app.switchTenant()");
+            try { app.switchTenant({ tenantId: selectedId }); switched = true; } catch(e) {
+              console.warn("[mcp-auth] app.switchTenant() failed:", e);
+            }
+          }
+          if (!switched) {
+            console.log("[mcp-auth] dispatching auth/switchTenant action");
+            try {
+              app.store.dispatch({ type: "auth/switchTenant/pending", payload: { tenantId: selectedId } });
+              switched = true;
+            } catch(e) {
+              console.warn("[mcp-auth] dispatch failed:", e);
+            }
+          }
+          if (!switched) {
+            // REST API fallback via server proxy.
+            console.log("[mcp-auth] falling back to /api/tenant-switch");
+            unsubSwitch();
+            fetch("/api/tenant-switch", {
+              method: "PUT",
+              headers: {
+                "authorization": "Bearer " + accessToken,
+                "content-type": "application/json"
+              },
+              body: JSON.stringify({ tenantId: selectedId })
+            })
+            .then(function(resp) {
+              if (!resp.ok) throw new Error("Switch failed: " + resp.status);
+              return resp.json();
+            })
+            .then(function(data) {
+              var newToken = data.accessToken || data.token || accessToken;
+              showConsentScreen(newToken);
+            })
+            .catch(function(err) {
+              btn.disabled = false;
+              btn.textContent = "Continue";
+              alert("Failed to switch account: " + err.message);
+            });
+            return;
+          }
+
+          // Timeout: if SDK switch doesn't fire within 10s, show error.
+          setTimeout(function() {
+            if (!switchDone) {
+              switchDone = true;
+              unsubSwitch();
+              console.warn("[mcp-auth] SDK switch timed out");
+              btn.disabled = false;
+              btn.textContent = "Continue";
+              alert("Account switch timed out. Please try again.");
+            }
+          }, 10000);
         });
       }
 
