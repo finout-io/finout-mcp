@@ -470,6 +470,82 @@ def test_proxy_tenant_switch_returns_new_token(monkeypatch):
     assert response.json()["accessToken"] == "new-jwt-for-t2"
 
 
+# ── End-to-end: OAuth → token → MCP tools/list ───────────────────────────────
+
+
+def test_oauth_then_mcp_tools_list():
+    """Full flow: authorize → token exchange → use Bearer to list MCP tools."""
+    module = importlib.import_module("finout_mcp_hosted.server")
+    verifier = "e2e-verifier-abcdefghij1234567890"
+    challenge = _make_challenge(verifier)
+
+    with patch(
+        "finout_mcp_hosted.server.verify_login_jwt",
+        return_value={"tenantId": "tenant-e2e", "email": "test@example.com"},
+    ):
+        # Step 1: POST /authorize → get auth code
+        with TestClient(module.app, follow_redirects=False) as client:
+            auth_resp = client.post(
+                "/authorize",
+                data={
+                    "access_token": "fake-frontegg-jwt",
+                    "redirect_uri": "http://localhost/cb",
+                    "code_challenge": challenge,
+                    "state": "s",
+                },
+            )
+        assert auth_resp.status_code == 302
+        code = auth_resp.headers["location"].split("code=")[1].split("&")[0]
+
+        # Step 2: POST /token → exchange code for access_token
+        with TestClient(module.app) as client:
+            token_resp = client.post(
+                "/token",
+                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}",
+                headers={"content-type": "application/x-www-form-urlencoded"},
+            )
+        assert token_resp.status_code == 200
+        access_token = token_resp.json()["access_token"]
+        assert access_token == "fake-frontegg-jwt"
+
+        # Step 3: POST /mcp with Bearer token → tools/list
+        with TestClient(module.app) as client:
+            mcp_resp = client.post(
+                "/mcp",
+                headers={
+                    "authorization": f"Bearer {access_token}",
+                    "accept": "application/json, text/event-stream",
+                },
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            )
+        assert mcp_resp.status_code == 200, f"MCP failed: {mcp_resp.status_code} {mcp_resp.text}"
+        body = mcp_resp.json()
+        assert "error" not in body, f"MCP error: {body}"
+        assert "result" in body
+        assert "tools" in body["result"]
+        assert len(body["result"]["tools"]) > 0
+
+
+def test_mcp_tools_list_with_key_secret():
+    """Key/secret auth → tools/list should work."""
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with TestClient(module.app) as client:
+        resp = client.post(
+            "/mcp",
+            headers={
+                "x-finout-client-id": "cid",
+                "x-finout-secret-key": "sk",
+                "accept": "application/json, text/event-stream",
+            },
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        )
+    assert resp.status_code == 200, f"MCP failed: {resp.status_code} {resp.text}"
+    body = resp.json()
+    assert "error" not in body, f"MCP error: {body}"
+    assert "result" in body
+    assert "tools" in body["result"]
+
+
 # ── Client pool ──────────────────────────────────────────────────────────────
 
 

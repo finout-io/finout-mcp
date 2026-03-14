@@ -474,10 +474,12 @@ async def _handle_with_transport(scope: Any, receive: Any, send: Any) -> None:
     async with transport.connect() as (read_stream, write_stream):
         async with anyio.create_task_group() as tg:
             tg.start_soon(
-                server.run,
-                read_stream,
-                write_stream,
-                server.create_initialization_options(),
+                lambda: server.run(
+                    read_stream,
+                    write_stream,
+                    server.create_initialization_options(),
+                    stateless=True,
+                )
             )
             await transport.handle_request(scope, receive, send)
             tg.cancel_scope.cancel()

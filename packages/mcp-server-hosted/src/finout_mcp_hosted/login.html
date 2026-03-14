@@ -367,6 +367,7 @@
       });
 
       var handled = false;
+      var consentStarted = false;
       var pendingToken = null;
 
       function buildForm(accessToken) {
@@ -490,6 +491,8 @@
       }
 
       function showConsent(accessToken) {
+        if (consentStarted) return;
+        consentStarted = true;
         var currentTenantId = decodeJwtTenantId(accessToken);
         console.log("[mcp-auth] currentTenantId:", currentTenantId);
 
