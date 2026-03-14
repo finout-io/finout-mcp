@@ -443,13 +443,23 @@
           btn.textContent = "Switching…";
           console.log("[mcp-auth] switching tenant to:", selectedId);
 
+          // Get refresh token from Frontegg SDK state.
+          var refreshToken = "";
+          try {
+            var s = app.store.getState();
+            refreshToken = (s.auth && s.auth.user && s.auth.user.refreshToken) || "";
+            console.log("[mcp-auth] refreshToken present:", !!refreshToken);
+          } catch(e) {
+            console.warn("[mcp-auth] could not read refreshToken from SDK:", e);
+          }
+
           fetch("/api/tenant-switch", {
             method: "PUT",
             headers: {
               "authorization": "Bearer " + accessToken,
               "content-type": "application/json"
             },
-            body: JSON.stringify({ tenantId: selectedId })
+            body: JSON.stringify({ tenantId: selectedId, refreshToken: refreshToken })
           })
           .then(function(resp) {
             console.log("[mcp-auth] /api/tenant-switch status:", resp.status);

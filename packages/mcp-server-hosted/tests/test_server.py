@@ -415,31 +415,55 @@ def test_proxy_tenant_switch_requires_tenant_id():
     with TestClient(module.app) as client:
         response = client.put(
             "/api/tenant-switch",
-            json={},
+            json={"refreshToken": "rt"},
             headers={"authorization": "Bearer some-jwt"},
         )
     assert response.status_code == 400
     assert "tenantId" in response.json()["error"]
 
 
+def test_proxy_tenant_switch_requires_refresh_token():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with TestClient(module.app) as client:
+        response = client.put(
+            "/api/tenant-switch",
+            json={"tenantId": "t2"},
+            headers={"authorization": "Bearer some-jwt"},
+        )
+    assert response.status_code == 400
+    assert "refreshToken" in response.json()["error"]
+
+
 def test_proxy_tenant_switch_returns_new_token(monkeypatch):
     module = importlib.import_module("finout_mcp_hosted.server")
     monkeypatch.setenv("FRONTEGG_BASE_URL", "https://app-test.frontegg.com/oauth")
 
-    switch_resp_body = {"accessToken": "new-jwt-for-t2", "refreshToken": "rt"}
+    switch_user = {"tenantId": "t2", "name": "User"}
+    refresh_tokens = {"accessToken": "new-jwt-for-t2", "refreshToken": "new-rt"}
 
     with patch("finout_mcp_hosted.server.httpx.AsyncClient") as mock_cls:
-        mock_resp = type("R", (), {
-            "status_code": 200,
-            "json": lambda self: switch_resp_body,
-        })()
+        switch_resp = type("R", (), {"status_code": 200, "json": lambda self: switch_user})()
+        refresh_resp = type("R", (), {"status_code": 200, "json": lambda self: refresh_tokens})()
 
-        mock_cls.return_value = _make_fake_httpx_client("put", mock_resp)
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
+
+            async def put(self, url, **kwargs):
+                return switch_resp
+
+            async def post(self, url, **kwargs):
+                return refresh_resp
+
+        mock_cls.return_value = FakeClient()
 
         with TestClient(module.app) as client:
             response = client.put(
                 "/api/tenant-switch",
-                json={"tenantId": "t2"},
+                json={"tenantId": "t2", "refreshToken": "old-rt"},
                 headers={"authorization": "Bearer original-jwt"},
             )
     assert response.status_code == 200
