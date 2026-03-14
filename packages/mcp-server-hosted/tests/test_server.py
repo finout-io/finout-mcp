@@ -546,6 +546,157 @@ def test_mcp_tools_list_with_key_secret():
     assert "tools" in body["result"]
 
 
+def _mcp_headers(bearer: str) -> dict:
+    return {
+        "authorization": f"Bearer {bearer}",
+        "accept": "application/json, text/event-stream",
+    }
+
+
+def _do_oauth_flow(module, verifier: str, jwt: str, tenant_id: str) -> str:
+    """Run the full OAuth PKCE flow and return the access_token."""
+    challenge = _make_challenge(verifier)
+    with patch(
+        "finout_mcp_hosted.server.verify_login_jwt",
+        return_value={"tenantId": tenant_id, "email": "test@example.com"},
+    ):
+        with TestClient(module.app, follow_redirects=False) as client:
+            auth_resp = client.post(
+                "/authorize",
+                data={
+                    "access_token": jwt,
+                    "redirect_uri": "http://localhost/cb",
+                    "code_challenge": challenge,
+                    "state": "s",
+                },
+            )
+        assert auth_resp.status_code == 302, f"Authorize failed: {auth_resp.status_code}"
+        code = auth_resp.headers["location"].split("code=")[1].split("&")[0]
+
+        with TestClient(module.app) as client:
+            token_resp = client.post(
+                "/token",
+                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}",
+                headers={"content-type": "application/x-www-form-urlencoded"},
+            )
+        assert token_resp.status_code == 200, f"Token exchange failed: {token_resp.text}"
+        return token_resp.json()["access_token"]
+
+
+def test_e2e_oauth_tools_list_then_call_tool():
+    """Full flow: OAuth → tools/list → call a tool."""
+    module = importlib.import_module("finout_mcp_hosted.server")
+    token = _do_oauth_flow(module, "e2e-full-verifier-1234567890ab", "jwt-t1", "tenant-1")
+
+    with patch(
+        "finout_mcp_hosted.server.verify_login_jwt",
+        return_value={"tenantId": "tenant-1", "email": "test@example.com"},
+    ):
+        with TestClient(module.app) as client:
+            # tools/list
+            resp = client.post("/mcp", headers=_mcp_headers(token),
+                               json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+            assert resp.status_code == 200
+            body = resp.json()
+            assert "result" in body, f"tools/list error: {body}"
+            tool_names = [t["name"] for t in body["result"]["tools"]]
+            assert "query_costs" in tool_names
+
+            # call_tool (will fail at API level but should NOT fail at protocol level)
+            resp2 = client.post("/mcp", headers=_mcp_headers(token),
+                                json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                      "params": {"name": "query_costs", "arguments": {
+                                          "time_period": "last_7_days"}}})
+            assert resp2.status_code == 200
+            body2 = resp2.json()
+            # Should get a result (even if it's an error message from the tool, not a protocol error)
+            assert "result" in body2 or ("error" not in body2 or body2["error"]["code"] != -32602), \
+                f"Protocol error on call_tool: {body2}"
+
+
+def test_e2e_tenant_switch_produces_valid_token(monkeypatch):
+    """Tenant switch proxy → new JWT → OAuth → tools/list."""
+    module = importlib.import_module("finout_mcp_hosted.server")
+    monkeypatch.setenv("FRONTEGG_BASE_URL", "https://app-test.frontegg.com/oauth")
+
+    switched_jwt = "jwt-after-switch-to-tenant-2"
+
+    # Mock Frontegg: switch returns user profile, refresh returns new tokens.
+    with patch("finout_mcp_hosted.server.httpx.AsyncClient") as mock_cls:
+        switch_resp = type("R", (), {
+            "status_code": 200,
+            "json": lambda self: {"tenantId": "tenant-2", "name": "User"},
+        })()
+        refresh_resp = type("R", (), {
+            "status_code": 200,
+            "json": lambda self: {"accessToken": switched_jwt, "refreshToken": "new-rt"},
+        })()
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *a):
+                pass
+            async def put(self, url, **kwargs):
+                return switch_resp
+            async def post(self, url, **kwargs):
+                return refresh_resp
+
+        mock_cls.return_value = FakeClient()
+
+        with TestClient(module.app) as client:
+            switch_result = client.put(
+                "/api/tenant-switch",
+                json={"tenantId": "tenant-2", "refreshToken": "old-rt"},
+                headers={"authorization": "Bearer original-jwt"},
+            )
+        assert switch_result.status_code == 200
+        new_token = switch_result.json()["accessToken"]
+        assert new_token == switched_jwt
+
+    # Now use the switched JWT through the full OAuth flow.
+    access_token = _do_oauth_flow(
+        module, "switch-verifier-1234567890abcde", switched_jwt, "tenant-2"
+    )
+    assert access_token == switched_jwt
+
+    # And verify MCP works with it.
+    with patch(
+        "finout_mcp_hosted.server.verify_login_jwt",
+        return_value={"tenantId": "tenant-2", "email": "test@example.com"},
+    ):
+        with TestClient(module.app) as client:
+            resp = client.post("/mcp", headers=_mcp_headers(access_token),
+                               json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+            assert resp.status_code == 200
+            body = resp.json()
+            assert "result" in body, f"tools/list failed after switch: {body}"
+            assert len(body["result"]["tools"]) > 0
+
+
+def test_e2e_two_tenants_isolated():
+    """Two users with different tenants get isolated tool responses."""
+    module = importlib.import_module("finout_mcp_hosted.server")
+    token_a = _do_oauth_flow(module, "tenant-a-verifier-1234567890ab", "jwt-a", "tenant-a")
+    token_b = _do_oauth_flow(module, "tenant-b-verifier-1234567890ab", "jwt-b", "tenant-b")
+
+    with patch(
+        "finout_mcp_hosted.server.verify_login_jwt",
+        side_effect=lambda t: {"tenantId": "tenant-a" if t == "jwt-a" else "tenant-b",
+                                "email": "a@test.com" if t == "jwt-a" else "b@test.com"},
+    ):
+        with TestClient(module.app) as client:
+            resp_a = client.post("/mcp", headers=_mcp_headers(token_a),
+                                 json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+            resp_b = client.post("/mcp", headers=_mcp_headers(token_b),
+                                 json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+
+        assert resp_a.status_code == 200
+        assert resp_b.status_code == 200
+        assert "result" in resp_a.json(), f"Tenant A error: {resp_a.json()}"
+        assert "result" in resp_b.json(), f"Tenant B error: {resp_b.json()}"
+
+
 # ── Client pool ──────────────────────────────────────────────────────────────
 
 

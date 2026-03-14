@@ -1,6 +1,6 @@
 """Tests for the observability module (Langfuse integration)."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,11 +24,12 @@ def _make_mock_langfuse():
     mock_lf = MagicMock()
 
     @contextmanager
-    def fake_start_as_current_span(**kwargs):
+    def fake_start_as_current_observation(**kwargs):
         yield mock_span
 
-    mock_lf.start_as_current_span = MagicMock(side_effect=fake_start_as_current_span)
-    return mock_lf, mock_span
+    mock_lf.start_as_current_observation = MagicMock(side_effect=fake_start_as_current_observation)
+    mock_propagate_attributes = MagicMock(return_value=nullcontext())
+    return (mock_lf, mock_propagate_attributes), mock_lf, mock_span
 
 
 def test_get_langfuse_returns_none_without_env(monkeypatch: pytest.MonkeyPatch):
@@ -83,20 +84,30 @@ async def test_trace_tool_noop_without_langfuse(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.mark.asyncio
 async def test_trace_tool_creates_span_when_langfuse_available():
-    mock_lf, mock_span = _make_mock_langfuse()
-    observability._langfuse_instance = mock_lf
+    mock_pair, mock_lf, mock_span = _make_mock_langfuse()
+    observability._langfuse_instance = mock_pair
     observability._langfuse_checked = True
 
     async with observability.trace_tool("search_filters", {"query": "ec2"}) as ctx:
         ctx["output"] = {"status": "success", "count": 5}
 
-    mock_lf.start_as_current_span.assert_called_once_with(
-        name="tool:search_filters", input={"query": "ec2"}
+    mock_lf.start_as_current_observation.assert_called_once_with(
+        name="tool:search_filters",
+        as_type="tool",
+        input={"query": "ec2"},
+        metadata={},
     )
-    mock_lf.update_current_trace.assert_called_once()
-    update_trace_kwargs = mock_lf.update_current_trace.call_args.kwargs
-    assert update_trace_kwargs["tags"] == ["origin:direct_mcp", "mode:unknown", "channel:mcp"]
-    assert update_trace_kwargs["metadata"] == {}
+    mock_pair[1].assert_called_once_with(
+        user_id=None,
+        session_id=None,
+        tags=["origin:direct_mcp", "mode:unknown", "channel:mcp"],
+        metadata={},
+        trace_name="Direct MCP",
+    )
+    mock_lf.set_current_trace_io.assert_called_once_with(
+        input={"query": "ec2"},
+        output={"status": "success", "count": 5},
+    )
     mock_span.update.assert_called_once()
     update_kwargs = mock_span.update.call_args[1]
     assert update_kwargs["output"] == {"status": "success", "count": 5}
@@ -105,8 +116,8 @@ async def test_trace_tool_creates_span_when_langfuse_available():
 
 @pytest.mark.asyncio
 async def test_trace_tool_sets_user_id_when_provided():
-    mock_lf, _ = _make_mock_langfuse()
-    observability._langfuse_instance = mock_lf
+    mock_pair, mock_lf, _ = _make_mock_langfuse()
+    observability._langfuse_instance = mock_pair
     observability._langfuse_checked = True
 
     async with observability.trace_tool(
@@ -114,30 +125,33 @@ async def test_trace_tool_sets_user_id_when_provided():
     ) as ctx:
         ctx["output"] = {"status": "success"}
 
-    mock_lf.update_current_trace.assert_called_once()
-    update_trace_kwargs = mock_lf.update_current_trace.call_args.kwargs
-    assert update_trace_kwargs["user_id"] == "acct-123"
-    assert update_trace_kwargs["tags"] == ["origin:direct_mcp", "mode:unknown", "channel:mcp"]
+    mock_pair[1].assert_called_once_with(
+        user_id="acct-123",
+        session_id=None,
+        tags=["origin:direct_mcp", "mode:unknown", "channel:mcp"],
+        metadata={},
+        trace_name="Direct MCP",
+    )
 
 
 @pytest.mark.asyncio
 async def test_trace_tool_noop_for_billy_internal():
-    mock_lf, _ = _make_mock_langfuse()
-    observability._langfuse_instance = mock_lf
+    mock_pair, mock_lf, _ = _make_mock_langfuse()
+    observability._langfuse_instance = mock_pair
     observability._langfuse_checked = True
 
     with patch("finout_mcp_server.server.get_runtime_mode", return_value="billy-internal"):
         async with observability.trace_tool("query_costs", {"period": "last_7_days"}) as ctx:
             ctx["output"] = {"status": "success"}
 
-    mock_lf.start_as_current_span.assert_not_called()
-    mock_lf.update_current_trace.assert_not_called()
+    mock_lf.start_as_current_observation.assert_not_called()
+    mock_lf.set_current_trace_io.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_trace_tool_records_error_on_exception():
-    mock_lf, mock_span = _make_mock_langfuse()
-    observability._langfuse_instance = mock_lf
+    mock_pair, mock_lf, mock_span = _make_mock_langfuse()
+    observability._langfuse_instance = mock_pair
     observability._langfuse_checked = True
 
     with pytest.raises(ValueError, match="bad input"):
@@ -153,7 +167,7 @@ async def test_trace_tool_records_error_on_exception():
 
 def test_shutdown_flushes_langfuse():
     mock_lf = MagicMock()
-    observability._langfuse_instance = mock_lf
+    observability._langfuse_instance = (mock_lf, MagicMock())
     observability._langfuse_checked = True
 
     observability.shutdown()

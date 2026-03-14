@@ -19,6 +19,27 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.30.0",
+        "date": "2026-03-14",
+        "title": "Observability, eval coverage, and tool routing improvements",
+        "sections": {
+            "external_mcp": [
+                "Virtual tag analysis and data explorer tools now available in the public MCP server",
+                "Improved tool descriptions with explicit workflows for analytics tools",
+                "search_filters response now includes routing guidance for downstream tool calls"
+            ],
+            "internal_mcp": [
+                "Langfuse observability for MCP tool calls with per-request trace context",
+                "Billy system prompt now includes tool routing table for all analytics tools",
+                "Separate Langfuse credentials for Billy and MCP via LANGFUSE_BILLY_* and LANGFUSE_MCP_* env prefixes"
+            ],
+            "billy": [
+                "Expanded eval suite from 52 to 76 cases covering all tool types",
+                "Langfuse trace enrichment: response mode, tool sequence, and presence scores per interaction"
+            ]
+        }
+    },
+    {
         "version": "0.29.0",
         "date": "2026-03-14",
         "title": "Multi-tenant account picker during OAuth login",

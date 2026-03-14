@@ -57,17 +57,15 @@ def _get_langfuse() -> Any:
         return None
 
     try:
-        from langfuse import Langfuse
+        from langfuse import Langfuse, propagate_attributes
 
         candidate = Langfuse(
             public_key=public_key,
             secret_key=secret_key,
             host=_env("HOST"),
         )
-        if hasattr(candidate, "start_as_current_span") and hasattr(
-            candidate, "update_current_trace"
-        ):
-            _langfuse_instance = candidate
+        if hasattr(candidate, "start_as_current_observation"):
+            _langfuse_instance = (candidate, propagate_attributes)
             logger.info("Langfuse MCP observability enabled (host=%s)", _env("HOST"))
         else:
             logger.warning(
@@ -96,60 +94,73 @@ async def trace_tool(name: str, args: dict[str, Any], *, user_id: str | None = N
         yield {}
         return
 
-    lf = _get_langfuse()
-    if lf is None:
+    langfuse_parts = _get_langfuse()
+    if langfuse_parts is None:
         yield {}
         return
+    if isinstance(langfuse_parts, tuple):
+        lf, lf_propagate_attributes = langfuse_parts
+    else:
+        from contextlib import nullcontext
+
+        lf = langfuse_parts
+
+        def lf_propagate_attributes(**_: Any) -> nullcontext:  # type: ignore[type-arg]
+            return nullcontext()
 
     ctx: dict[str, Any] = {}
     start = time.monotonic()
+    tags = [f"origin:{origin}", f"mode:{active_mode or 'unknown'}", "channel:mcp"]
+    extra_tags = trace_context.get("tags")
+    if isinstance(extra_tags, list):
+        tags.extend(str(tag) for tag in extra_tags if tag)
 
-    with lf.start_as_current_span(name=f"tool:{name}", input=args) as span:
-        tags = [f"origin:{origin}", f"mode:{active_mode or 'unknown'}", "channel:mcp"]
-        extra_tags = trace_context.get("tags")
-        if isinstance(extra_tags, list):
-            tags.extend(str(tag) for tag in extra_tags if tag)
+    trace_metadata = {
+        key: str(value)
+        for key, value in trace_context.items()
+        if key not in {"user_id", "session_id", "tags"} and value is not None
+    }
 
-        trace_metadata = {
-            key: value
-            for key, value in trace_context.items()
-            if key not in {"user_id", "session_id", "tags"}
-        }
-        lf.update_current_trace(
+    with lf.start_as_current_observation(
+        name=f"tool:{name}",
+        as_type="tool",
+        input=args,
+        metadata=trace_metadata,
+    ) as span:
+        with lf_propagate_attributes(
             user_id=trace_context.get("user_id") or user_id,
             session_id=trace_context.get("session_id"),
             tags=tags,
             metadata=trace_metadata,
-        )
-        try:
-            yield ctx
-            duration_ms = (time.monotonic() - start) * 1000
-            span.update(
-                output=ctx.get("output", {"status": "success"}),
-                metadata={
-                    "duration_ms": round(duration_ms, 2),
-                    "origin": origin,
-                    "runtime_mode": active_mode,
-                    "request_id": trace_context.get("request_id"),
-                    "account_id": trace_context.get("account_id"),
-                    "client_id": trace_context.get("client_id"),
-                },
-            )
-        except Exception as exc:
-            duration_ms = (time.monotonic() - start) * 1000
-            span.update(
-                output={"status": "error", "error": str(exc), "error_type": type(exc).__name__},
-                level="ERROR",
-                metadata={
-                    "duration_ms": round(duration_ms, 2),
-                    "origin": origin,
-                    "runtime_mode": active_mode,
-                    "request_id": trace_context.get("request_id"),
-                    "account_id": trace_context.get("account_id"),
-                    "client_id": trace_context.get("client_id"),
-                },
-            )
-            raise
+            trace_name="Direct MCP",
+        ):
+            span_meta: dict[str, Any] = {
+                "origin": origin,
+                "runtime_mode": active_mode,
+                "request_id": trace_context.get("request_id"),
+                "account_id": trace_context.get("account_id"),
+                "client_id": trace_context.get("client_id"),
+            }
+            try:
+                yield ctx
+                duration_ms = (time.monotonic() - start) * 1000
+                lf.set_current_trace_io(input=args, output=ctx.get("output", {"status": "success"}))
+                span.update(
+                    output=ctx.get("output", {"status": "success"}),
+                    metadata={**span_meta, "duration_ms": round(duration_ms, 2)},
+                )
+            except Exception as exc:
+                duration_ms = (time.monotonic() - start) * 1000
+                lf.set_current_trace_io(
+                    input=args,
+                    output={"status": "error", "error": str(exc), "error_type": type(exc).__name__},
+                )
+                span.update(
+                    output={"status": "error", "error": str(exc), "error_type": type(exc).__name__},
+                    level="ERROR",
+                    metadata={**span_meta, "duration_ms": round(duration_ms, 2)},
+                )
+                raise
 
 
 def shutdown() -> None:
@@ -158,7 +169,12 @@ def shutdown() -> None:
 
     if _langfuse_instance is not None:
         try:
-            _langfuse_instance.flush()
+            client = (
+                _langfuse_instance[0]
+                if isinstance(_langfuse_instance, tuple)
+                else _langfuse_instance
+            )
+            client.flush()
         except Exception:
             logger.debug("Langfuse flush failed", exc_info=True)
 

@@ -103,6 +103,8 @@ PUBLIC_TOOLS: set[str] = {
     "get_tag_coverage",
     "get_budget_status",
     "get_cost_statistics",
+    "analyze_virtual_tags",
+    "list_data_explorers",
 }
 
 BILLY_INTERNAL_EXTRA_TOOLS: set[str] = {
@@ -113,8 +115,6 @@ BILLY_INTERNAL_EXTRA_TOOLS: set[str] = {
     "submit_feedback",
     "create_dashboard",
     "render_chart",
-    "analyze_virtual_tags",
-    "list_data_explorers",
 }
 
 BILLY_INTERNAL_TOOLS: set[str] = PUBLIC_TOOLS | BILLY_INTERNAL_EXTRA_TOOLS

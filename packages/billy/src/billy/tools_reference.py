@@ -325,7 +325,7 @@ TOOLS_REFERENCE: List[ToolEntry] = [
     {
         "name": "analyze_virtual_tags",
         "category": "context",
-        "availability": "internal",
+        "availability": "public",
         "description": "Analyze virtual tag relationships, dependencies, and allocation chains.",
         "when_to_use": [
             "virtual tag relationships, dependencies, hierarchies",
@@ -521,7 +521,7 @@ TOOLS_REFERENCE: List[ToolEntry] = [
     {
         "name": "list_data_explorers",
         "category": "context",
-        "availability": "internal",
+        "availability": "public",
         "description": "List saved data explorer configurations in the account.",
         "when_to_use": [
             "what data explorers exist?",

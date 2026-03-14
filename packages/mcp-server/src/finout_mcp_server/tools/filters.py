@@ -103,12 +103,12 @@ async def search_filters_impl(args: dict) -> dict:
             if vals:
                 sample_values[sv_key] = vals
 
-    # Format for LLM — keep compact for better routing
-    formatted = format_search_results(results, max_results=10, sample_values=sample_values)
+    # Format for LLM
+    formatted = format_search_results(results, max_results=50, sample_values=sample_values)
 
     # Build copy-pasteable filter objects for top results
     copy_paste_filters = []
-    for r in results[:5]:
+    for r in results[:10]:
         cost_center_value = r.get("costCenter")
         key_value = r.get("key")
         path_value = r.get("path")
@@ -123,10 +123,9 @@ async def search_filters_impl(args: dict) -> dict:
                 }
             )
 
-    # Put instruction FIRST so the model sees it before the data
     response: dict[str, Any] = {
-        "next_step": (
-            "Use a filter object from 'filters' below to call the right tool NOW:\n"
+        "instruction": (
+            "Pick a filter from 'filters' and call the appropriate tool:\n"
             "• Cost movers/changes → get_top_movers(group_by=[<filter>])\n"
             "• Cost totals/breakdown → query_costs(group_by=[<filter>])\n"
             "• Cost per unit → get_unit_economics\n"
@@ -134,12 +133,16 @@ async def search_filters_impl(args: dict) -> dict:
             "• Tag coverage → get_tag_coverage(tag_dimension=<filter>)\n"
             "• Cost patterns → get_cost_patterns\n"
             "• Statistics/volatility → get_cost_statistics(group_by=[<filter>])\n"
-            "For group_by: use the filter object as-is. Do NOT respond with text — call a tool."
+            "For group_by: use the filter object as-is. "
+            "For filters with a specific value: add operator + value "
+            "(call get_filter_values first — values are unintuitive). "
+            "Do NOT modify costCenter, key, path, or type."
         ),
-        "filters": copy_paste_filters,
         "query": query,
+        "cost_center": cost_center,
         "result_count": len(results),
         "results": formatted,
+        "filters": copy_paste_filters,
     }
 
     # Cross-provider gap detection (only for broad searches without cost_center)

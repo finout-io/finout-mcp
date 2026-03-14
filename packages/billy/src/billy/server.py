@@ -56,13 +56,14 @@ def _langfuse_env(name: str) -> str | None:
 if _langfuse_env("PUBLIC_KEY") and _langfuse_env("SECRET_KEY"):
     try:
         from langfuse import Langfuse as _Langfuse
+        from langfuse import propagate_attributes as _langfuse_propagate_attributes
 
         candidate = _Langfuse(
             public_key=_langfuse_env("PUBLIC_KEY"),
             secret_key=_langfuse_env("SECRET_KEY"),
             host=_langfuse_env("HOST"),
         )  # Registers OTel TracerProvider
-        if hasattr(candidate, "start_as_current_span") and hasattr(candidate, "update_current_trace"):
+        if hasattr(candidate, "start_as_current_observation"):
             _langfuse = candidate
         else:
             print(
@@ -384,6 +385,15 @@ async def cleanup_idle_sessions():
 # Outputs are excluded from the SSE final event and fetched separately by the frontend.
 _tool_output_store: Dict[str, Dict[str, Any]] = {}
 _TOOL_OUTPUT_TTL = timedelta(minutes=30)
+_LIVE_JUDGE_METRICS = (
+    "answers_question",
+    "states_key_result",
+    "grounded_in_tool_output",
+    "directness",
+    "actionability",
+    "interaction_quality",
+    "response_quality",
+)
 
 # Global account cache
 _account_cache: Optional[Dict[str, Any]] = None
@@ -583,6 +593,185 @@ def _frontend_dir() -> Optional[Path]:
     return None
 
 
+def _live_judge_enabled() -> bool:
+    raw = os.getenv("BILLY_TRACE_JUDGE_ENABLED", "").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    return bool(_langfuse and os.getenv("ANTHROPIC_API_KEY"))
+
+
+def _usage_details_for_langfuse(usage: Dict[str, Any] | None) -> Dict[str, int] | None:
+    if not usage:
+        return None
+    return {
+        "input_tokens": int(usage.get("input_tokens") or 0),
+        "output_tokens": int(usage.get("output_tokens") or 0),
+        "cache_creation_input_tokens": int(usage.get("cache_creation_input_tokens") or 0),
+        "cache_read_input_tokens": int(usage.get("cache_read_input_tokens") or 0),
+    }
+
+
+def _cost_details_for_langfuse(usage: Dict[str, Any] | None) -> Dict[str, float] | None:
+    if not usage:
+        return None
+    estimated_cost = usage.get("estimated_cost_usd")
+    if estimated_cost is None:
+        return None
+    try:
+        return {"estimated_cost_usd": float(estimated_cost)}
+    except (TypeError, ValueError):
+        return None
+
+
+def _record_final_answer_observation(
+    *,
+    question: str,
+    response_text: str,
+    request_id: str,
+    tool_calls: list[dict[str, Any]],
+    model: str,
+    usage: Dict[str, Any] | None,
+    response_mode: str,
+    tool_time: float | None,
+) -> None:
+    if not _langfuse:
+        return
+
+    from .evaluation import build_judge_output_payload
+
+    compact_output = build_judge_output_payload(
+        response_text=response_text,
+        tool_calls=tool_calls,
+    )
+    with _langfuse.start_as_current_observation(
+        name="billy_final_answer",
+        as_type="generation",
+        input={
+            "question": question,
+            "request_id": request_id,
+        },
+        output=compact_output,
+        metadata={
+            "source": "billy",
+            "request_id": request_id,
+            "response_mode": response_mode,
+            "tool_time": tool_time,
+            "tool_count": len(compact_output.get("tool_names", [])),
+        },
+        model=model,
+        usage_details=_usage_details_for_langfuse(usage),
+        cost_details=_cost_details_for_langfuse(usage),
+    ) as final_answer:
+        final_answer.score(
+            name="final_text_present",
+            value=1.0 if response_text.strip() else 0.0,
+            data_type="NUMERIC",
+            metadata={"source": "billy"},
+        )
+        final_answer.score(
+            name="chart_answer_present",
+            value=1.0 if "render_chart" in compact_output.get("tool_names", []) else 0.0,
+            data_type="NUMERIC",
+            metadata={"source": "billy"},
+        )
+
+
+async def _score_trace_with_judge(
+    *,
+    trace_id: str,
+    session_id: str,
+    question: str,
+    response_text: str,
+    request_id: str,
+) -> None:
+    if not _langfuse or not _live_judge_enabled():
+        return
+
+    tool_calls = list((_tool_output_store.get(request_id) or {}).get("calls") or [])
+    if not response_text and not tool_calls:
+        return
+
+    try:
+        from .evaluation import judge_live_interaction
+
+        judged = await asyncio.to_thread(
+            judge_live_interaction,
+            question=question,
+            response_text=response_text,
+            tool_calls=tool_calls,
+        )
+
+        reason = str(judged.get("reason", "")).strip() or "Billy async judge"
+        judge_model = os.getenv("EVAL_JUDGE_MODEL", "claude-haiku-4-5-20251001")
+        evaluator_input = {
+            "question": question,
+            "response": response_text,
+            "request_id": request_id,
+            "tool_names": [tc.get("name") for tc in tool_calls if tc.get("name")],
+        }
+        evaluator_output = {
+            "reason": reason,
+            "metrics": {
+                metric_name: judged.get(metric_name)
+                for metric_name in _LIVE_JUDGE_METRICS
+                if judged.get(metric_name) is not None
+            },
+        }
+        with _langfuse.start_as_current_observation(
+            trace_context={"trace_id": trace_id},
+            name="billy_async_judge",
+            as_type="evaluator",
+            input=evaluator_input,
+            metadata={
+                "source": "billy_async_judge",
+                "request_id": request_id,
+                "judge_model": judge_model,
+            },
+        ) as evaluator:
+            evaluator.update(output=evaluator_output)
+            for metric_name in _LIVE_JUDGE_METRICS:
+                raw_value = judged.get(metric_name)
+                try:
+                    score = float(max(1, min(5, int(raw_value))))
+                except (TypeError, ValueError):
+                    continue
+                evaluator.score(
+                    name=metric_name,
+                    value=score,
+                    data_type="NUMERIC",
+                    comment=reason,
+                    metadata={
+                        "source": "billy_async_judge",
+                        "request_id": request_id,
+                        "judge_model": judge_model,
+                    },
+                )
+
+        for metric_name in _LIVE_JUDGE_METRICS:
+            raw_value = judged.get(metric_name)
+            try:
+                score = float(max(1, min(5, int(raw_value))))
+            except (TypeError, ValueError):
+                continue
+            _langfuse.create_score(
+                trace_id=trace_id,
+                session_id=session_id,
+                name=metric_name,
+                value=score,
+                data_type="NUMERIC",
+                comment=reason,
+                metadata={
+                    "source": "billy_async_judge",
+                    "request_id": request_id,
+                    "judge_model": judge_model,
+                },
+            )
+    except Exception as exc:
+        print(f"Failed to score Billy trace with async judge: {exc}")
+
+
 @app.get("/share/{share_token}")
 @app.get("/manage")
 async def spa_routes(share_token: str = ""):
@@ -738,72 +927,116 @@ async def _run_chat_pipeline_traced(
         "origin": "billy",
         "channel": "chat",
     }
-    with _langfuse.start_as_current_span(
+    propagated_metadata = {
+        "account_id": account_id,
+        "conversation_id": session_id,
+        "origin": "billy",
+        "channel": "chat",
+    }
+    trace_context = {"trace_id": _langfuse.create_trace_id(seed=session_id)}
+    with _langfuse.start_as_current_observation(
+        trace_context=trace_context,
         name="chat_pipeline",
+        as_type="chain",
         input={
             "message": request.message,
             "model": request.model,
             "account_id": account_id,
             "conversation_id": session_id,
         },
+        metadata=base_metadata,
     ) as span:
-        trace_kwargs: Dict[str, Any] = {
-            "session_id": session_id,
-            "tags": [request.model, "origin:billy", "channel:chat"],
-            "metadata": base_metadata,
-        }
-        if request.user_email:
-            trace_kwargs["user_id"] = request.user_email
-        _langfuse.update_current_trace(**trace_kwargs)
-        result = await _run_chat_pipeline_inner(
-            request, session_mcp, status_callback, token_callback
-        )
-        tool_names = [tc.get("name") for tc in result.get("tool_calls", []) if tc.get("name")]
-        has_chart = "render_chart" in tool_names
-        has_text = bool((result.get("response") or "").strip())
-        if has_text and has_chart:
-            response_mode = "text_and_chart"
-        elif has_text:
-            response_mode = "text_only"
-        elif has_chart:
-            response_mode = "chart_only"
-        else:
-            response_mode = "none"
-        _langfuse.update_current_trace(
-            metadata={
-                **base_metadata,
-                "request_id": result.get("request_id"),
-                "response_mode": response_mode,
-                "tool_sequence": tool_names,
-                "tool_count": len(tool_names),
-                "response_length": len(result.get("response", "")),
-            }
-        )
-        _langfuse.score_current_trace(
-            name="visible_answer_present",
-            value=1 if (has_text or has_chart) else 0,
-            data_type="NUMERIC",
-        )
-        _langfuse.score_current_trace(
-            name="final_text_present",
-            value=1 if has_text else 0,
-            data_type="NUMERIC",
-        )
-        _langfuse.score_current_trace(
-            name="chart_answer_present",
-            value=1 if has_chart else 0,
-            data_type="NUMERIC",
-        )
-        span.update(
-            output={
-                "tool_count": len(result.get("tool_calls", [])),
-                "tool_time": result.get("tool_time"),
-                "usage": result.get("usage"),
-                "response_mode": response_mode,
-                "request_id": result.get("request_id"),
-            },
-        )
-        return result
+        with _langfuse_propagate_attributes(
+            user_id=request.user_email,
+            session_id=session_id,
+            metadata=propagated_metadata,
+            tags=[request.model or "unknown-model", "origin:billy", "channel:chat"],
+            trace_name="Billy Chat",
+        ):
+            result = await _run_chat_pipeline_inner(
+                request, session_mcp, status_callback, token_callback
+            )
+            from .evaluation import build_judge_output_payload
+
+            trace_id = getattr(span, "trace_id", None) or _langfuse.get_current_trace_id()
+            tool_names = [tc.get("name") for tc in result.get("tool_calls", []) if tc.get("name")]
+            has_chart = "render_chart" in tool_names
+            has_text = bool((result.get("response") or "").strip())
+            if has_text and has_chart:
+                response_mode = "text_and_chart"
+            elif has_text:
+                response_mode = "text_only"
+            elif has_chart:
+                response_mode = "chart_only"
+            else:
+                response_mode = "none"
+            judge_ready_output = build_judge_output_payload(
+                response_text=result.get("response", ""),
+                tool_calls=list((_tool_output_store.get(result.get("request_id", "")) or {}).get("calls") or []),
+            )
+            _langfuse.set_current_trace_io(
+                input={
+                    "question": request.message,
+                    "model": request.model,
+                    "account_id": account_id,
+                    "conversation_id": session_id,
+                },
+                output=judge_ready_output,
+            )
+            _langfuse.score_current_trace(
+                name="visible_answer_present",
+                value=1 if (has_text or has_chart) else 0,
+                data_type="NUMERIC",
+            )
+            _langfuse.score_current_trace(
+                name="final_text_present",
+                value=1 if has_text else 0,
+                data_type="NUMERIC",
+            )
+            _langfuse.score_current_trace(
+                name="chart_answer_present",
+                value=1 if has_chart else 0,
+                data_type="NUMERIC",
+            )
+            _record_final_answer_observation(
+                question=request.message,
+                response_text=result.get("response", ""),
+                request_id=result.get("request_id", ""),
+                tool_calls=list((_tool_output_store.get(result.get("request_id", "")) or {}).get("calls") or []),
+                model=request.model,
+                usage=result.get("usage"),
+                response_mode=response_mode,
+                tool_time=result.get("tool_time"),
+            )
+            span.update(
+                output={
+                    "tool_count": len(result.get("tool_calls", [])),
+                    "tool_time": result.get("tool_time"),
+                    "usage": result.get("usage"),
+                    "response_mode": response_mode,
+                    "request_id": result.get("request_id"),
+                },
+                metadata={
+                    **base_metadata,
+                    "request_id": result.get("request_id"),
+                    "response_mode": response_mode,
+                    "tool_sequence": tool_names,
+                    "tool_count": len(tool_names),
+                    "response_length": len(result.get("response", "")),
+                    "trace_id": trace_id,
+                },
+            )
+            if trace_id and result.get("request_id"):
+                asyncio.create_task(
+                    _score_trace_with_judge(
+                        trace_id=trace_id,
+                        session_id=session_id,
+                        question=request.message,
+                        response_text=result.get("response", ""),
+                        request_id=result["request_id"],
+                    )
+                )
+            return result
 
 
 async def _build_system_prompt(
@@ -911,20 +1144,23 @@ async def _call_mcp_tool_traced(
     if not _langfuse:
         return await session_mcp.call_tool(tool_name, tool_input)
 
-    with _langfuse.start_as_current_span(
+    span_meta = {
+        "origin": "billy",
+        "channel": "chat",
+        "account_id": session_mcp.current_account_id,
+        "request_id": request_id,
+    }
+    with _langfuse.start_as_current_observation(
         name=f"mcp:{tool_name}",
+        as_type="tool",
         input=tool_input,
+        metadata=span_meta,
     ) as tool_span:
         try:
             result = await session_mcp.call_tool(tool_name, tool_input)
             tool_span.update(
                 output={"status": "success", "preview": str(result)[:400]},
-                metadata={
-                    "origin": "billy",
-                    "channel": "chat",
-                    "account_id": session_mcp.current_account_id,
-                    "request_id": request_id,
-                },
+                metadata=span_meta,
             )
             return result
         except Exception as exc:
@@ -935,12 +1171,7 @@ async def _call_mcp_tool_traced(
                     "error_type": type(exc).__name__,
                 },
                 level="ERROR",
-                metadata={
-                    "origin": "billy",
-                    "channel": "chat",
-                    "account_id": session_mcp.current_account_id,
-                    "request_id": request_id,
-                },
+                metadata=span_meta,
             )
             raise
 

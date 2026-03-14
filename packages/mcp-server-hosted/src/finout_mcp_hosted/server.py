@@ -26,7 +26,7 @@ from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
 import finout_mcp_server.server as server_module
 
@@ -271,7 +271,7 @@ async def proxy_tenant_switch(request: Request) -> JSONResponse:
             logger.info("POST %s", refresh_url)
             refresh_resp = await http.post(
                 refresh_url,
-                headers={"content-type": "application/json"},
+                headers={"authorization": auth, "content-type": "application/json"},
                 json={"refreshToken": refresh_token},
             )
             logger.info("Refresh response: %s", refresh_resp.status_code)
@@ -291,6 +291,45 @@ async def proxy_tenant_switch(request: Request) -> JSONResponse:
     except Exception as exc:
         logger.exception("Tenant switch failed")
         return JSONResponse({"error": f"Tenant switch error: {exc}"}, status_code=500)
+
+
+async def frontegg_proxy(request: Request) -> Response:
+    """Catch-all proxy for /frontegg/* → Frontegg host.
+
+    The Frontegg JS SDK calls {appUrl}/frontegg/... for identity operations
+    like switchTenant. We strip the /frontegg prefix and forward to the
+    real Frontegg host.
+    """
+    fe_host = _frontegg_host()
+    if not fe_host:
+        return JSONResponse({"error": "Frontegg not configured"}, status_code=500)
+
+    # Strip /frontegg prefix to get the real path.
+    path = request.url.path
+    if path.startswith("/frontegg"):
+        path = path[len("/frontegg"):]
+
+    target_url = f"{fe_host}{path}"
+    if request.url.query:
+        target_url += f"?{request.url.query}"
+
+    # Forward all headers except host.
+    fwd_headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
+    body = await request.body()
+
+    async with httpx.AsyncClient(timeout=15.0) as http:
+        resp = await http.request(
+            method=request.method,
+            url=target_url,
+            headers=fwd_headers,
+            content=body,
+        )
+
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers=dict(resp.headers),
+    )
 
 
 _LOGIN_HTML_TEMPLATE = (pathlib.Path(__file__).parent / "login.html").read_text()
@@ -700,6 +739,8 @@ app = Starlette(
         Route("/debug/verify-token", endpoint=debug_verify_token, methods=["GET"]),
         Route("/api/tenants", endpoint=proxy_tenants, methods=["GET"]),
         Route("/api/tenant-switch", endpoint=proxy_tenant_switch, methods=["POST", "PUT"]),
+        # Catch-all proxy for Frontegg SDK calls (e.g. switchTenant).
+        Mount("/frontegg", app=frontegg_proxy),
         Route("/authorize", endpoint=oauth_authorize_get, methods=["GET"]),
         Route("/authorize", endpoint=oauth_authorize_post, methods=["POST"]),
         # Frontegg redirects to {appUrl}/account/login-callback after embedded login.

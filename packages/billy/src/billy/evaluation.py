@@ -38,6 +38,44 @@ JUDGE_METRIC_KEYS = (
 )
 
 
+def build_judge_output_payload(
+    *,
+    response_text: str,
+    tool_calls: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build the compact interaction payload used by the LLM judge."""
+    tool_trace = [
+        {
+            "index": idx,
+            "name": tc.get("name"),
+            "input": tc.get("input", {}),
+            "output_summary": _summarize_for_judge(tc.get("output")),
+            "error": bool(tc.get("error", False)),
+        }
+        for idx, tc in enumerate(tool_calls)
+        if isinstance(tc, dict) and tc.get("name")
+    ]
+    return {
+        "response": response_text or "",
+        "tool_names": [entry["name"] for entry in tool_trace],
+        "tool_trace": tool_trace,
+    }
+
+
+def judge_live_interaction(
+    *,
+    question: str,
+    response_text: str,
+    tool_calls: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Run the LLM judge against a completed Billy interaction."""
+    output = build_judge_output_payload(
+        response_text=response_text,
+        tool_calls=tool_calls,
+    )
+    return _judge_interaction(output, {}, question)
+
+
 def load_eval_cases(suite: str = "langfuse") -> list[dict[str, Any]]:
     raw_cases = json.loads(CASES_PATH.read_text())
     cases = [

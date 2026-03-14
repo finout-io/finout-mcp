@@ -741,7 +741,9 @@ class TestToolDescriptions:
         assert "get_account_context" not in public_tool_names
         assert "submit_feedback" not in public_tool_names
         assert "get_anomalies" in public_tool_names
-        assert len(public_tools) == 18
+        assert "analyze_virtual_tags" in public_tool_names
+        assert "list_data_explorers" in public_tool_names
+        assert len(public_tools) == 20
         assert "get_top_movers" in public_tool_names
         assert "get_unit_economics" in public_tool_names
         assert "get_cost_patterns" in public_tool_names
