@@ -468,23 +468,47 @@
         });
       }
 
+      function handleTenantList(accessToken, tenants, currentTenantId) {
+        console.log("[mcp-auth] tenants:", tenants);
+        if (Array.isArray(tenants) && tenants.length > 1) {
+          showTenantPicker(accessToken, tenants, currentTenantId);
+        } else {
+          showConsentScreen(accessToken);
+        }
+      }
+
       function showConsent(accessToken) {
         var currentTenantId = decodeJwtTenantId(accessToken);
+        console.log("[mcp-auth] currentTenantId:", currentTenantId);
+
+        // Try Frontegg SDK state first (already loaded, no extra request).
+        try {
+          var s = app.store.getState();
+          var sdkTenants = (s.auth && s.auth.tenantsState && s.auth.tenantsState.tenants) || [];
+          console.log("[mcp-auth] SDK tenantsState:", s.auth && s.auth.tenantsState);
+          console.log("[mcp-auth] SDK user.tenantIds:", s.auth && s.auth.user && s.auth.user.tenantIds);
+          if (sdkTenants.length > 1) {
+            handleTenantList(accessToken, sdkTenants, currentTenantId);
+            return;
+          }
+        } catch(e) {
+          console.warn("[mcp-auth] SDK tenant read failed:", e);
+        }
+
+        // Fall back to server-side proxy.
         fetch("/api/tenants", {
           headers: { "authorization": "Bearer " + accessToken }
         })
         .then(function(resp) {
-          if (!resp.ok) throw new Error("Failed to fetch tenants");
+          console.log("[mcp-auth] /api/tenants status:", resp.status);
+          if (!resp.ok) throw new Error("HTTP " + resp.status);
           return resp.json();
         })
         .then(function(tenants) {
-          if (Array.isArray(tenants) && tenants.length > 1) {
-            showTenantPicker(accessToken, tenants, currentTenantId);
-          } else {
-            showConsentScreen(accessToken);
-          }
+          handleTenantList(accessToken, tenants, currentTenantId);
         })
-        .catch(function() {
+        .catch(function(err) {
+          console.warn("[mcp-auth] tenant fetch failed:", err);
           showConsentScreen(accessToken);
         });
       }
