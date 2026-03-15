@@ -64,6 +64,7 @@ interface Props {
   sessionReady: boolean
   accountId?: string | null
   userName?: string
+  isEmbedded?: boolean
 }
 
 export function ChatArea({
@@ -76,6 +77,7 @@ export function ChatArea({
   sessionReady,
   accountId,
   userName,
+  isEmbedded,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -143,7 +145,7 @@ export function ChatArea({
       ) : (
         <>
           {messages.map((msg, idx) => (
-            <ChatMessage key={idx} message={msg} />
+            <ChatMessage key={idx} message={msg} isEmbedded={isEmbedded} />
           ))}
           {isSending && (
             <StreamingAssistantMessage

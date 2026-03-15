@@ -115,10 +115,15 @@ class FinoutClient:
 
         self._recent_curls: list[str] = []
 
+        async def _inject_request_id(request: httpx.Request) -> None:
+            from .observability import get_api_request_id
+
+            request.headers["x-request-id"] = get_api_request_id()
+
         async def _capture_request(request: httpx.Request) -> None:
             self._recent_curls.append(self._request_to_curl(request))
 
-        event_hooks: dict[str, list[Any]] = {"request": [_capture_request]}
+        event_hooks: dict[str, list[Any]] = {"request": [_inject_request_id, _capture_request]}
 
         self.client = httpx.AsyncClient(
             base_url=self.base_url, headers=headers, timeout=30.0, event_hooks=event_hooks
@@ -131,7 +136,7 @@ class FinoutClient:
             self.internal_client = httpx.AsyncClient(
                 base_url=self.internal_api_url,
                 timeout=30.0,
-                event_hooks={"request": [_capture_request]},
+                event_hooks={"request": [_inject_request_id, _capture_request]},
             )
         else:
             self.internal_client = None

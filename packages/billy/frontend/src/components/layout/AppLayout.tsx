@@ -535,6 +535,7 @@ export function AppLayout() {
             sessionReady={session.isReady}
             accountId={accountId}
             userName={user?.name}
+            isEmbedded={isEmbedded}
           />
 
           <Stack

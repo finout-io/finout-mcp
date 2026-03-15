@@ -15,9 +15,10 @@ function modelLabel(model?: string): string {
 
 interface Props {
   message: Message
+  isEmbedded?: boolean
 }
 
-export function ChatMessage({ message }: Props) {
+export function ChatMessage({ message, isEmbedded }: Props) {
   const isUser = message.role === 'user'
 
   const avatar = isUser ? (
@@ -71,7 +72,23 @@ export function ChatMessage({ message }: Props) {
             <MarkdownRenderer content={message.content} size="sm" />
           )}
 
-          {!isUser && message.thinking_trace && message.thinking_trace.trim().length > 0 && (
+          {!isUser && message.tool_calls?.filter((tc) => tc.name === 'render_chart').map((tc, idx) => (
+            <ChartPanel
+              key={`${tc.name}-${idx}-${JSON.stringify(tc.input ?? {}).length}`}
+              output={tc.output}
+            />
+          ))}
+
+          {!isUser && message.tool_calls?.filter((tc) => ['analyze_virtual_tags', 'get_object_usages', 'check_delete_safety'].includes(tc.name)).map((tc, idx) => (
+            <MermaidPanel key={idx} output={tc.output} />
+          ))}
+
+          {!isUser && !isEmbedded && (
+            (message.thinking_trace?.trim().length ?? 0) > 0 ||
+            (message.tool_calls && message.tool_calls.length > 0) ||
+            message.usage ||
+            message.total_time
+          ) && (
             <Box
               component="details"
               style={(theme) => ({
@@ -91,89 +108,101 @@ export function ChatMessage({ message }: Props) {
                   opacity: 0.9,
                 }}
               >
-                Thinking
-              </Box>
-              <Box
-                component="pre"
-                style={(theme) => ({
-                  margin: `${theme.spacing.xs} 0 0`,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  fontSize: theme.fontSizes.xs,
-                  lineHeight: 1.35,
-                  color: theme.colors.gray[7],
-                  maxHeight: 260,
-                  overflowY: 'auto',
-                })}
-              >
-                {message.thinking_trace}
-              </Box>
-            </Box>
-          )}
-
-          {!isUser && message.tool_calls?.filter((tc) => tc.name === 'render_chart').map((tc, idx) => (
-            <ChartPanel
-              key={`${tc.name}-${idx}-${JSON.stringify(tc.input ?? {}).length}`}
-              output={tc.output}
-            />
-          ))}
-
-          {!isUser && message.tool_calls?.filter((tc) => ['analyze_virtual_tags', 'get_object_usages', 'check_delete_safety'].includes(tc.name)).map((tc, idx) => (
-            <MermaidPanel key={idx} output={tc.output} />
-          ))}
-
-          {message.tool_calls && message.tool_calls.length > 0 && (
-            <Stack gap={4}>
-              {message.tool_calls.map((tc, idx) => (
-                <ToolCallCard key={idx} toolCall={tc} index={idx} />
-              ))}
-            </Stack>
-          )}
-
-          {/* Timing + usage bar (assistant only) */}
-          {!isUser && (message.usage || message.total_time) && (
-            <Group
-              gap="xs"
-              mt={4}
-              p="xs"
-              style={(theme) => ({
-                background: '#f8fafc',
-                borderRadius: theme.radius.sm,
-                flexWrap: 'wrap',
-                border: '1px solid #e2e8f0',
-              })}
-            >
-              <Text size="xs" fw={600} c="dimmed">
-                {modelLabel(message.model)}
-              </Text>
-
-              {message.tool_time != null && message.tool_time > 0 && message.total_time != null && (
-                <>
-                  <Text size="xs" c="orange">🔧 {message.tool_time.toFixed(1)}s</Text>
-                  <Text size="xs" c="dimmed">
-                    💭 {(message.total_time - message.tool_time).toFixed(1)}s
+                Diagnostics
+                {message.total_time != null && (
+                  <Text component="span" size="xs" c="dimmed" ml="xs" style={{ fontWeight: 400 }}>
+                    {message.total_time.toFixed(1)}s
+                    {message.usage?.estimated_cost_usd != null && ` · ~$${message.usage.estimated_cost_usd.toFixed(4)}`}
                   </Text>
-                </>
-              )}
+                )}
+              </Box>
 
-              {message.usage?.total_tokens != null && (
-                <Text size="xs" c="teal.6">
-                  🧮 {message.usage.total_tokens.toLocaleString()} tokens
-                </Text>
-              )}
+              <Stack gap="xs" mt="xs">
+                {message.thinking_trace && message.thinking_trace.trim().length > 0 && (
+                  <Box
+                    component="details"
+                    style={(theme) => ({
+                      fontSize: theme.fontSizes.xs,
+                      color: theme.colors.gray[6],
+                    })}
+                  >
+                    <Box
+                      component="summary"
+                      style={{ cursor: 'pointer', userSelect: 'none', fontWeight: 600, opacity: 0.9 }}
+                    >
+                      Thinking
+                    </Box>
+                    <Box
+                      component="pre"
+                      style={(theme) => ({
+                        margin: `${theme.spacing.xs} 0 0`,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        fontSize: theme.fontSizes.xs,
+                        lineHeight: 1.35,
+                        color: theme.colors.gray[7],
+                        maxHeight: 260,
+                        overflowY: 'auto',
+                      })}
+                    >
+                      {message.thinking_trace}
+                    </Box>
+                  </Box>
+                )}
 
-              {message.usage?.estimated_cost_usd != null && (
-                <Text size="xs" fw={700} c="teal.7">
-                  ~${message.usage.estimated_cost_usd.toFixed(4)}
-                </Text>
-              )}
+                {message.tool_calls && message.tool_calls.length > 0 && (
+                  <Stack gap={4}>
+                    {message.tool_calls.map((tc, idx) => (
+                      <ToolCallCard key={idx} toolCall={tc} index={idx} />
+                    ))}
+                  </Stack>
+                )}
 
-              {message.total_time != null && (
-                <Text size="xs" c="dimmed" style={{ marginLeft: 'auto', fontFamily: 'monospace' }}>
-                  {message.total_time.toFixed(1)}s total
-                </Text>
-              )}
-            </Group>
+                {(message.usage || message.total_time) && (
+                  <Group
+                    gap="xs"
+                    p="xs"
+                    style={(theme) => ({
+                      background: '#f8fafc',
+                      borderRadius: theme.radius.sm,
+                      flexWrap: 'wrap',
+                      border: '1px solid #e2e8f0',
+                    })}
+                  >
+                    <Text size="xs" fw={600} c="dimmed">
+                      {modelLabel(message.model)}
+                    </Text>
+
+                    {message.tool_time != null && message.tool_time > 0 && message.total_time != null && (
+                      <>
+                        <Text size="xs" c="orange">🔧 {message.tool_time.toFixed(1)}s</Text>
+                        <Text size="xs" c="dimmed">
+                          💭 {(message.total_time - message.tool_time).toFixed(1)}s
+                        </Text>
+                      </>
+                    )}
+
+                    {message.usage?.total_tokens != null && (
+                      <Text size="xs" c="teal.6">
+                        🧮 {message.usage.total_tokens.toLocaleString()} tokens
+                      </Text>
+                    )}
+
+                    {message.usage?.estimated_cost_usd != null && (
+                      <Text size="xs" fw={700} c="teal.7">
+                        ~${message.usage.estimated_cost_usd.toFixed(4)}
+                      </Text>
+                    )}
+
+                    {message.total_time != null && (
+                      <Text size="xs" c="dimmed" style={{ marginLeft: 'auto', fontFamily: 'monospace' }}>
+                        {message.total_time.toFixed(1)}s total
+                      </Text>
+                    )}
+                  </Group>
+                )}
+              </Stack>
+            </Box>
           )}
         </Stack>
       </Box>

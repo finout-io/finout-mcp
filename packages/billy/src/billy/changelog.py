@@ -19,6 +19,22 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.36.0",
+        "date": "2026-03-15",
+        "title": "Collapse diagnostics into single pane",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Thinking, tool calls, and token/cost/timing collapsed into a single Diagnostics pane (hidden in embedded mode)"
+            ]
+        }
+    },
+    {
         "version": "0.35.0",
         "date": "2026-03-15",
         "title": "Filter search intelligence, cross-cost-center recovery, telemetry centers",

@@ -15,7 +15,6 @@ spec:
       labels:
         app: finout-mcp
     spec:
-      serviceAccountName: finout-mcp-hosted
       containers:
       - name: finout-mcp
         image: 277411487094.dkr.ecr.us-east-1.amazonaws.com/finout-mcp:latest

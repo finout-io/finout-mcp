@@ -20,10 +20,31 @@ _langfuse_checked = False
 _trace_context_var: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "langfuse_trace_ctx", default=None
 )
+_api_request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "api_request_id", default=None
+)
 
 
 def _env(name: str) -> str | None:
     return os.getenv(f"LANGFUSE_MCP_{name}") or os.getenv(f"LANGFUSE_{name}")
+
+
+def get_api_request_id() -> str:
+    """Return the current API request ID for x-request-id headers.
+
+    Prefers the Langfuse trace ID (set during trace_tool) for end-to-end
+    traceability.  Falls back to the trace-context request_id, then to a
+    fresh UUID.
+    """
+    import uuid
+
+    rid = _api_request_id_var.get()
+    if rid:
+        return rid
+    ctx = _trace_context_var.get()
+    if ctx and ctx.get("request_id"):
+        return str(ctx["request_id"])
+    return str(uuid.uuid4())
 
 
 def set_trace_context(context: dict[str, Any]) -> contextvars.Token[dict[str, Any] | None]:
@@ -127,6 +148,10 @@ async def trace_tool(name: str, args: dict[str, Any], *, user_id: str | None = N
         input=args,
         metadata=trace_metadata,
     ) as span:
+        # Use the Langfuse trace ID as the API request ID for continuity
+        langfuse_trace_id = getattr(span, "trace_id", None)
+        rid_token = _api_request_id_var.set(langfuse_trace_id)
+
         with lf_propagate_attributes(
             user_id=trace_context.get("user_id") or user_id,
             session_id=trace_context.get("session_id"),
@@ -134,10 +159,12 @@ async def trace_tool(name: str, args: dict[str, Any], *, user_id: str | None = N
             metadata=trace_metadata,
             trace_name="Direct MCP",
         ):
+            api_request_id = get_api_request_id()
             span_meta: dict[str, Any] = {
                 "origin": origin,
                 "runtime_mode": active_mode,
                 "request_id": trace_context.get("request_id"),
+                "api_request_id": api_request_id,
                 "account_id": trace_context.get("account_id"),
                 "client_id": trace_context.get("client_id"),
             }
@@ -161,6 +188,8 @@ async def trace_tool(name: str, args: dict[str, Any], *, user_id: str | None = N
                     metadata={**span_meta, "duration_ms": round(duration_ms, 2)},
                 )
                 raise
+            finally:
+                _api_request_id_var.reset(rid_token)
 
 
 def shutdown() -> None:
