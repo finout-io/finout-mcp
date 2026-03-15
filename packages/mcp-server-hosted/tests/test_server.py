@@ -289,7 +289,7 @@ def test_token_exchange_valid():
         with TestClient(module.app) as client:
             token_resp = client.post(
                 "/token",
-                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}",
+                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
     assert token_resp.status_code == 200
@@ -540,7 +540,7 @@ def test_oauth_then_mcp_tools_list():
         with TestClient(module.app) as client:
             token_resp = client.post(
                 "/token",
-                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}",
+                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
         assert token_resp.status_code == 200
@@ -615,7 +615,7 @@ def _do_oauth_flow(module, verifier: str, jwt: str, tenant_id: str) -> str:
         with TestClient(module.app) as client:
             token_resp = client.post(
                 "/token",
-                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}",
+                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
         assert token_resp.status_code == 200, f"Token exchange failed: {token_resp.text}"

@@ -366,10 +366,11 @@ def _embedded_login_page(
 
 
 async def oauth_login_callback(request: Request) -> Response:
-    """Handle Frontegg's post-login redirect (e.g. /account/login-callback).
+    """Handle Frontegg SDK navigation under /account/*.
 
-    After embedded login, Frontegg navigates to {appUrl}/account/login-callback.
-    We serve the same login page (no params) so the JS picks them up from sessionStorage.
+    The Frontegg embedded SDK navigates to various {appUrl}/account/* paths during
+    login (login, login-callback, MFA challenge, social login, etc.).
+    We serve the same login page so the JS SDK keeps control of the flow.
     """
     return _embedded_login_page()
 
@@ -401,6 +402,7 @@ async def oauth_authorize_post(request: Request) -> Response:
 
     form = await request.form()
     access_token = str(form.get("access_token", "")).strip()
+    refresh_token = str(form.get("refresh_token", "")).strip()
     redirect_uri = str(form.get("redirect_uri", "")).strip()
     code_challenge = str(form.get("code_challenge", "")).strip()
     state = str(form.get("state", "")).strip()
@@ -428,7 +430,7 @@ async def oauth_authorize_post(request: Request) -> Response:
             status_code=401,
         )
 
-    code = generate_auth_code(access_token, code_challenge, redirect_uri)
+    code = generate_auth_code(access_token, code_challenge, redirect_uri, refresh_token)
     _log.info("POST /authorize — generated code len=%d first 30: %s", len(code), code[:30])
     _log.info("POST /authorize — code dots: %d (should be 1)", code.count("."))
     query: dict[str, str] = {"code": code}
@@ -475,13 +477,73 @@ async def oauth_authorization_server(request: Request) -> JSONResponse:
             "registration_endpoint": f"{base_url}/register",
             "response_types_supported": ["code"],
             "code_challenge_methods_supported": ["S256"],
-            "grant_types_supported": ["authorization_code"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
         }
     )
 
 
+def _jwt_expires_in(token: str) -> int:
+    """Compute seconds until a JWT expires. Falls back to 3600 on decode errors."""
+    import base64 as _b64
+    import json as _json
+    import time as _time
+    try:
+        parts = token.split(".")
+        pad = "=" * (-len(parts[1]) % 4)
+        payload = _json.loads(_b64.urlsafe_b64decode(parts[1] + pad))
+        return max(int(payload["exp"] - _time.time()), 0)
+    except Exception:
+        return 3600
+
+
+async def _refresh_via_frontegg(refresh_token: str) -> JSONResponse:
+    """Exchange a Frontegg refresh token for new access + refresh tokens."""
+    import logging
+    _log = logging.getLogger("finout_mcp_hosted.oauth")
+
+    fe_host = _frontegg_host()
+    if not fe_host:
+        return JSONResponse(
+            {"error": "server_error", "error_description": "Frontegg not configured"},
+            status_code=500,
+        )
+
+    url = f"{fe_host}/identity/resources/auth/v1/user/token/refresh"
+    _log.info("POST /token [refresh] — calling %s", url)
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        resp = await http.post(url, json={"refreshToken": refresh_token})
+
+    if resp.status_code != 200:
+        _log.warning("POST /token [refresh] — Frontegg returned %d", resp.status_code)
+        return JSONResponse(
+            {"error": "invalid_grant", "error_description": "Refresh token rejected"},
+            status_code=400,
+        )
+
+    try:
+        tokens = resp.json()
+    except Exception:
+        return JSONResponse({"error": "server_error"}, status_code=502)
+
+    new_access = tokens.get("accessToken", tokens.get("access_token", ""))
+    new_refresh = tokens.get("refreshToken", tokens.get("refresh_token", ""))
+    if not new_access:
+        return JSONResponse(
+            {"error": "server_error", "error_description": "No access token in refresh response"},
+            status_code=502,
+        )
+
+    _log.info("POST /token [refresh] — OK, tenantId=%s", decodeJwtTenantId(new_access))
+    return JSONResponse({
+        "access_token": new_access,
+        "token_type": "bearer",
+        "expires_in": _jwt_expires_in(new_access),
+        "refresh_token": new_refresh,
+    })
+
+
 async def oauth_token(request: Request) -> JSONResponse:
-    """Token endpoint: exchange authorization code + PKCE verifier for access token."""
+    """Token endpoint: authorization_code and refresh_token grant types."""
     import logging
     _log = logging.getLogger("finout_mcp_hosted.oauth")
 
@@ -495,17 +557,28 @@ async def oauth_token(request: Request) -> JSONResponse:
 
     grant_type = _get("grant_type")
     _log.info("POST /token — grant_type=%s", grant_type)
+
+    if grant_type == "refresh_token":
+        rt = _get("refresh_token")
+        if not rt:
+            return JSONResponse(
+                {"error": "invalid_request", "error_description": "refresh_token required"},
+                status_code=400,
+            )
+        return await _refresh_via_frontegg(rt)
+
     if grant_type != "authorization_code":
         return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
 
     code = _get("code")
     code_verifier = _get("code_verifier")
+    redirect_uri = _get("redirect_uri")
     _log.info("POST /token — code len=%d code dots=%d first 30: %s",
               len(code), code.count("."), code[:30])
     _log.info("POST /token — verifier len=%d", len(code_verifier))
 
     try:
-        access_token = consume_auth_code(code, code_verifier)
+        access_token, refresh_token = consume_auth_code(code, code_verifier, redirect_uri)
         _log.info("POST /token — code consumed OK, jwt len=%d dots=%d tenantId=%s",
                   len(access_token), access_token.count("."),
                   decodeJwtTenantId(access_token))
@@ -514,13 +587,14 @@ async def oauth_token(request: Request) -> JSONResponse:
         _log.info("POST /token — code first 50: %s", code[:50])
         return JSONResponse({"error": "invalid_grant", "error_description": str(exc)}, status_code=400)
 
-    return JSONResponse(
-        {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "expires_in": 3600,
-        }
-    )
+    result: dict[str, object] = {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": _jwt_expires_in(access_token),
+    }
+    if refresh_token:
+        result["refresh_token"] = refresh_token
+    return JSONResponse(result)
 
 
 def decodeJwtTenantId(token: str) -> str:
@@ -648,8 +722,11 @@ async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
                 )
             else:
                 # Frontegg JWT path: use BEARER_TOKEN mode via public API URL.
+                # Include user identity in fingerprint so different users don't
+                # share a client (and each other's bearer tokens).
                 api_url = os.getenv("FINOUT_API_URL", "https://app.finout.io")
-                fingerprint = ("jwt", account_id, api_url)
+                user_id = payload.get("sub") or payload.get("email") or account_id
+                fingerprint = ("jwt", account_id, user_id, api_url)
                 client = await pool.get_or_create(
                     fingerprint,
                     bearer_token=token,
@@ -658,6 +735,8 @@ async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
                     internal_auth_mode=InternalAuthMode.BEARER_TOKEN,
                     allow_missing_credentials=True,
                 )
+                # Always update to the current token so re-auth refreshes it.
+                client.bearer_token = token
 
             # Set per-coroutine context so tool impls see this client.
             client_token = set_request_client(client)
@@ -793,9 +872,8 @@ app = Starlette(
         Route("/frontegg/{path:path}", endpoint=frontegg_proxy, methods=["GET", "POST", "PUT", "DELETE", "PATCH"]),
         Route("/authorize", endpoint=oauth_authorize_get, methods=["GET"]),
         Route("/authorize", endpoint=oauth_authorize_post, methods=["POST"]),
-        # Frontegg redirects to {appUrl}/account/login-callback after embedded login.
-        Route("/account/login-callback", endpoint=oauth_login_callback, methods=["GET"]),
-        Route("/account/login", endpoint=oauth_login_callback, methods=["GET"]),
+        # Frontegg SDK navigates to {appUrl}/account/* for login, MFA, callbacks, etc.
+        Route("/account/{path:path}", endpoint=oauth_login_callback, methods=["GET"]),
         Route("/register", endpoint=oauth_register, methods=["POST"]),
         Route("/token", endpoint=oauth_token, methods=["POST"]),
         Route(

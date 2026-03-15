@@ -370,6 +370,13 @@
       var consentStarted = false;
       var pendingToken = null;
 
+      function getRefreshToken() {
+        try {
+          var s = app.store.getState();
+          return (s.auth && s.auth.user && s.auth.user.refreshToken) || "";
+        } catch(e) { return ""; }
+      }
+
       function buildForm(accessToken) {
         var form = document.createElement("form");
         form.method = "POST";
@@ -377,6 +384,7 @@
         form.style.display = "none";
         var fields = {
           access_token:   accessToken,
+          refresh_token:  getRefreshToken(),
           redirect_uri:   OAUTH_PARAMS.redirect_uri,
           code_challenge: OAUTH_PARAMS.code_challenge,
           state:          OAUTH_PARAMS.state

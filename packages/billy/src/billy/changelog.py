@@ -19,6 +19,24 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.33.0",
+        "date": "2026-03-15",
+        "title": "OAuth hardening and refresh token support",
+        "sections": {
+            "external_mcp": [
+                "MFA and multi-step login flows now complete without requiring re-authentication",
+                "Token refresh support \u2014 MCP sessions stay connected without re-login when access tokens expire",
+                "Improved token security: redirect URI verification, accurate token expiration, and per-user session isolation"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
         "version": "0.32.0",
         "date": "2026-03-15",
         "title": "Financial plans rewrite + drop Promptfoo",
