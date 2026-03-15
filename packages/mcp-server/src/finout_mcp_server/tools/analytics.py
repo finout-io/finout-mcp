@@ -1,9 +1,7 @@
 """Analytical tools built on top of cost queries."""
 
 import asyncio
-import calendar
 import statistics
-from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
@@ -927,128 +925,6 @@ async def get_tag_coverage_impl(args: dict) -> dict:
     if validation_warnings:
         result["_validation_warnings"] = validation_warnings
 
-    return result
-
-
-async def get_budget_status_impl(args: dict) -> dict:
-    """Compare actual spend against financial plan budgets."""
-    from ..server import get_client
-
-    finout_client = get_client()
-
-    plan_name = args.get("plan_name")
-    period = args.get("period")
-    time_period = args.get("time_period")
-
-    if not finout_client.internal_api_url:
-        return {"error": "Internal API not configured"}
-
-    if not period:
-        now = datetime.now()
-        period = f"{now.year}-{now.month}"
-
-    # Fetch financial plans
-    plans = await finout_client.get_financial_plans(name=plan_name, period=period)
-    if not plans:
-        return {
-            "period": period,
-            "message": "No financial plans found"
-            + (f' matching "{plan_name}"' if plan_name else "")
-            + ".",
-        }
-
-    # Derive time_period for cost query from the budget period
-    if not time_period:
-        parts = period.split("-")
-        year, month = int(parts[0]), int(parts[1])
-        now = datetime.now()
-        if year == now.year and month == now.month:
-            time_period = "this_month"
-        else:
-            _, last_day = calendar.monthrange(year, month)
-            time_period = f"{year}-{month:02d}-01 to {year}-{month:02d}-{last_day:02d}"
-
-    # Group plans by cost_type and run one query per unique cost_type in parallel
-    plans_by_cost_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for plan in plans:
-        ct = plan.get("cost_type") or "netAmortizedCost"
-        plans_by_cost_type[ct].append(plan)
-
-    ct_keys = list(plans_by_cost_type.keys())
-    ct_values = [CostType(k) if k in _VALID_COST_TYPES else CostType.NET_AMORTIZED for k in ct_keys]
-    actual_results = await asyncio.gather(
-        *[
-            finout_client.query_costs_with_filters(time_period=time_period, cost_type=ct)
-            for ct in ct_values
-        ]
-    )
-    actual_by_cost_type: dict[str, float] = {
-        ct_str: sum(
-            row.get(col, 0) for row in actual_data for col in [_find_cost_column(row)] if col
-        )
-        for ct_str, actual_data in zip(ct_keys, actual_results, strict=True)
-    }
-
-    results: list[dict[str, Any]] = []
-    for plan in plans:
-        ct = plan.get("cost_type") or "netAmortizedCost"
-        actual_total = actual_by_cost_type.get(ct, 0)
-        budget = plan.get("total_budget", 0)
-        forecast = plan.get("total_forecast")
-        utilization = (actual_total / budget * 100) if budget > 0 else 0
-        remaining = budget - actual_total
-
-        # Estimate days elapsed / total days in period
-        now = datetime.now()
-        parts = period.split("-")
-        year, month = int(parts[0]), int(parts[1])
-        _, total_days = calendar.monthrange(year, month)
-        if year == now.year and month == now.month:
-            days_elapsed = now.day
-        elif (year, month) < (now.year, now.month):
-            days_elapsed = total_days  # month is complete
-        else:
-            days_elapsed = 0
-
-        # Burn rate: cost per day → projected month-end
-        daily_burn = (actual_total / days_elapsed) if days_elapsed > 0 else 0
-        projected_total = daily_burn * total_days
-
-        projected_vs_budget = (projected_total / budget * 100) if budget > 0 else 0
-
-        entry: dict[str, Any] = {
-            "plan_name": plan["name"],
-            "period": period,
-            "budget": format_currency(budget),
-            "actual_spend": format_currency(actual_total),
-            "remaining": format_currency(remaining),
-            "utilization_percent": round(utilization, 1),
-            "days_elapsed": days_elapsed,
-            "total_days": total_days,
-            "daily_burn_rate": format_currency(daily_burn),
-            "projected_month_end": format_currency(projected_total),
-            "projected_vs_budget_percent": round(projected_vs_budget, 1),
-            "status": (
-                "on_track"
-                if projected_vs_budget <= 100
-                else "at_risk"
-                if projected_vs_budget <= 110
-                else "over_budget"
-            ),
-        }
-        if forecast is not None:
-            entry["forecast"] = format_currency(forecast)
-        results.append(entry)
-
-    result: dict[str, Any] = {
-        "period": period,
-        "plans": results,
-        "_presentation_hint": (
-            "Lead with the status (on_track / at_risk / over_budget). "
-            "Show utilization %, remaining budget, and projected month-end. "
-            "Highlight plans at risk or over budget."
-        ),
-    }
     return result
 
 

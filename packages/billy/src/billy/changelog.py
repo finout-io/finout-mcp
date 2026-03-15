@@ -19,6 +19,27 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.32.0",
+        "date": "2026-03-15",
+        "title": "Financial plans rewrite + drop Promptfoo",
+        "sections": {
+            "external_mcp": [
+                "Financial plans now show budget vs actual cost, run rate, and status (on_track/at_risk/over_budget) using pre-computed data",
+                "Financial plans auto-detect the best period instead of defaulting to current month",
+                "Plan listing shows date ranges and active/future/past status",
+                "Removed get_budget_status tool \u2014 its functionality is now part of get_financial_plans"
+            ],
+            "internal_mcp": [
+                "Financial plans use the /financial-plan-data enrichment endpoint for budget + actuals",
+                "Dropped Promptfoo eval suite \u2014 Langfuse is the single eval system",
+                "Added 5 new financial plan eval cases, updated 5 existing ones"
+            ],
+            "billy": [
+                "No changes"
+            ]
+        }
+    },
+    {
         "version": "0.31.0",
         "date": "2026-03-14",
         "title": "Multi-tenant account switching and auth code compression",

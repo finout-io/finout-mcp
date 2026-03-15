@@ -743,13 +743,13 @@ class TestToolDescriptions:
         assert "get_anomalies" in public_tool_names
         assert "analyze_virtual_tags" in public_tool_names
         assert "list_data_explorers" in public_tool_names
-        assert len(public_tools) == 20
+        assert len(public_tools) == 19
         assert "get_top_movers" in public_tool_names
         assert "get_unit_economics" in public_tool_names
         assert "get_cost_patterns" in public_tool_names
         assert "get_savings_coverage" in public_tool_names
         assert "get_tag_coverage" in public_tool_names
-        assert "get_budget_status" in public_tool_names
+        assert "get_budget_status" not in public_tool_names
         assert "get_cost_statistics" in public_tool_names
 
         server_module.runtime_mode = server_module.MCPMode.BILLY_INTERNAL.value
@@ -763,7 +763,7 @@ class TestToolDescriptions:
         assert "get_top_movers" in internal_tool_names
         assert "get_unit_economics" in internal_tool_names
         assert "list_data_explorers" in internal_tool_names
-        assert len(internal_tools) == 27
+        assert len(internal_tools) == 26
 
     @pytest.mark.asyncio
     async def test_create_dashboard_impl_formats_presentation_hint(self):
@@ -1873,6 +1873,11 @@ class TestCrossProviderGapDetection:
             ):
                 return ["val1", "val2"]
 
+            def get_default_cost_type(self):
+                from src.finout_mcp_server.finout_client import CostType
+
+                return CostType.NET_AMORTIZED
+
             async def query_costs_with_filters(self, **kwargs):
                 return [{"Sum(Net Amortized Cost)": 1000}]
 
@@ -1930,6 +1935,11 @@ class TestCrossProviderGapDetection:
                 self, filter_key, cost_center=None, filter_type=None, limit=100
             ):
                 return ["AmazonEC2"]
+
+            def get_default_cost_type(self):
+                from src.finout_mcp_server.finout_client import CostType
+
+                return CostType.NET_AMORTIZED
 
             async def query_costs_with_filters(self, **kwargs):
                 return [{"Sum(Net Amortized Cost)": 500}]
@@ -2661,9 +2671,9 @@ class TestTagCoverageImpl:
             server_module.finout_client = original
 
 
-class TestBudgetStatusImpl:
+class TestFinancialPlansImpl:
     @pytest.mark.asyncio
-    async def test_budget_status_basic(self):
+    async def test_financial_plans_basic(self):
         import importlib
 
         server_module = importlib.import_module("src.finout_mcp_server.server")
@@ -2675,28 +2685,80 @@ class TestBudgetStatusImpl:
                 return [
                     {
                         "name": "AWS Budget",
-                        "total_budget": 100000,
-                        "total_forecast": 95000,
+                        "period": "2026-3",
                         "cost_type": "netAmortizedCost",
+                        "total_budget": 100000,
+                        "total_cost": 40000,
+                        "total_run_rate": 95000,
+                        "total_forecast": 95000,
+                        "total_delta": -5000,
+                        "status": "on_track",
+                        "active_line_item_count": 2,
+                        "line_items": [
+                            {
+                                "key": "EC2",
+                                "budget": 60000,
+                                "cost": 25000,
+                                "run_rate": 58000,
+                                "forecast": 57000,
+                                "delta": -3000,
+                            },
+                            {
+                                "key": "S3",
+                                "budget": 40000,
+                                "cost": 15000,
+                                "run_rate": 37000,
+                                "forecast": 38000,
+                                "delta": -2000,
+                            },
+                        ],
                     }
                 ]
-
-            async def query_costs_with_filters(self, **kwargs):
-                return [{"Sum(Net Amortized Cost)": 40000}]
 
         original = server_module.finout_client
         server_module.finout_client = StubClient()
         try:
-            result = await server_module.get_budget_status_impl({"period": "2026-3"})
+            result = await server_module.get_financial_plans_impl(
+                {"name": "AWS", "period": "2026-3"}
+            )
         finally:
             server_module.finout_client = original
 
-        assert len(result["plans"]) == 1
-        plan = result["plans"][0]
-        assert plan["plan_name"] == "AWS Budget"
-        assert plan["budget"] == "$100,000.00"
-        assert plan["actual_spend"] == "$40,000.00"
-        assert plan["utilization_percent"] == 40.0
+        assert result["name"] == "AWS Budget"
+        assert result["total_budget"] == "$100,000.00"
+        assert result["total_cost"] == "$40,000.00"
+        assert result["total_run_rate"] == "$95,000.00"
+        assert result["status"] == "on_track"
+        assert len(result["line_items"]) == 2
+        assert result["line_items"][0]["cost"] == "$25,000.00"
+
+    @pytest.mark.asyncio
+    async def test_financial_plans_list_mode(self):
+        """Without name, returns plan names only."""
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+
+            async def get_financial_plans(self, name=None, period=None):
+                return [
+                    {"name": "AWS Budget", "id": "plan-1", "start_month": "2026-4", "years": 1},
+                    {"name": "GCP Budget", "id": "plan-2", "start_month": "2026-1", "years": 1},
+                ]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.get_financial_plans_impl({})
+        finally:
+            server_module.finout_client = original
+
+        assert result["plan_count"] == 2
+        assert result["plans"][0]["name"] == "AWS Budget"
+        assert result["plans"][0]["start_month"] == "2026-4"
+        assert result["plans"][1]["name"] == "GCP Budget"
 
 
 class TestCostStatisticsImpl:
@@ -2923,16 +2985,12 @@ class TestTagCoverageEmptyBuckets:
         assert result["summary"]["untagged_cost"] == "$4,000.00"
 
 
-class TestBudgetStatusMultiplePlans:
-    """Tests that each plan uses its own cost_type for actual spend."""
-
+class TestFinancialPlansOverBudget:
     @pytest.mark.asyncio
-    async def test_multiple_plans_with_different_cost_types(self):
+    async def test_over_budget_status(self):
         import importlib
 
         server_module = importlib.import_module("src.finout_mcp_server.server")
-
-        queries_made: list[dict] = []
 
         class StubClient:
             internal_api_url = "http://localhost:3000"
@@ -2940,40 +2998,35 @@ class TestBudgetStatusMultiplePlans:
             async def get_financial_plans(self, name=None, period=None):
                 return [
                     {
-                        "name": "Net Amortized Plan",
-                        "total_budget": 100000,
-                        "total_forecast": None,
-                        "cost_type": "netAmortizedCost",
-                    },
-                    {
-                        "name": "Blended Plan",
-                        "total_budget": 80000,
-                        "total_forecast": None,
+                        "name": "Over Budget Plan",
+                        "period": "2026-3",
                         "cost_type": "blendedCost",
+                        "total_budget": 50000,
+                        "total_cost": 45000,
+                        "total_run_rate": 60000,
+                        "total_forecast": None,
+                        "total_delta": None,
+                        "status": "over_budget",
+                        "active_line_item_count": 1,
+                        "line_items": [
+                            {"key": "RDS", "budget": 50000, "cost": 45000, "run_rate": 60000},
+                        ],
                     },
                 ]
-
-            async def query_costs_with_filters(self, **kwargs):
-                queries_made.append({"cost_type": kwargs.get("cost_type")})
-                if str(kwargs.get("cost_type", "")).lower().startswith("blended"):
-                    return [{"Sum(Blended Cost)": 30000}]
-                return [{"Sum(Net Amortized Cost)": 45000}]
 
         original = server_module.finout_client
         server_module.finout_client = StubClient()
         try:
-            result = await server_module.get_budget_status_impl({"period": "2026-3"})
+            result = await server_module.get_financial_plans_impl(
+                {"name": "Over Budget", "period": "2026-3"}
+            )
         finally:
             server_module.finout_client = original
 
-        # Two different cost types → two separate queries
-        assert len(queries_made) == 2
-
-        plans = {p["plan_name"]: p for p in result["plans"]}
-        # Net amortized plan should see 45000 actual
-        assert plans["Net Amortized Plan"]["actual_spend"] == "$45,000.00"
-        # Blended plan should see 30000 actual (its own query)
-        assert plans["Blended Plan"]["actual_spend"] == "$30,000.00"
+        assert result["name"] == "Over Budget Plan"
+        assert result["status"] == "over_budget"
+        assert result["total_cost"] == "$45,000.00"
+        assert result["total_run_rate"] == "$60,000.00"
 
 
 class TestCostStatisticsGroupedPeakTrough:
@@ -3036,6 +3089,199 @@ class TestCostStatisticsGroupedPeakTrough:
         # Trough day should be 03-03 (total 100)
         assert result["trough_day"]["date"] == "2026-03-03"
         assert result["trough_day"]["cost"] == "$100.00"
+
+
+class TestCostTypeSelection:
+    """Tests for cost_type parameter on query_costs and compare_costs."""
+
+    def test_get_default_cost_type_from_account_info(self):
+        """get_default_cost_type reads from generalConfig.defaultCostType."""
+        from src.finout_mcp_server.finout_client import CostType
+
+        client = FinoutClient(client_id="test", secret_key="test", allow_missing_credentials=False)
+        client._account_info = {
+            "generalConfig": {"defaultCostType": "unblendedCost"},
+        }
+        assert client.get_default_cost_type() == CostType.UNBLENDED
+
+    def test_get_default_cost_type_falls_back(self):
+        """get_default_cost_type falls back to NET_AMORTIZED when not set."""
+        from src.finout_mcp_server.finout_client import CostType
+
+        client = FinoutClient(client_id="test", secret_key="test", allow_missing_credentials=False)
+        client._account_info = {"generalConfig": {}}
+        assert client.get_default_cost_type() == CostType.NET_AMORTIZED
+
+    def test_get_default_cost_type_unrecognized_value(self):
+        """get_default_cost_type falls back when value is not in CostType."""
+        from src.finout_mcp_server.finout_client import CostType
+
+        client = FinoutClient(client_id="test", secret_key="test", allow_missing_credentials=False)
+        client._account_info = {
+            "generalConfig": {"defaultCostType": "effectiveCost"},
+        }
+        assert client.get_default_cost_type() == CostType.NET_AMORTIZED
+
+    def test_get_default_cost_type_no_account_info(self):
+        """get_default_cost_type falls back when _account_info is None."""
+        from src.finout_mcp_server.finout_client import CostType
+
+        client = FinoutClient(client_id="test", secret_key="test", allow_missing_credentials=False)
+        assert client.get_default_cost_type() == CostType.NET_AMORTIZED
+
+    @pytest.mark.asyncio
+    async def test_get_account_context_includes_default_cost_type(
+        self, mock_internal_response, sample_filters
+    ):
+        """get_account_context includes default_cost_type."""
+        mock_internal_response.json.return_value = sample_filters
+
+        client = FinoutClient(
+            client_id="test",
+            secret_key="test",
+            internal_api_url="http://localhost:3000",
+            account_id="test-account-123",
+        )
+        client._account_info = {
+            "name": "Test Account",
+            "featureFlags": {},
+            "generalConfig": {"defaultCostType": "blendedCost"},
+        }
+
+        with patch.object(client.internal_client, "post", return_value=mock_internal_response):
+            result = await client.get_account_context()
+
+        assert result["default_cost_type"] == "blendedCost"
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_query_costs_passes_explicit_cost_type(self):
+        """query_costs passes cost_type to client when provided."""
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        captured_kwargs: dict = {}
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            _account_info = {"generalConfig": {"defaultCostType": "blendedCost"}}
+
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            def get_default_cost_type(self):
+                from src.finout_mcp_server.finout_client import CostType
+
+                return CostType.BLENDED
+
+            async def query_costs_with_filters(self, **kwargs):
+                captured_kwargs.update(kwargs)
+                return [{"Sum(Unblended Cost)": 1000}]
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            await server_module.query_costs_impl(
+                {"time_period": "last_30_days", "cost_type": "unblendedCost"}
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        from src.finout_mcp_server.finout_client import CostType
+
+        assert captured_kwargs["cost_type"] == CostType.UNBLENDED
+
+    @pytest.mark.asyncio
+    async def test_query_costs_uses_account_default(self):
+        """query_costs uses account default when cost_type omitted."""
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        captured_kwargs: dict = {}
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            _account_info = {"generalConfig": {"defaultCostType": "blendedCost"}}
+
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            def get_default_cost_type(self):
+                from src.finout_mcp_server.finout_client import CostType
+
+                return CostType.BLENDED
+
+            async def query_costs_with_filters(self, **kwargs):
+                captured_kwargs.update(kwargs)
+                return [{"Sum(Blended Cost)": 500}]
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.query_costs_impl({"time_period": "last_30_days"})
+        finally:
+            server_module.finout_client = original_client
+
+        from src.finout_mcp_server.finout_client import CostType
+
+        assert captured_kwargs["cost_type"] == CostType.BLENDED
+        assert result["cost_type"] == "blendedCost"
+
+    @pytest.mark.asyncio
+    async def test_compare_costs_passes_cost_type_to_both_queries(self):
+        """compare_costs passes cost_type to both period queries."""
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        all_kwargs: list[dict] = []
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            _account_info = {}
+
+            async def get_filters_metadata(self):
+                return {}
+
+            async def get_filter_values(self, *a, **kw):
+                return []
+
+            def get_default_cost_type(self):
+                from src.finout_mcp_server.finout_client import CostType
+
+                return CostType.NET_AMORTIZED
+
+            async def query_costs_with_filters(self, **kwargs):
+                all_kwargs.append(dict(kwargs))
+                return [{"Sum(Fair Share Cost)": 100}]
+
+        original_client = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.compare_costs_impl(
+                {
+                    "current_period": "this_month",
+                    "comparison_period": "last_month",
+                    "cost_type": "fairShareCost",
+                }
+            )
+        finally:
+            server_module.finout_client = original_client
+
+        from src.finout_mcp_server.finout_client import CostType
+
+        assert len(all_kwargs) == 2
+        assert all_kwargs[0]["cost_type"] == CostType.FAIR_SHARE
+        assert all_kwargs[1]["cost_type"] == CostType.FAIR_SHARE
+        assert result["cost_type"] == "fairShareCost"
 
 
 class TestPromptTemplates:

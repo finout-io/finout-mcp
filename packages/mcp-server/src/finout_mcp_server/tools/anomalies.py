@@ -1,7 +1,6 @@
-"""Anomaly detection and financial plans tools."""
+"""Anomaly detection tools."""
 
 from datetime import datetime
-from typing import Any
 
 from .cost import format_currency
 
@@ -51,53 +50,5 @@ async def get_anomalies_impl(args: dict) -> dict:
             "Present anomalies sorted by cost impact. "
             "Group by date if there are many. "
             "Highlight the largest surprises with their percent over expected."
-        ),
-    }
-
-
-async def get_financial_plans_impl(args: dict) -> dict:
-    """Implementation of get_financial_plans tool"""
-    from ..server import get_client
-
-    finout_client = get_client()
-
-    name = args.get("name")
-    period = args.get("period")
-
-    plans = await finout_client.get_financial_plans(name=name, period=period)
-
-    formatted = []
-    for plan in plans:
-        items = plan.get("top_line_items", [])
-        formatted_items = [
-            {
-                "key": item["key"],
-                "budget": format_currency(item["budget"]),
-                "forecast": format_currency(item["forecast"])
-                if item.get("forecast") is not None
-                else None,
-            }
-            for item in items
-        ]
-
-        entry: dict[str, Any] = {
-            "name": plan["name"],
-            "period": plan["period"],
-            "cost_type": plan["cost_type"],
-            "total_budget": format_currency(plan["total_budget"]),
-            "active_line_items": plan["active_line_item_count"],
-            "top_line_items": formatted_items,
-        }
-        if plan.get("total_forecast") is not None:
-            entry["total_forecast"] = format_currency(plan["total_forecast"])
-
-        formatted.append(entry)
-
-    return {
-        "plan_count": len(formatted),
-        "plans": formatted,
-        "_presentation_hint": (
-            "Show plan name, period, total budget and top line items. "
-            "If forecast is present, compare budget vs forecast."
         ),
     }

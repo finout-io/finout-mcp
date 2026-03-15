@@ -2,6 +2,17 @@
 
 from mcp.types import Tool
 
+COST_TYPE_ENUM = [
+    "netAmortizedCost",
+    "blendedCost",
+    "unblendedCost",
+    "amortizedCost",
+    "netUnblendedCost",
+    "listCost",
+    "fairShareCost",
+    "netFairShareCost",
+]
+
 
 def _allowed_tools_for_runtime() -> set[str]:
     from .server import BILLY_INTERNAL_TOOLS, PUBLIC_TOOLS, MCPMode, get_runtime_mode
@@ -91,6 +102,15 @@ async def list_tools() -> list[Tool]:
                             "- Custom range: 'YYYY-MM-DD to YYYY-MM-DD' (e.g., '2026-01-24 to 2026-01-31')"
                         ),
                         "default": "last_30_days",
+                    },
+                    "cost_type": {
+                        "type": "string",
+                        "enum": COST_TYPE_ENUM,
+                        "description": (
+                            "Cost metric to use. Defaults to the account's configured default "
+                            "(usually netAmortizedCost). Common types: netAmortizedCost (RI/SP adjusted), "
+                            "unblendedCost (on-demand rates), blendedCost (org-averaged rates)."
+                        ),
                     },
                     "filters": {
                         "type": "array",
@@ -220,8 +240,9 @@ async def list_tools() -> list[Tool]:
                                 "type": {
                                     "type": "string",
                                     "description": (
-                                        "Cost metric type: amortizedCost, unblendedCost, "
-                                        "blendedCost, netAmortizedCost"
+                                        "Cost metric type: netAmortizedCost, amortizedCost, "
+                                        "unblendedCost, blendedCost, netUnblendedCost, "
+                                        "listCost, fairShareCost, netFairShareCost"
                                     ),
                                 },
                                 "aggregation": {
@@ -238,7 +259,7 @@ async def list_tools() -> list[Tool]:
                         },
                         "description": (
                             "Additional cost metrics in the same query. "
-                            "The primary metric (netAmortizedCost sum) is always included. "
+                            "The primary metric (from cost_type param) is always included. "
                             "Use this to compare cost types or get min/max/avg.\n"
                             'Examples: [{"type": "unblendedCost"}] or '
                             '[{"type": "amortizedCost", "aggregation": "max"}]'
@@ -339,6 +360,14 @@ async def list_tools() -> list[Tool]:
                             "- Custom range: 'YYYY-MM-DD to YYYY-MM-DD'"
                         ),
                     },
+                    "cost_type": {
+                        "type": "string",
+                        "enum": COST_TYPE_ENUM,
+                        "description": (
+                            "Cost metric to use for both periods. Defaults to the account's "
+                            "configured default (usually netAmortizedCost)."
+                        ),
+                    },
                     "filters": {
                         "type": "array",
                         "items": {
@@ -403,8 +432,9 @@ async def list_tools() -> list[Tool]:
                                 "type": {
                                     "type": "string",
                                     "description": (
-                                        "Cost metric type: amortizedCost, unblendedCost, "
-                                        "blendedCost, netAmortizedCost"
+                                        "Cost metric type: netAmortizedCost, amortizedCost, "
+                                        "unblendedCost, blendedCost, netUnblendedCost, "
+                                        "listCost, fairShareCost, netFairShareCost"
                                     ),
                                 },
                                 "aggregation": {
@@ -492,27 +522,36 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_financial_plans",
             description=(
-                "Get financial plans (budgets and forecasts) for the account.\n\n"
+                "Get financial plans with budget, actual cost, run rate, and forecast.\n\n"
                 "WHEN TO USE: When the user asks about 'budget', 'financial plan', 'forecast', "
-                "'planned spend', 'budget vs actual', or 'are we on track'.\n\n"
-                "Each plan has line items (one per dimension value) with monthly budget and "
-                "optional forecast amounts.\n\n"
-                "PRESENTING RESULTS: Show the plan name, period, total budget, and top line items "
-                "sorted by budget. If forecast is available, compare budget vs forecast."
+                "'planned spend', 'budget vs actual', 'are we on track', 'burn rate', "
+                "'will we exceed the budget', 'budget utilization', or any question "
+                "comparing spend to planned amounts.\n\n"
+                "WORKFLOW:\n"
+                "1. Call WITHOUT name first to list available plan names.\n"
+                "2. Call WITH name to get detailed budget vs actual data for one plan.\n\n"
+                "PRESENTING RESULTS: Lead with status (on_track/at_risk/over_budget). "
+                "Show budget vs actual cost, run rate, and remaining budget. "
+                "Highlight plans at risk or over budget."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Optional: Filter plans by name (partial, case-insensitive)",
+                        "description": (
+                            "Plan name to look up (partial, case-insensitive). "
+                            "Omit to list all plan names. "
+                            "Provide to get detailed budget vs actual data for one plan."
+                        ),
                     },
                     "period": {
                         "type": "string",
                         "description": (
-                            "Month to show budgets for in 'YYYY-M' format (no zero-padding). "
-                            "Examples: '2026-2' for Feb 2026, '2025-12' for Dec 2025. "
-                            "Defaults to current month."
+                            "Month in 'YYYY-M' format (no zero-padding). "
+                            "Examples: '2026-4' for Apr 2026, '2025-12' for Dec 2025. "
+                            "If omitted, auto-selects the latest month with budget + actual data. "
+                            "Only used when name is provided."
                         ),
                     },
                 },
@@ -581,12 +620,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "cost_type": {
                         "type": "string",
-                        "enum": [
-                            "netAmortizedCost",
-                            "blendedCost",
-                            "unblendedCost",
-                            "amortizedCost",
-                        ],
+                        "enum": COST_TYPE_ENUM,
                         "description": "Cost metric type",
                         "default": "netAmortizedCost",
                     },
@@ -696,12 +730,7 @@ async def list_tools() -> list[Tool]:
                                 },
                                 "cost_type": {
                                     "type": "string",
-                                    "enum": [
-                                        "netAmortizedCost",
-                                        "blendedCost",
-                                        "unblendedCost",
-                                        "amortizedCost",
-                                    ],
+                                    "enum": COST_TYPE_ENUM,
                                     "description": "costUsage: cost metric type",
                                     "default": "netAmortizedCost",
                                 },
@@ -1477,12 +1506,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "cost_type": {
                         "type": "string",
-                        "enum": [
-                            "netAmortizedCost",
-                            "amortizedCost",
-                            "unblendedCost",
-                            "blendedCost",
-                        ],
+                        "enum": COST_TYPE_ENUM,
                         "default": "netAmortizedCost",
                         "description": "Cost metric to use for unit economics calculation",
                     },
@@ -1649,44 +1673,6 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["tag_dimension"],
-            },
-        ),
-        Tool(
-            name="get_budget_status",
-            description=(
-                "Compare actual spend against financial plan budgets.\n\n"
-                "WHEN TO USE: When the user asks 'are we on budget?', 'budget vs actual', "
-                "'burn rate', 'will we exceed the budget?', 'budget utilization', "
-                "or any question comparing spend to planned amounts.\n\n"
-                "HOW IT WORKS: Fetches financial plans and queries actual cost per plan, "
-                "matching each plan's cost type (net amortized, blended, etc.). "
-                "Computes utilization %, daily burn rate, and projected month-end spend.\n\n"
-                "PRESENTING RESULTS: Lead with status (on_track/at_risk/over_budget), "
-                "then utilization %, remaining budget, and projected month-end."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "plan_name": {
-                        "type": "string",
-                        "description": "Optional: Filter to a specific plan by name (partial, case-insensitive).",
-                    },
-                    "period": {
-                        "type": "string",
-                        "description": (
-                            "Budget month in 'YYYY-M' format (e.g., '2026-3'). "
-                            "Defaults to current month."
-                        ),
-                    },
-                    "time_period": {
-                        "type": "string",
-                        "description": (
-                            "Override the time period for actual cost query. "
-                            "Defaults to the budget month (auto-derived from period)."
-                        ),
-                    },
-                },
-                "required": [],
             },
         ),
         Tool(

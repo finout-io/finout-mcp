@@ -1,7 +1,6 @@
 """Tool implementations for the Finout MCP server."""
 
 from .analytics import (
-    get_budget_status_impl,
     get_cost_patterns_impl,
     get_cost_statistics_impl,
     get_savings_coverage_impl,
@@ -9,7 +8,8 @@ from .analytics import (
     get_top_movers_impl,
     get_unit_economics_impl,
 )
-from .anomalies import get_anomalies_impl, get_financial_plans_impl
+from .anomalies import get_anomalies_impl
+from .budgets import get_financial_plans_impl
 from .charts import render_chart_impl
 from .context import discover_context_impl, get_account_context_impl, list_data_explorers_impl
 from .cost import compare_costs_impl, query_costs_impl, summarize_cost_data
@@ -46,7 +46,6 @@ __all__ = [
     "get_anomalies_impl",
     "get_filter_values_impl",
     "get_financial_plans_impl",
-    "get_budget_status_impl",
     "get_cost_patterns_impl",
     "get_cost_statistics_impl",
     "get_savings_coverage_impl",

@@ -23,6 +23,10 @@ class CostType(StrEnum):
     BLENDED = "blendedCost"
     UNBLENDED = "unblendedCost"
     AMORTIZED = "amortizedCost"
+    NET_UNBLENDED = "netUnblendedCost"
+    LIST = "listCost"
+    FAIR_SHARE = "fairShareCost"
+    NET_FAIR_SHARE = "netFairShareCost"
 
 
 class Granularity(StrEnum):
@@ -355,13 +359,8 @@ class FinoutClient:
         result.sort(key=lambda x: x["cost_impact"], reverse=True)
         return result
 
-    async def get_financial_plans_raw(self) -> list[dict[str, Any]]:
-        """
-        Fetch raw financial plan objects for dependency analysis.
-
-        Returns full plan structures (including components, filters, originId)
-        without budget/forecast summarisation. Used by the dependency graph tool.
-        """
+    async def _fetch_all_plans(self) -> list[dict[str, Any]]:
+        """Fetch all financial plan objects from the budgets service."""
         if not self.internal_client:
             raise ValueError("Internal API client not configured.")
 
@@ -375,8 +374,31 @@ class FinoutClient:
         )
         response.raise_for_status()
 
-        plans = response.json()
-        return plans if isinstance(plans, list) else []
+        data = response.json()
+        return data if isinstance(data, list) else []
+
+    async def get_financial_plans_raw(self) -> list[dict[str, Any]]:
+        """Fetch raw financial plan objects. Used by dependency graph."""
+        return await self._fetch_all_plans()
+
+    async def get_financial_plan_data(self, plan_id: str) -> list[dict[str, Any]]:
+        """Fetch enriched line items (budget + actuals) for a financial plan."""
+        if not self.internal_client:
+            raise ValueError("Internal API client not configured.")
+
+        headers = self._get_internal_headers()
+        if self.internal_auth_mode == InternalAuthMode.AUTHORIZED_HEADERS:
+            headers["authorized-user-permissions"] = "fin.financial-plans.view.financial-plans"
+
+        response = await self.internal_client.post(
+            "/budgets-service/financial-plan-data",
+            headers=headers,
+            json={"id": plan_id},
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        return data if isinstance(data, list) else []
 
     async def get_financial_plans(
         self,
@@ -384,84 +406,200 @@ class FinoutClient:
         period: str | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Fetch financial plans (budgets) for the account.
+        Fetch financial plan data.
+
+        Without name: returns a lightweight list of plan names (no enrichment).
+        With name: fetches enriched budget + actuals for the first matching plan.
 
         Args:
-            name: Optional partial name filter (case-insensitive)
+            name: Plan name filter (partial, case-insensitive).
             period: Month in "YYYY-M" format (default: current month).
-                    No zero-padding on month (e.g., "2026-2" not "2026-02").
-
-        Returns:
-            List of financial plan summaries with budget/forecast per line item
         """
-        if not self.internal_client:
-            raise ValueError("Internal API client not configured.")
+        all_plans = await self._fetch_all_plans()
 
-        headers = self._get_internal_headers()
-        # Internal/BILLY mode requires this explicit permission header.
-        # In public key/secret mode, equivalent auth context is applied upstream.
-        if self.internal_auth_mode == InternalAuthMode.AUTHORIZED_HEADERS:
-            headers["authorized-user-permissions"] = "fin.financial-plans.view.financial-plans"
+        if not name:
+            now = datetime.now()
+            current_ym = (now.year, now.month)
+            return [self._plan_list_entry(p, current_ym) for p in all_plans]
 
-        response = await self.internal_client.get(
-            "/budgets-service/financial-plan",
-            headers=headers,
-        )
-        response.raise_for_status()
+        # Find the first matching plan
+        plan = None
+        name_lower = name.lower()
+        for p in all_plans:
+            if name_lower in p.get("name", "").lower():
+                plan = p
+                break
 
-        all_plans = response.json()
-        if not isinstance(all_plans, list):
+        if plan is None:
             return []
 
-        if not period:
-            now = datetime.now()
-            period = f"{now.year}-{now.month}"
+        plan_id = plan.get("id") or plan.get("_id")
+        if not plan_id:
+            return []
 
-        result = []
-        for plan in all_plans:
-            plan_name = plan.get("name", "")
-            if name and name.lower() not in plan_name.lower():
+        enriched = await self.get_financial_plan_data(plan_id)
+
+        if not period:
+            period = self._pick_best_period(enriched)
+
+        return [self._build_plan_summary(plan, enriched, period)]
+
+    @staticmethod
+    def _plan_list_entry(plan: dict[str, Any], current_ym: tuple[int, int]) -> dict[str, Any]:
+        """Build a lightweight list entry with timing status."""
+        start_month = plan.get("startMonth", "")
+        years = plan.get("years", 1)
+
+        status = "unknown"
+        start_ym, end_ym = FinoutClient._parse_plan_range(start_month, years)
+        if start_ym and end_ym:
+            if current_ym < start_ym:
+                status = "future"
+            elif current_ym > end_ym:
+                status = "past"
+            else:
+                status = "active"
+
+        return {
+            "name": plan.get("name", ""),
+            "start_month": start_month,
+            "years": years,
+            "status": status,
+        }
+
+    @staticmethod
+    def _parse_plan_range(
+        start_month: str, years: int
+    ) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
+        """Parse plan start_month + years into (start_ym, end_ym) tuples."""
+        if not start_month or "-" not in start_month:
+            return None, None
+        try:
+            parts = start_month.split("-")
+            sy, sm = int(parts[0]), int(parts[1])
+            ey = sy + years
+            em = sm - 1  # end is the month before the start anniversary
+            if em < 1:
+                em = 12
+                ey -= 1
+            return (sy, sm), (ey, em)
+        except (ValueError, IndexError):
+            return None, None
+
+    @staticmethod
+    def _pick_best_period(line_items_data: list[dict[str, Any]]) -> str:
+        """Pick the best period: latest month that has both budget and cost data.
+
+        Falls back to latest with budget, then latest with cost, then current month.
+        Only samples the first line item — all items share the same period keys.
+        """
+        if not line_items_data:
+            now = datetime.now()
+            return f"{now.year}-{now.month}"
+
+        has_budget: set[str] = set()
+        has_cost: set[str] = set()
+        for period_key, period_val in line_items_data[0].get("values", {}).items():
+            if not isinstance(period_val, dict):
+                continue
+            if period_val.get("budget"):
+                has_budget.add(period_key)
+            if period_val.get("cost") is not None:
+                has_cost.add(period_key)
+
+        def _sort_key(p: str) -> tuple[int, int]:
+            parts = p.split("-")
+            return (int(parts[0]), int(parts[1])) if len(parts) == 2 else (0, 0)
+
+        both = has_budget & has_cost
+        if both:
+            return max(both, key=_sort_key)
+        if has_budget:
+            return max(has_budget, key=_sort_key)
+        if has_cost:
+            return max(has_cost, key=_sort_key)
+
+        now = datetime.now()
+        return f"{now.year}-{now.month}"
+
+    @staticmethod
+    def _build_plan_summary(
+        plan: dict[str, Any],
+        line_items_data: list[dict[str, Any]],
+        period: str,
+    ) -> dict[str, Any]:
+        period_items: list[dict[str, Any]] = []
+        total_budget = 0.0
+        total_cost = 0.0
+        total_run_rate = 0.0
+        total_forecast = 0.0
+        total_delta = 0.0
+        has_cost = False
+        has_forecast = False
+
+        for li in line_items_data:
+            key = li.get("key", [])
+            key_str = ", ".join(key) if isinstance(key, list) else str(key)
+            period_data = li.get("values", {}).get(period, {})
+            if not period_data:
                 continue
 
-            line_items = plan.get("lineItems", [])
-            period_items = []
-            total_budget = 0.0
-            total_forecast = 0.0
-            has_forecast = False
+            budget = period_data.get("budget") or 0
+            cost = period_data.get("cost")
+            run_rate = period_data.get("runRate")
+            forecast = period_data.get("forecast")
+            delta = period_data.get("delta")
 
-            for li in line_items:
-                if li.get("isDisabled"):
-                    continue
-                key = li.get("key", [])
-                key_str = ", ".join(key) if isinstance(key, list) else str(key)
-                period_data = li.get("values", {}).get(period, {})
-                budget = period_data.get("budget") or 0
-                forecast = period_data.get("forecast")
-                total_budget += budget
+            total_budget += budget
+            if cost is not None:
+                total_cost += cost
+                has_cost = True
+            if run_rate is not None:
+                total_run_rate += run_rate
+            if forecast is not None:
+                total_forecast += forecast
+                has_forecast = True
+            if delta is not None:
+                total_delta += delta
+
+            if budget or cost is not None:
+                item: dict[str, Any] = {"key": key_str, "budget": budget}
+                if cost is not None:
+                    item["cost"] = cost
+                if run_rate is not None:
+                    item["run_rate"] = run_rate
                 if forecast is not None:
-                    total_forecast += forecast
-                    has_forecast = True
-                if budget or forecast is not None:
-                    period_items.append({"key": key_str, "budget": budget, "forecast": forecast})
+                    item["forecast"] = forecast
+                if delta is not None:
+                    item["delta"] = delta
+                period_items.append(item)
 
-            period_items.sort(key=lambda x: x["budget"] or 0, reverse=True)
+        period_items.sort(key=lambda x: x["budget"] or 0, reverse=True)
 
-            result.append(
-                {
-                    "id": plan.get("id"),
-                    "name": plan_name,
-                    "cost_type": plan.get("costType"),
-                    "start_month": plan.get("startMonth"),
-                    "years": plan.get("years"),
-                    "period": period,
-                    "total_budget": total_budget,
-                    "total_forecast": total_forecast if has_forecast else None,
-                    "active_line_item_count": len(period_items),
-                    "top_line_items": period_items[:20],
-                }
-            )
+        status = None
+        if has_cost and total_budget > 0:
+            ratio = total_run_rate / total_budget * 100 if total_run_rate else 0
+            if ratio <= 100:
+                status = "on_track"
+            elif ratio <= 110:
+                status = "at_risk"
+            else:
+                status = "over_budget"
 
-        return result
+        return {
+            "id": plan.get("id"),
+            "name": plan.get("name", ""),
+            "cost_type": plan.get("costType"),
+            "period": period,
+            "total_budget": total_budget,
+            "total_cost": total_cost if has_cost else None,
+            "total_run_rate": total_run_rate if has_cost else None,
+            "total_forecast": total_forecast if has_forecast else None,
+            "total_delta": total_delta if has_cost else None,
+            "status": status,
+            "active_line_item_count": len(period_items),
+            "line_items": period_items[:20],
+        }
 
     async def get_costguard_scans(self) -> list[dict[str, Any]]:
         """
@@ -1478,6 +1616,17 @@ class FinoutClient:
                 "Request timed out. The usage-unit-types API may be slow or unavailable."
             ) from e
 
+    def get_default_cost_type(self) -> CostType:
+        """Return the account's default cost type, falling back to NET_AMORTIZED."""
+        if self._account_info:
+            raw = self._account_info.get("generalConfig", {}).get("defaultCostType")
+            if raw:
+                try:
+                    return CostType(raw)
+                except ValueError:
+                    pass
+        return CostType.NET_AMORTIZED
+
     async def get_account_context(self) -> dict[str, Any]:
         """Get account context summary for the LLM."""
         if not self._account_info:
@@ -1489,6 +1638,7 @@ class FinoutClient:
                     "account_id": self.account_id or "Not configured",
                     "cost_centers": {},
                     "feature_flags": {},
+                    "default_cost_type": CostType.NET_AMORTIZED.value,
                 }
 
         metadata = await self.get_filters_metadata()
@@ -1503,6 +1653,7 @@ class FinoutClient:
             "account_id": self.account_id,
             "cost_centers": cost_centers,
             "feature_flags": self._account_info.get("featureFlags", {}),
+            "default_cost_type": self.get_default_cost_type().value,
         }
 
     # Context Discovery Methods

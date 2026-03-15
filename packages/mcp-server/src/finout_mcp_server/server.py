@@ -101,7 +101,6 @@ PUBLIC_TOOLS: set[str] = {
     "get_cost_patterns",
     "get_savings_coverage",
     "get_tag_coverage",
-    "get_budget_status",
     "get_cost_statistics",
     "analyze_virtual_tags",
     "list_data_explorers",
@@ -139,7 +138,6 @@ INTERNAL_API_TOOLS: set[str] = {
     "get_cost_patterns",
     "get_savings_coverage",
     "get_tag_coverage",
-    "get_budget_status",
     "get_cost_statistics",
     "list_data_explorers",
 }
@@ -359,8 +357,6 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 result = await get_savings_coverage_impl(arguments)
             elif name == "get_tag_coverage":
                 result = await get_tag_coverage_impl(arguments)
-            elif name == "get_budget_status":
-                result = await get_budget_status_impl(arguments)
             elif name == "get_cost_statistics":
                 result = await get_cost_statistics_impl(arguments)
             elif name == "list_data_explorers":
@@ -471,9 +467,6 @@ from .tools import (
 )
 from .tools import (
     get_anomalies_impl as get_anomalies_impl,
-)
-from .tools import (  # noqa: E402
-    get_budget_status_impl as get_budget_status_impl,
 )
 from .tools import (
     get_cost_patterns_impl as get_cost_patterns_impl,

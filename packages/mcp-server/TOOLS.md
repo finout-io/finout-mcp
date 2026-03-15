@@ -142,14 +142,14 @@ Retrieve cost anomalies and spikes detected by Finout. Use this when investigati
 
 **Purpose**
 
-Retrieve financial plans (budgets and forecasts) for your account. Each plan contains line items with monthly budget and optional forecast amounts per dimension value.
+Get financial plans with budget, actual cost, run rate, and forecast. Without `name`, lists all plans with their date ranges and status (active/future/past). With `name`, fetches detailed budget vs actual data for one plan.
 
 **Parameters**
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `name` | No | Filter plans by name (partial match, case-insensitive). |
-| `period` | No | Month to show budgets for, in `YYYY-M` format (no zero-padding). Example: `2026-2` for February 2026. Defaults to current month. |
+| `name` | No | Plan name to look up (partial, case-insensitive). Omit to list all plans. |
+| `period` | No | Month in `YYYY-M` format (e.g. `2026-4`). Auto-selects the best period if omitted. |
 
 ---
 

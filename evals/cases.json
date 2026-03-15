@@ -3,10 +3,17 @@
     "id": "top_5_costs_last_month",
     "description": "baseline routing - top costs last month",
     "prompt": "What were my top 5 costs last month?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["baseline", "routing"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "baseline",
+      "routing"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "no_fabrication": true
     }
   },
@@ -14,10 +21,18 @@
     "id": "compare_this_week_vs_last_week",
     "description": "baseline routing - compare this week vs last week",
     "prompt": "Compare this week vs last week",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["baseline", "routing", "comparison"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "baseline",
+      "routing",
+      "comparison"
+    ],
     "expected": {
-      "tools": ["compare_costs"],
+      "tools": [
+        "compare_costs"
+      ],
       "no_fabrication": true
     }
   },
@@ -25,10 +40,17 @@
     "id": "show_anomalies",
     "description": "baseline routing - anomalies",
     "prompt": "Show me anomalies",
-    "suites": ["langfuse"],
-    "tags": ["baseline", "routing"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "baseline",
+      "routing"
+    ],
     "expected": {
-      "tools": ["get_anomalies"],
+      "tools": [
+        "get_anomalies"
+      ],
       "no_fabrication": true
     }
   },
@@ -36,10 +58,18 @@
     "id": "filters_for_ec2",
     "description": "baseline routing - search filters",
     "prompt": "What filters are available for EC2?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["baseline", "routing", "filters"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "baseline",
+      "routing",
+      "filters"
+    ],
     "expected": {
-      "tools": ["search_filters"],
+      "tools": [
+        "search_filters"
+      ],
       "no_fabrication": true
     }
   },
@@ -47,10 +77,17 @@
     "id": "waste_recommendations",
     "description": "baseline routing - waste recommendations",
     "prompt": "Any waste recommendations?",
-    "suites": ["langfuse"],
-    "tags": ["baseline", "routing"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "baseline",
+      "routing"
+    ],
     "expected": {
-      "tools": ["get_waste_recommendations"],
+      "tools": [
+        "get_waste_recommendations"
+      ],
       "no_fabrication": true
     }
   },
@@ -58,10 +95,18 @@
     "id": "last_5_days_flexible_date",
     "description": "last_5_days flexible date",
     "prompt": "What were my costs for the last 5 days?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "time_period", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "time_period",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "time_period": "last_5_days"
@@ -74,10 +119,18 @@
     "id": "last_2_weeks_flexible_date",
     "description": "last_2_weeks flexible date",
     "prompt": "Show me my total cloud spend for the last 2 weeks",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "time_period", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "time_period",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "time_period": {
@@ -92,10 +145,18 @@
     "id": "last_3_months_flexible_date",
     "description": "last_3_months flexible date",
     "prompt": "How much did I spend in the last 3 months?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "time_period", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "time_period",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "time_period": "last_3_months"
@@ -108,10 +169,19 @@
     "id": "compare_last_14_days_to_last_30_days",
     "description": "compare using flexible dates",
     "prompt": "Compare my costs from the last 14 days to the last 30 days",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "comparison", "time_period", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "comparison",
+      "time_period",
+      "migration"
+    ],
     "expected": {
-      "tools": ["compare_costs"],
+      "tools": [
+        "compare_costs"
+      ],
       "args": {
         "compare_costs": {
           "current_period": "last_14_days",
@@ -125,10 +195,18 @@
     "id": "hourly_granularity_today",
     "description": "hourly granularity - explicit request",
     "prompt": "Give me an hourly cost breakdown for today",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "granularity", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "granularity",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "x_axis_group_by": "hourly"
@@ -141,10 +219,18 @@
     "id": "hourly_granularity_yesterday",
     "description": "hourly granularity - yesterday",
     "prompt": "Show me hourly cost trends for yesterday",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "granularity", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "granularity",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "x_axis_group_by": "hourly"
@@ -157,12 +243,22 @@
     "id": "extra_measurement_unblended_cost",
     "description": "extra measurement - unblended cost",
     "prompt": "Show me both net amortized and unblended cost for the last 30 days by service",
-    "suites": ["langfuse"],
-    "tags": ["routing", "metrics", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "metrics",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "terminal_tool": "query_costs",
-      "allowed_prefix_tools": ["search_filters"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
       "args": {
         "query_costs": {
           "extra_measurements": [
@@ -172,7 +268,9 @@
           ]
         }
       },
-      "response_checks": ["mention both net amortized and unblended cost"],
+      "response_checks": [
+        "mention both net amortized and unblended cost"
+      ],
       "no_fabrication": true
     }
   },
@@ -180,12 +278,22 @@
     "id": "extra_measurement_max_aggregation",
     "description": "extra measurement - max aggregation",
     "prompt": "What's the peak (max) cost per service for last month?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "metrics", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "metrics",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "terminal_tool": "query_costs",
-      "allowed_prefix_tools": ["search_filters"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
       "args": {
         "query_costs": {
           "extra_measurements": [
@@ -195,7 +303,9 @@
           ]
         }
       },
-      "response_checks": ["identify the peak cost per service"],
+      "response_checks": [
+        "identify the peak cost per service"
+      ],
       "no_fabrication": true
     }
   },
@@ -203,13 +313,24 @@
     "id": "billing_metric_savings_plan",
     "description": "billing metric - savings plan effective cost",
     "prompt": "Show me my savings plan effective cost for the last 30 days",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "metrics", "billing", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "metrics",
+      "billing",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
-          "billing_metrics": ["savingsPlanEffectiveCost"]
+          "billing_metrics": [
+            "savingsPlanEffectiveCost"
+          ]
         }
       },
       "no_fabrication": true
@@ -219,13 +340,24 @@
     "id": "billing_metric_reservation",
     "description": "billing metric - reservation effective cost",
     "prompt": "What's my reservation effective cost this month?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "metrics", "billing", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "metrics",
+      "billing",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
-          "billing_metrics": ["reservationEffectiveCost"]
+          "billing_metrics": [
+            "reservationEffectiveCost"
+          ]
         }
       },
       "no_fabrication": true
@@ -235,12 +367,22 @@
     "id": "count_distinct_resources",
     "description": "count distinct - unique resources",
     "prompt": "How many distinct resources are incurring costs per service this month?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "metrics", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "metrics",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "terminal_tool": "query_costs",
-      "allowed_prefix_tools": ["search_filters"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
       "args": {
         "query_costs": {
           "count_distinct": {
@@ -248,7 +390,9 @@
           }
         }
       },
-      "response_checks": ["report distinct resource counts"],
+      "response_checks": [
+        "report distinct resource counts"
+      ],
       "no_fabrication": true
     }
   },
@@ -256,10 +400,18 @@
     "id": "today_date_period",
     "description": "today date period",
     "prompt": "What are my costs today?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "time_period", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "time_period",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "time_period": "today"
@@ -272,10 +424,18 @@
     "id": "yesterday_date_period",
     "description": "yesterday date period",
     "prompt": "How much did I spend yesterday?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "time_period", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "time_period",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "time_period": "yesterday"
@@ -288,10 +448,19 @@
     "id": "granularity_guard_absent_x_axis",
     "description": "no explicit granularity - x_axis_group_by should be absent",
     "prompt": "What are my top 5 services by cost this month?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "granularity", "guardrail", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "granularity",
+      "guardrail",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "x_axis_group_by": null
@@ -304,10 +473,18 @@
     "id": "weekly_granularity_last_quarter",
     "description": "weekly granularity - explicit",
     "prompt": "Show me weekly cost trends for the last quarter",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "granularity", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "granularity",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "x_axis_group_by": "weekly"
@@ -320,10 +497,18 @@
     "id": "compare_this_month_to_last_month",
     "description": "compare costs - correct tool",
     "prompt": "How do my costs this month compare to last month?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "comparison", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "comparison",
+      "migration"
+    ],
     "expected": {
-      "tools": ["compare_costs"],
+      "tools": [
+        "compare_costs"
+      ],
       "no_fabrication": true
     }
   },
@@ -331,10 +516,18 @@
     "id": "last_90_days",
     "description": "90-day range",
     "prompt": "Show me total cloud costs for the last 90 days",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "time_period", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "time_period",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "time_period": "last_90_days"
@@ -347,10 +540,18 @@
     "id": "custom_iso_date_range_january_2026",
     "description": "custom ISO date range",
     "prompt": "What were my costs between January 1 and January 31, 2026?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "time_period", "migration"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "time_period",
+      "migration"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "time_period": {
@@ -365,12 +566,23 @@
     "id": "top_movers_cost_increase_month_over_month",
     "description": "top movers - what drove the increase",
     "prompt": "What drove our cost increase this month vs last month?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "top_movers", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "top_movers",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_top_movers"],
+      "tools": [
+        "get_top_movers"
+      ],
       "terminal_tool": "get_top_movers",
-      "response_checks": ["explain what drove the increase", "highlight major movers"],
+      "response_checks": [
+        "explain what drove the increase",
+        "highlight major movers"
+      ],
       "no_fabrication": true
     }
   },
@@ -378,10 +590,18 @@
     "id": "top_movers_biggest_changes_last_7_days",
     "description": "top movers - biggest changes last 7 days",
     "prompt": "Which services had the biggest cost changes in the last 7 days?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "top_movers", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "top_movers",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_top_movers"],
+      "tools": [
+        "get_top_movers"
+      ],
       "args": {
         "get_top_movers": {
           "time_period": "last_7_days"
@@ -394,13 +614,26 @@
     "id": "top_movers_by_region_last_30_days",
     "description": "top movers - region over trailing 30 days",
     "prompt": "Show me the top cost movers by region for last_30_days vs the 30 days before",
-    "suites": ["langfuse"],
-    "tags": ["routing", "top_movers", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "top_movers",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_top_movers"],
-      "required_tools": ["search_filters", "get_top_movers"],
+      "tools": [
+        "get_top_movers"
+      ],
+      "required_tools": [
+        "search_filters",
+        "get_top_movers"
+      ],
       "terminal_tool": "get_top_movers",
-      "allowed_prefix_tools": ["search_filters"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
       "args": {
         "get_top_movers": {
           "time_period": "last_30_days",
@@ -409,7 +642,9 @@
           }
         }
       },
-      "response_checks": ["highlight top movers by region"],
+      "response_checks": [
+        "highlight top movers by region"
+      ],
       "no_fabrication": true
     }
   },
@@ -417,14 +652,29 @@
     "id": "unit_economics_ec2_instance_average",
     "description": "unit economics - average cost per EC2 instance",
     "prompt": "What's the average cost per EC2 instance?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "unit_economics", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "unit_economics",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_unit_economics"],
-      "required_tools": ["search_filters", "get_unit_economics"],
+      "tools": [
+        "get_unit_economics"
+      ],
+      "required_tools": [
+        "search_filters",
+        "get_unit_economics"
+      ],
       "terminal_tool": "get_unit_economics",
-      "allowed_prefix_tools": ["search_filters"],
-      "response_checks": ["report average cost per EC2 instance"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
+      "response_checks": [
+        "report average cost per EC2 instance"
+      ],
       "no_fabrication": true
     }
   },
@@ -432,13 +682,26 @@
     "id": "unit_economics_grouped_by_service",
     "description": "unit economics - cost per resource grouped by service",
     "prompt": "Show me cost per resource grouped by service for last 30 days",
-    "suites": ["langfuse"],
-    "tags": ["routing", "unit_economics", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "unit_economics",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_unit_economics"],
-      "required_tools": ["search_filters", "get_unit_economics"],
+      "tools": [
+        "get_unit_economics"
+      ],
+      "required_tools": [
+        "search_filters",
+        "get_unit_economics"
+      ],
       "terminal_tool": "get_unit_economics",
-      "allowed_prefix_tools": ["search_filters"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
       "args": {
         "get_unit_economics": {
           "time_period": {
@@ -446,7 +709,9 @@
           }
         }
       },
-      "response_checks": ["report cost per resource grouped by service"],
+      "response_checks": [
+        "report cost per resource grouped by service"
+      ],
       "no_fabrication": true
     }
   },
@@ -454,14 +719,30 @@
     "id": "unit_economics_lambda_average",
     "description": "unit economics - Lambda function counts and averages",
     "prompt": "How many unique Lambda functions do we have and what does each one cost on average?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "unit_economics", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "unit_economics",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_unit_economics"],
-      "required_tools": ["search_filters", "get_unit_economics"],
+      "tools": [
+        "get_unit_economics"
+      ],
+      "required_tools": [
+        "search_filters",
+        "get_unit_economics"
+      ],
       "terminal_tool": "get_unit_economics",
-      "allowed_prefix_tools": ["search_filters"],
-      "response_checks": ["report unique Lambda functions", "report average cost per function"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
+      "response_checks": [
+        "report unique Lambda functions",
+        "report average cost per function"
+      ],
       "no_fabrication": true
     }
   },
@@ -469,14 +750,28 @@
     "id": "cost_patterns_peak_hours",
     "description": "cost patterns - highest cost time of day",
     "prompt": "When are our costs highest during the day?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "cost_patterns", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_patterns",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_cost_patterns"],
-      "required_tools": ["get_cost_patterns"],
+      "tools": [
+        "get_cost_patterns"
+      ],
+      "required_tools": [
+        "get_cost_patterns"
+      ],
       "terminal_tool": "get_cost_patterns",
-      "allowed_prefix_tools": ["search_filters"],
-      "response_checks": ["report when costs are highest during the day"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
+      "response_checks": [
+        "report when costs are highest during the day"
+      ],
       "no_fabrication": true
     }
   },
@@ -484,10 +779,18 @@
     "id": "cost_patterns_this_week_hourly",
     "description": "cost patterns - hourly pattern this week",
     "prompt": "Show me the hourly cost pattern for this week",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "cost_patterns", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_patterns",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_cost_patterns"],
+      "tools": [
+        "get_cost_patterns"
+      ],
       "args": {
         "get_cost_patterns": {
           "time_period": "this_week"
@@ -500,10 +803,18 @@
     "id": "cost_patterns_weekend_vs_weekday",
     "description": "cost patterns - weekend versus weekdays",
     "prompt": "Is our weekend spend different from weekdays?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "cost_patterns", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_patterns",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_cost_patterns"],
+      "tools": [
+        "get_cost_patterns"
+      ],
       "no_fabrication": true
     }
   },
@@ -511,14 +822,29 @@
     "id": "cost_patterns_peak_off_peak_ratio_ec2",
     "description": "cost patterns - peak versus off-peak EC2 ratio",
     "prompt": "What's the peak vs off-peak cost ratio for EC2 this week?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "cost_patterns", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_patterns",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_cost_patterns"],
-      "required_tools": ["search_filters", "get_cost_patterns"],
+      "tools": [
+        "get_cost_patterns"
+      ],
+      "required_tools": [
+        "search_filters",
+        "get_cost_patterns"
+      ],
       "terminal_tool": "get_cost_patterns",
-      "allowed_prefix_tools": ["search_filters"],
-      "response_checks": ["report peak versus off-peak ratio for EC2"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
+      "response_checks": [
+        "report peak versus off-peak ratio for EC2"
+      ],
       "no_fabrication": true
     }
   },
@@ -526,14 +852,29 @@
     "id": "savings_coverage_by_service",
     "description": "savings coverage - by service",
     "prompt": "What's our savings plan coverage by service?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "savings_coverage", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "savings_coverage",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_savings_coverage"],
-      "required_tools": ["search_filters", "get_savings_coverage"],
+      "tools": [
+        "get_savings_coverage"
+      ],
+      "required_tools": [
+        "search_filters",
+        "get_savings_coverage"
+      ],
       "terminal_tool": "get_savings_coverage",
-      "allowed_prefix_tools": ["search_filters"],
-      "response_checks": ["compare on-demand and reserved spend"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
+      "response_checks": [
+        "compare on-demand and reserved spend"
+      ],
       "no_fabrication": true
     }
   },
@@ -541,14 +882,28 @@
     "id": "savings_coverage_on_demand_vs_reserved",
     "description": "savings coverage - on demand versus reserved",
     "prompt": "How much are we paying on-demand vs reserved?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "savings_coverage", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "savings_coverage",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_savings_coverage"],
-      "required_tools": ["get_savings_coverage"],
+      "tools": [
+        "get_savings_coverage"
+      ],
+      "required_tools": [
+        "get_savings_coverage"
+      ],
       "terminal_tool": "get_savings_coverage",
-      "allowed_prefix_tools": ["search_filters"],
-      "response_checks": ["compare on-demand and reserved spend"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
+      "response_checks": [
+        "compare on-demand and reserved spend"
+      ],
       "no_fabrication": true
     }
   },
@@ -556,10 +911,18 @@
     "id": "savings_coverage_lowest_services",
     "description": "savings coverage - lowest coverage services",
     "prompt": "Which services have the lowest RI/SP coverage?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "savings_coverage", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "savings_coverage",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_savings_coverage"],
+      "tools": [
+        "get_savings_coverage"
+      ],
       "no_fabrication": true
     }
   },
@@ -567,14 +930,29 @@
     "id": "tag_coverage_team_spend",
     "description": "tag coverage - team tag percentage",
     "prompt": "What percentage of our spend is tagged by team?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "tag_coverage", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "tag_coverage",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_tag_coverage"],
-      "required_tools": ["search_filters", "get_tag_coverage"],
+      "tools": [
+        "get_tag_coverage"
+      ],
+      "required_tools": [
+        "search_filters",
+        "get_tag_coverage"
+      ],
       "terminal_tool": "get_tag_coverage",
-      "allowed_prefix_tools": ["search_filters"],
-      "response_checks": ["report tagged spend percentage for team"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
+      "response_checks": [
+        "report tagged spend percentage for team"
+      ],
       "no_fabrication": true
     }
   },
@@ -582,14 +960,29 @@
     "id": "tag_coverage_environment_gaps",
     "description": "tag coverage - environment tag gaps by service",
     "prompt": "Which services have the worst tagging coverage for the environment tag?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "tag_coverage", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "tag_coverage",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_tag_coverage"],
-      "required_tools": ["search_filters", "get_tag_coverage"],
+      "tools": [
+        "get_tag_coverage"
+      ],
+      "required_tools": [
+        "search_filters",
+        "get_tag_coverage"
+      ],
       "terminal_tool": "get_tag_coverage",
-      "allowed_prefix_tools": ["search_filters"],
-      "response_checks": ["identify services with the worst environment tag coverage"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
+      "response_checks": [
+        "identify services with the worst environment tag coverage"
+      ],
       "no_fabrication": true
     }
   },
@@ -597,47 +990,84 @@
     "id": "tag_coverage_untagged_spend",
     "description": "tag coverage - untagged spend",
     "prompt": "How much untagged spend do we have?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "tag_coverage", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "tag_coverage",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_tag_coverage"],
-      "required_tools": ["search_filters", "get_tag_coverage"],
+      "tools": [
+        "get_tag_coverage"
+      ],
+      "required_tools": [
+        "search_filters",
+        "get_tag_coverage"
+      ],
       "terminal_tool": "get_tag_coverage",
-      "allowed_prefix_tools": ["search_filters", "get_account_context"],
-      "response_checks": ["report untagged spend"],
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_account_context"
+      ],
+      "response_checks": [
+        "report untagged spend"
+      ],
       "no_fabrication": true
     }
   },
   {
     "id": "budget_status_this_month",
-    "description": "budget status - on track this month",
+    "description": "budget vs actual - on track this month",
     "prompt": "Are we on track with our budget this month?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "budget_status", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "financial_plans"
+    ],
     "expected": {
-      "tools": ["get_budget_status"],
+      "tools": [
+        "get_financial_plans"
+      ],
       "no_fabrication": true
     }
   },
   {
     "id": "budget_status_burn_rate",
-    "description": "budget status - burn rate versus plan",
+    "description": "budget vs actual - burn rate versus plan",
     "prompt": "What's our burn rate vs the planned budget?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "budget_status", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "financial_plans"
+    ],
     "expected": {
-      "tools": ["get_budget_status"],
+      "tools": [
+        "get_financial_plans"
+      ],
       "no_fabrication": true
     }
   },
   {
     "id": "budget_status_projection",
-    "description": "budget status - projected budget exceedance",
+    "description": "budget vs actual - projected budget exceedance",
     "prompt": "Will we exceed the budget at this pace?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "budget_status", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "financial_plans"
+    ],
     "expected": {
-      "tools": ["get_budget_status"],
+      "tools": [
+        "get_financial_plans"
+      ],
       "no_fabrication": true
     }
   },
@@ -645,10 +1075,18 @@
     "id": "cost_statistics_average_daily_aws",
     "description": "cost statistics - average daily AWS cost",
     "prompt": "What's our average daily AWS cost?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "cost_statistics", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_statistics",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_cost_statistics"],
+      "tools": [
+        "get_cost_statistics"
+      ],
       "no_fabrication": true
     }
   },
@@ -656,10 +1094,18 @@
     "id": "cost_statistics_peak_day_last_month",
     "description": "cost statistics - highest cost day last month",
     "prompt": "Which day had the highest cost last month?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "cost_statistics", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_statistics",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_cost_statistics"],
+      "tools": [
+        "get_cost_statistics"
+      ],
       "args": {
         "get_cost_statistics": {
           "time_period": "last_month"
@@ -672,10 +1118,18 @@
     "id": "cost_statistics_volatility_by_service",
     "description": "cost statistics - volatility by service",
     "prompt": "How volatile is our daily spend by service?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "cost_statistics", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_statistics",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_cost_statistics"],
+      "tools": [
+        "get_cost_statistics"
+      ],
       "no_fabrication": true
     }
   },
@@ -683,10 +1137,18 @@
     "id": "cost_statistics_distribution_last_30_days",
     "description": "cost statistics - distribution stats last 30 days",
     "prompt": "Show me the cost distribution stats for the last 30 days",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "cost_statistics", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_statistics",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["get_cost_statistics"],
+      "tools": [
+        "get_cost_statistics"
+      ],
       "args": {
         "get_cost_statistics": {
           "time_period": "last_30_days"
@@ -699,19 +1161,24 @@
     "id": "compare_amortized_vs_unblended_month_over_month",
     "description": "compare costs - amortized versus unblended month over month",
     "prompt": "Compare amortized vs unblended cost changes between this month and last month",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "comparison", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "comparison",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["compare_costs"],
+      "tools": [
+        "compare_costs"
+      ],
       "args": {
         "compare_costs": {
           "current_period": "this_month",
-          "comparison_period": "last_month",
-          "extra_measurements": [
-            {
-              "type": "unblendedCost"
-            }
-          ]
+          "comparison_period": {
+            "$regex": "^(last_month|2026-)"
+          }
         }
       },
       "no_fabrication": true
@@ -721,13 +1188,23 @@
     "id": "compare_savings_plan_effective_cost_week_over_week",
     "description": "compare costs - savings plan effective cost week over week",
     "prompt": "How did our savings plan effective cost change week over week?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "comparison", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "comparison",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["compare_costs"],
+      "tools": [
+        "compare_costs"
+      ],
       "args": {
         "compare_costs": {
-          "billing_metrics": ["savingsPlanEffectiveCost"]
+          "billing_metrics": [
+            "savingsPlanEffectiveCost"
+          ]
         }
       },
       "no_fabrication": true
@@ -737,10 +1214,19 @@
     "id": "cross_dimension_service_region",
     "description": "query costs - cross dimension service and region",
     "prompt": "Break down costs by service and region simultaneously",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "query_costs", "cross_dimension", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "query_costs",
+      "cross_dimension",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "group_by": {
@@ -755,13 +1241,27 @@
     "id": "cross_dimension_team_environment_last_30_days",
     "description": "query costs - team and environment last 30 days",
     "prompt": "Show me cost by team and environment for last 30 days",
-    "suites": ["langfuse"],
-    "tags": ["routing", "query_costs", "cross_dimension", "analytics"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "query_costs",
+      "cross_dimension",
+      "analytics"
+    ],
     "expected": {
-      "tools": ["query_costs"],
-      "required_tools": ["search_filters", "query_costs"],
+      "tools": [
+        "query_costs"
+      ],
+      "required_tools": [
+        "search_filters",
+        "query_costs"
+      ],
       "terminal_tool": "query_costs",
-      "allowed_prefix_tools": ["search_filters"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
       "args": {
         "query_costs": {
           "time_period": "last_30_days",
@@ -770,7 +1270,9 @@
           }
         }
       },
-      "response_checks": ["break down cost by both team and environment"],
+      "response_checks": [
+        "break down cost by both team and environment"
+      ],
       "no_fabrication": true
     }
   },
@@ -778,10 +1280,18 @@
     "id": "list_data_explorers_all",
     "description": "list data explorers - all",
     "prompt": "What data explorers do we have?",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "context", "data_explorers"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "context",
+      "data_explorers"
+    ],
     "expected": {
-      "tools": ["list_data_explorers"],
+      "tools": [
+        "list_data_explorers"
+      ],
       "no_fabrication": true
     }
   },
@@ -789,10 +1299,18 @@
     "id": "list_data_explorers_kubernetes",
     "description": "list data explorers - Kubernetes",
     "prompt": "Show me saved data explorers about Kubernetes",
-    "suites": ["promptfoo", "langfuse"],
-    "tags": ["routing", "context", "data_explorers"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "context",
+      "data_explorers"
+    ],
     "expected": {
-      "tools": ["list_data_explorers"],
+      "tools": [
+        "list_data_explorers"
+      ],
       "args": {
         "list_data_explorers": {
           "query": {
@@ -803,34 +1321,58 @@
       "no_fabrication": true
     }
   },
-
   {
     "id": "get_filter_values_what_services",
     "description": "get_filter_values - list available services",
     "prompt": "What services do we have?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "filters", "discovery"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "filters",
+      "discovery"
+    ],
     "expected": {
-      "tools": ["get_filter_values"],
-      "required_tools": ["search_filters", "get_filter_values"],
+      "tools": [
+        "get_filter_values"
+      ],
+      "required_tools": [
+        "search_filters",
+        "get_filter_values"
+      ],
       "terminal_tool": "get_filter_values",
-      "allowed_prefix_tools": ["search_filters"],
-      "response_checks": ["list actual service names"],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
+      "response_checks": [
+        "list actual service names"
+      ],
       "no_fabrication": true
     }
   },
   {
     "id": "get_filter_values_show_regions",
-    "description": "get_filter_values - list available regions",
+    "description": "get_filter_values - list available regions (or query_costs grouped by region)",
     "prompt": "Show me all the regions we have costs in",
-    "suites": ["langfuse"],
-    "tags": ["routing", "filters", "discovery"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "filters",
+      "discovery"
+    ],
     "expected": {
-      "tools": ["get_filter_values"],
-      "required_tools": ["search_filters", "get_filter_values"],
-      "terminal_tool": "get_filter_values",
-      "allowed_prefix_tools": ["search_filters"],
-      "response_checks": ["list region names"],
+      "tools": [
+        "search_filters"
+      ],
+      "required_tools": [
+        "search_filters"
+      ],
+      "response_checks": [
+        "list region names"
+      ],
       "no_fabrication": true
     }
   },
@@ -838,63 +1380,105 @@
     "id": "get_filter_values_environments",
     "description": "get_filter_values - what environments exist",
     "prompt": "What environments do we have tagged?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "filters", "discovery"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "filters",
+      "discovery"
+    ],
     "expected": {
-      "tools": ["get_filter_values"],
-      "required_tools": ["search_filters", "get_filter_values"],
-      "terminal_tool": "get_filter_values",
-      "allowed_prefix_tools": ["search_filters"],
-      "response_checks": ["list environment tag values"],
+      "tools": [
+        "search_filters"
+      ],
+      "required_tools": [
+        "search_filters"
+      ],
+      "response_checks": [
+        "list environment tag values"
+      ],
       "no_fabrication": true
     }
   },
-
   {
     "id": "list_available_filters_all",
     "description": "list_available_filters - explore all dimensions",
     "prompt": "What dimensions can I filter or group costs by?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "filters", "discovery"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "filters",
+      "discovery"
+    ],
     "expected": {
-      "tools": ["list_available_filters"],
+      "tools": [
+        "list_available_filters"
+      ],
       "no_fabrication": true
     }
   },
   {
     "id": "list_available_filters_kubernetes",
-    "description": "list_available_filters - Kubernetes filters",
+    "description": "list_available_filters - Kubernetes filters (search_filters also acceptable)",
     "prompt": "What Kubernetes filters are available?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "filters", "discovery"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "filters",
+      "discovery"
+    ],
     "expected": {
-      "tools": ["list_available_filters"],
+      "tools": [
+        "search_filters"
+      ],
       "no_fabrication": true
     }
   },
-
   {
     "id": "get_usage_unit_types_ec2",
     "description": "get_usage_unit_types - discover EC2 usage units",
     "prompt": "What usage units are available for EC2?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "usage", "discovery"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "usage",
+      "discovery"
+    ],
     "expected": {
-      "tools": ["get_usage_unit_types"],
-      "required_tools": ["get_usage_unit_types"],
-      "allowed_prefix_tools": ["search_filters"],
+      "tools": [
+        "get_usage_unit_types"
+      ],
+      "required_tools": [
+        "get_usage_unit_types"
+      ],
+      "allowed_prefix_tools": [
+        "search_filters"
+      ],
       "no_fabrication": true
     }
   },
-
   {
     "id": "get_financial_plans_list",
     "description": "get_financial_plans - list all plans",
     "prompt": "Show me our financial plans",
-    "suites": ["langfuse"],
-    "tags": ["routing", "financial_plans"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "financial_plans"
+    ],
     "expected": {
-      "tools": ["get_financial_plans"],
+      "tools": [
+        "get_financial_plans"
+      ],
       "no_fabrication": true
     }
   },
@@ -902,22 +1486,140 @@
     "id": "get_financial_plans_by_name",
     "description": "get_financial_plans - search by name",
     "prompt": "Do we have a financial plan for infrastructure?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "financial_plans"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "financial_plans"
+    ],
     "expected": {
-      "tools": ["get_financial_plans"],
+      "tools": [
+        "get_financial_plans"
+      ],
+      "args": {
+        "get_financial_plans": {
+          "name": {
+            "$regex": "(?i)infra"
+          }
+        }
+      },
       "no_fabrication": true
     }
   },
-
+  {
+    "id": "budget_utilization_percent",
+    "description": "budget utilization - how much spent vs budget",
+    "prompt": "What percentage of our budget have we used so far?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "financial_plans"
+    ],
+    "expected": {
+      "tools": [
+        "get_financial_plans"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "budget_specific_plan_period",
+    "description": "get_financial_plans - specific plan and period",
+    "prompt": "Show me the AWS budget for February 2026",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "financial_plans"
+    ],
+    "expected": {
+      "tools": [
+        "get_financial_plans"
+      ],
+      "args": {
+        "get_financial_plans": {
+          "name": {
+            "$regex": "(?i)aws"
+          },
+          "period": "2026-2"
+        }
+      },
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "budget_forecast_comparison",
+    "description": "get_financial_plans - budget vs forecast",
+    "prompt": "How does our forecast compare to the budget?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "financial_plans"
+    ],
+    "expected": {
+      "tools": [
+        "get_financial_plans"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "budget_over_budget_plans",
+    "description": "get_financial_plans - which plans are over budget",
+    "prompt": "Which plans are over budget right now?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "financial_plans"
+    ],
+    "expected": {
+      "tools": [
+        "get_financial_plans"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "budget_remaining_this_month",
+    "description": "get_financial_plans - remaining budget",
+    "prompt": "How much budget do we have left this month?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "financial_plans"
+    ],
+    "expected": {
+      "tools": [
+        "get_financial_plans"
+      ],
+      "no_fabrication": true
+    }
+  },
   {
     "id": "anomalies_last_30_days",
     "description": "get_anomalies - last 30 days",
     "prompt": "Were there any cost anomalies in the last 30 days?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "anomalies"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "anomalies"
+    ],
     "expected": {
-      "tools": ["get_anomalies"],
+      "tools": [
+        "get_anomalies"
+      ],
       "args": {
         "get_anomalies": {
           "time_period": "last_30_days"
@@ -930,22 +1632,35 @@
     "id": "anomalies_high_severity",
     "description": "get_anomalies - high severity only",
     "prompt": "Show me only the critical cost spikes",
-    "suites": ["langfuse"],
-    "tags": ["routing", "anomalies"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "anomalies"
+    ],
     "expected": {
-      "tools": ["get_anomalies"],
+      "tools": [
+        "get_anomalies"
+      ],
       "no_fabrication": true
     }
   },
-
   {
     "id": "waste_idle_resources",
     "description": "get_waste_recommendations - idle resources",
     "prompt": "Do we have any idle resources we're paying for?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "waste"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "waste"
+    ],
     "expected": {
-      "tools": ["get_waste_recommendations"],
+      "tools": [
+        "get_waste_recommendations"
+      ],
       "no_fabrication": true
     }
   },
@@ -953,10 +1668,17 @@
     "id": "waste_rightsizing_ec2",
     "description": "get_waste_recommendations - EC2 rightsizing",
     "prompt": "Are any of our EC2 instances over-provisioned?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "waste"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "waste"
+    ],
     "expected": {
-      "tools": ["get_waste_recommendations"],
+      "tools": [
+        "get_waste_recommendations"
+      ],
       "no_fabrication": true
     }
   },
@@ -964,26 +1686,49 @@
     "id": "waste_commitment_gaps",
     "description": "get_waste_recommendations - commitment coverage gaps",
     "prompt": "Where could we save money with more reserved instances or savings plans?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "waste"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "waste"
+    ],
     "expected": {
-      "tools": ["get_waste_recommendations"],
+      "tools": [
+        "get_waste_recommendations"
+      ],
       "no_fabrication": true
     }
   },
-
   {
     "id": "query_costs_filtered_ec2_us_east",
     "description": "query_costs - filter by service and region",
     "prompt": "Show me EC2 costs in us-east-1 for the last 30 days",
-    "suites": ["langfuse"],
-    "tags": ["routing", "query_costs", "filters", "multi_step"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "query_costs",
+      "filters",
+      "multi_step"
+    ],
     "expected": {
-      "tools": ["query_costs"],
-      "required_tools": ["search_filters", "query_costs"],
+      "tools": [
+        "query_costs"
+      ],
+      "required_tools": [
+        "search_filters",
+        "query_costs"
+      ],
       "terminal_tool": "query_costs",
-      "allowed_prefix_tools": ["search_filters", "get_filter_values"],
-      "response_checks": ["report EC2 costs in us-east-1"],
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values"
+      ],
+      "response_checks": [
+        "report EC2 costs in us-east-1"
+      ],
       "no_fabrication": true
     }
   },
@@ -991,29 +1736,59 @@
     "id": "query_costs_filtered_production",
     "description": "query_costs - filter by environment tag",
     "prompt": "How much are we spending in production this month?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "query_costs", "filters", "multi_step"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "query_costs",
+      "filters",
+      "multi_step"
+    ],
     "expected": {
-      "tools": ["query_costs"],
-      "required_tools": ["search_filters", "query_costs"],
+      "tools": [
+        "query_costs"
+      ],
+      "required_tools": [
+        "search_filters",
+        "query_costs"
+      ],
       "terminal_tool": "query_costs",
-      "allowed_prefix_tools": ["search_filters", "get_filter_values"],
-      "response_checks": ["report production costs"],
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values"
+      ],
+      "response_checks": [
+        "report production costs"
+      ],
       "no_fabrication": true
     }
   },
-
   {
     "id": "query_costs_usage_ec2_hours",
     "description": "query_costs - EC2 usage hours",
     "prompt": "How many EC2 hours did we use last month?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "query_costs", "usage"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "query_costs",
+      "usage"
+    ],
     "expected": {
-      "tools": ["query_costs"],
-      "required_tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
+      "required_tools": [
+        "query_costs"
+      ],
       "terminal_tool": "query_costs",
-      "allowed_prefix_tools": ["search_filters", "get_filter_values", "get_usage_unit_types"],
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "get_usage_unit_types"
+      ],
       "args": {
         "query_costs": {
           "usage_configuration": {
@@ -1021,19 +1796,27 @@
           }
         }
       },
-      "response_checks": ["report EC2 usage hours"],
+      "response_checks": [
+        "report EC2 usage hours"
+      ],
       "no_fabrication": true
     }
   },
-
   {
     "id": "analyze_virtual_tags_discovery",
     "description": "analyze_virtual_tags - global discovery",
     "prompt": "Show me our virtual tag allocation structure",
-    "suites": ["langfuse"],
-    "tags": ["routing", "virtual_tags"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "virtual_tags"
+    ],
     "expected": {
-      "tools": ["analyze_virtual_tags"],
+      "tools": [
+        "analyze_virtual_tags"
+      ],
       "no_fabrication": true
     }
   },
@@ -1041,35 +1824,57 @@
     "id": "analyze_virtual_tags_specific",
     "description": "analyze_virtual_tags - focused on specific tag",
     "prompt": "How does the Team virtual tag work and what depends on it?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "virtual_tags"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "virtual_tags"
+    ],
     "expected": {
-      "tools": ["analyze_virtual_tags"],
+      "tools": [
+        "analyze_virtual_tags"
+      ],
       "no_fabrication": true
     }
   },
-
   {
     "id": "get_object_usages_virtual_tag",
     "description": "get_object_usages - find where a virtual tag is used",
     "prompt": "Where is the Team virtual tag used across dashboards and views?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "object_usages"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "object_usages"
+    ],
     "expected": {
-      "tools": ["get_object_usages"],
+      "tools": [
+        "get_object_usages"
+      ],
       "no_fabrication": true
     }
   },
-
   {
     "id": "ambiguous_routing_cost_change_ec2",
     "description": "ambiguous routing - EC2 cost change could be compare or top_movers",
     "prompt": "How did our EC2 costs change compared to last month?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "ambiguous"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "ambiguous"
+    ],
     "expected": {
-      "tools": ["compare_costs"],
-      "allowed_prefix_tools": ["search_filters", "get_filter_values"],
+      "tools": [
+        "compare_costs"
+      ],
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values"
+      ],
       "no_fabrication": true
     }
   },
@@ -1077,26 +1882,50 @@
     "id": "ambiguous_routing_s3_spend",
     "description": "ambiguous routing - S3 total spend needs filter chain",
     "prompt": "How much are we spending on S3?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "query_costs", "filters", "multi_step"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "query_costs",
+      "filters",
+      "multi_step"
+    ],
     "expected": {
-      "tools": ["query_costs"],
-      "required_tools": ["search_filters", "query_costs"],
+      "tools": [
+        "query_costs"
+      ],
+      "required_tools": [
+        "search_filters",
+        "query_costs"
+      ],
       "terminal_tool": "query_costs",
-      "allowed_prefix_tools": ["search_filters", "get_filter_values"],
-      "response_checks": ["report S3 costs"],
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values"
+      ],
+      "response_checks": [
+        "report S3 costs"
+      ],
       "no_fabrication": true
     }
   },
-
   {
     "id": "named_period_preference_this_month",
     "description": "guardrail - prefer this_month over date range",
     "prompt": "What are my total costs this month?",
-    "suites": ["langfuse"],
-    "tags": ["routing", "time_period", "guardrail"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "time_period",
+      "guardrail"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "time_period": "this_month"
@@ -1109,10 +1938,18 @@
     "id": "named_period_preference_last_month",
     "description": "guardrail - prefer last_month over date range",
     "prompt": "Show me last month's total spend",
-    "suites": ["langfuse"],
-    "tags": ["routing", "time_period", "guardrail"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "time_period",
+      "guardrail"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "time_period": "last_month"
@@ -1121,19 +1958,194 @@
       "no_fabrication": true
     }
   },
-
   {
     "id": "daily_trend_last_month",
     "description": "query_costs - daily trend for a month period",
     "prompt": "Show me the daily cost trend for last month",
-    "suites": ["langfuse"],
-    "tags": ["routing", "granularity", "query_costs"],
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "granularity",
+      "query_costs"
+    ],
     "expected": {
-      "tools": ["query_costs"],
+      "tools": [
+        "query_costs"
+      ],
       "args": {
         "query_costs": {
           "x_axis_group_by": "daily",
           "time_period": "last_month"
+        }
+      },
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "query_costs_unblended",
+    "description": "cost type selection - explicit unblended cost",
+    "prompt": "Show me last month's costs using unblended cost",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_type",
+      "query_costs"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "args": {
+        "query_costs": {
+          "cost_type": "unblendedCost"
+        }
+      },
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "query_costs_blended",
+    "description": "cost type selection - blended cost",
+    "prompt": "What's my blended cost by service for the last 30 days?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_type",
+      "query_costs"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "args": {
+        "query_costs": {
+          "cost_type": "blendedCost"
+        }
+      },
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "query_costs_amortized",
+    "description": "cost type selection - amortized (not net amortized)",
+    "prompt": "Show amortized costs for last week",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_type",
+      "query_costs"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "args": {
+        "query_costs": {
+          "cost_type": "amortizedCost"
+        }
+      },
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "query_costs_list_cost",
+    "description": "cost type selection - list cost",
+    "prompt": "What are my list costs for last month?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_type",
+      "query_costs"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "args": {
+        "query_costs": {
+          "cost_type": "listCost"
+        }
+      },
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "compare_costs_unblended",
+    "description": "cost type selection - compare with unblended",
+    "prompt": "Compare this month vs last month using unblended cost",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_type",
+      "comparison"
+    ],
+    "expected": {
+      "tools": [
+        "compare_costs"
+      ],
+      "args": {
+        "compare_costs": {
+          "cost_type": "unblendedCost"
+        }
+      },
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "query_costs_no_cost_type_when_unspecified",
+    "description": "cost type selection - no cost_type arg when user doesn't specify",
+    "prompt": "What were my top costs last month?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_type",
+      "query_costs"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "args": {
+        "query_costs": {
+          "cost_type": null
+        }
+      },
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "query_costs_fair_share",
+    "description": "cost type selection - fair share cost",
+    "prompt": "Show me fair share costs by service for last 30 days",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "routing",
+      "cost_type",
+      "query_costs"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "args": {
+        "query_costs": {
+          "cost_type": "fairShareCost"
         }
       },
       "no_fabrication": true

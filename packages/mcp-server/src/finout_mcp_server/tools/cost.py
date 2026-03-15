@@ -49,6 +49,7 @@ def summarize_cost_data(data: list[dict[str, Any]], max_items: int = 25) -> list
 
 async def query_costs_impl(args: dict) -> dict:
     """Implementation of query_costs tool"""
+    from ..finout_client import CostType
     from ..server import _auto_granularity, get_client
 
     finout_client = get_client()
@@ -62,6 +63,13 @@ async def query_costs_impl(args: dict) -> dict:
     billing_metrics = args.get("billing_metrics")
     count_distinct = args.get("count_distinct")
     predefined_queries = args.get("predefined_queries")
+
+    # Resolve cost type: explicit param → account default → NET_AMORTIZED
+    raw_cost_type = args.get("cost_type")
+    if raw_cost_type:
+        cost_type = CostType(raw_cost_type)
+    else:
+        cost_type = finout_client.get_default_cost_type()
 
     # Check if internal API is configured
     if not finout_client.internal_api_url:
@@ -148,6 +156,7 @@ async def query_costs_impl(args: dict) -> dict:
         filters=filters if filters else None,
         group_by=group_by,
         x_axis_group_by=x_axis_group_by,
+        cost_type=cost_type,
         usage_configuration=usage_configuration,
         extra_measurements=extra_measurements,
         billing_metrics=billing_metrics,
@@ -161,6 +170,7 @@ async def query_costs_impl(args: dict) -> dict:
     # Format response
     result: dict[str, Any] = {
         "time_period": time_period,
+        "cost_type": cost_type.value,
         "filters": filters,
         "group_by": group_by,
         "data": summarized,
@@ -323,6 +333,7 @@ def _infer_previous_period(time_period: str) -> str:
 
 async def compare_costs_impl(args: dict) -> dict:
     """Implementation of compare_costs tool"""
+    from ..finout_client import CostType
     from ..server import get_client
 
     finout_client = get_client()
@@ -333,6 +344,13 @@ async def compare_costs_impl(args: dict) -> dict:
     group_by = args.get("group_by")
     extra_measurements = args.get("extra_measurements")
     billing_metrics = args.get("billing_metrics")
+
+    # Resolve cost type: explicit param → account default → NET_AMORTIZED
+    raw_cost_type = args.get("cost_type")
+    if raw_cost_type:
+        cost_type = CostType(raw_cost_type)
+    else:
+        cost_type = finout_client.get_default_cost_type()
 
     # Check if internal API is configured
     if not finout_client.internal_api_url:
@@ -356,6 +374,7 @@ async def compare_costs_impl(args: dict) -> dict:
         time_period=current_period,
         filters=filters if filters else None,
         group_by=group_by,
+        cost_type=cost_type,
         extra_measurements=extra_measurements,
         billing_metrics=billing_metrics,
     )
@@ -364,6 +383,7 @@ async def compare_costs_impl(args: dict) -> dict:
         time_period=comparison_period,
         filters=filters if filters else None,
         group_by=group_by,
+        cost_type=cost_type,
         extra_measurements=extra_measurements,
         billing_metrics=billing_metrics,
     )
@@ -408,6 +428,7 @@ async def compare_costs_impl(args: dict) -> dict:
 
     result: dict[str, Any] = {
         "current_period": current_period,
+        "cost_type": cost_type.value,
         "current_total": format_currency(current_total),
         "comparison_period": comparison_period,
         "comparison_total": format_currency(comparison_total),

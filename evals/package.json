@@ -1,7 +1,0 @@
-{
-  "name": "finout-evals",
-  "private": true,
-  "dependencies": {
-    "promptfoo": "latest"
-  }
-}

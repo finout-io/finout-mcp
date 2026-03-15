@@ -35,6 +35,7 @@ TOOLS_REFERENCE: List[ToolEntry] = [
         ],
         "key_params": [
             "time_period (default: last_30_days)",
+            "cost_type — cost metric (defaults to account setting)",
             "filters — copy from search_filters",
             "group_by — copy from search_filters",
             "usage_configuration — for usage alongside cost",
@@ -60,6 +61,7 @@ TOOLS_REFERENCE: List[ToolEntry] = [
         "key_params": [
             "current_period",
             "comparison_period",
+            "cost_type — cost metric (defaults to account setting)",
             "filters — copy from search_filters",
             "group_by",
         ],
@@ -90,19 +92,21 @@ TOOLS_REFERENCE: List[ToolEntry] = [
         "name": "get_financial_plans",
         "category": "cost_query",
         "availability": "public",
-        "description": "Get budgets and forecasts for the account.",
+        "description": "Get financial plans with budget, actual cost, run rate, and forecast.",
         "when_to_use": [
             "budget, financial plan, forecast",
             "planned spend, budget vs actual",
-            "are we on track?",
+            "are we on track? budget utilization",
+            "burn rate, will we exceed budget?",
         ],
         "example_prompts": [
             "What's our AWS budget for this month?",
             "Show me all active financial plans",
             "Are we on track with the Q1 budget?",
+            "What's our burn rate vs the planned budget?",
         ],
         "key_params": [
-            "name — filter by plan name (optional)",
+            "name — omit to list plan names, provide to get details for one plan",
             "period — month in YYYY-M format (default: current month)",
         ],
         "workflow": None,
@@ -475,27 +479,6 @@ TOOLS_REFERENCE: List[ToolEntry] = [
             "time_period, group_by, filters",
         ],
         "workflow": "search_filters → get_tag_coverage",
-    },
-    {
-        "name": "get_budget_status",
-        "category": "cost_query",
-        "availability": "public",
-        "description": "Compare actual spend against financial plan budgets with burn rate.",
-        "when_to_use": [
-            "are we on budget? budget vs actual",
-            "burn rate, will we exceed budget?",
-            "budget utilization",
-        ],
-        "example_prompts": [
-            "Are we on track with our budget this month?",
-            "What's our burn rate vs the planned budget?",
-            "Will we exceed the Q1 budget at this pace?",
-        ],
-        "key_params": [
-            "plan_name — filter to specific plan (optional)",
-            "period — budget month in YYYY-M format",
-        ],
-        "workflow": None,
     },
     {
         "name": "get_cost_statistics",
