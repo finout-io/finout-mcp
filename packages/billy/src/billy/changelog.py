@@ -19,6 +19,22 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.34.0",
+        "date": "2026-03-15",
+        "title": "Share link in embedded sidebar",
+        "sections": {
+            "external_mcp": [
+                "No changes"
+            ],
+            "internal_mcp": [
+                "No changes"
+            ],
+            "billy": [
+                "Share link button now available in collapsed sidebar for embedded mode"
+            ]
+        }
+    },
+    {
         "version": "0.33.0",
         "date": "2026-03-15",
         "title": "OAuth hardening and refresh token support",

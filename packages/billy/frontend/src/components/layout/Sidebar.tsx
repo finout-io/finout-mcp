@@ -18,6 +18,8 @@ interface Props {
   activeConversationId?: string
   onSelectConversation: (conversation: ConversationSummary) => void
   onNewConversation: () => void
+  shareToken?: string
+  onCopyShareLink?: () => void
 }
 
 function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
@@ -53,6 +55,8 @@ export function Sidebar({
   activeConversationId,
   onSelectConversation,
   onNewConversation,
+  shareToken,
+  onCopyShareLink,
 }: Props) {
   if (collapsed) {
     return (
@@ -81,6 +85,19 @@ export function Sidebar({
               <Text size="lg" fw={700}>+</Text>
             </ActionIcon>
           </Tooltip>
+          {shareToken && onCopyShareLink && (
+            <Tooltip label="Copy share link" position="right">
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="lg"
+                onClick={onCopyShareLink}
+                aria-label="Copy share link"
+              >
+                <Text size="md">🔗</Text>
+              </ActionIcon>
+            </Tooltip>
+          )}
         </Stack>
       </Box>
     )

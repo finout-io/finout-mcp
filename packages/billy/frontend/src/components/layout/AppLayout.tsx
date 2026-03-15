@@ -433,6 +433,8 @@ export function AppLayout() {
           activeConversationId={activeConversationId}
           onSelectConversation={handleSelectConversation}
           onNewConversation={handleNewConversation}
+          shareToken={shareToken}
+          onCopyShareLink={handleCopyShareLink}
         />
       </AppShell.Navbar>
 
