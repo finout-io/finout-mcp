@@ -1775,7 +1775,7 @@ async def list_tools() -> list[Tool]:
                 "AWS Cost Explorer, or a Finout view ratio) and produces metrics that virtual tags use "
                 "for metric-based cost reallocation.\n\n"
                 "PRESENTING RESULTS: Group centers by type. Highlight source details "
-                "(bucket, query, view, etc). Note which have data_fetched=true vs false."
+                "(bucket, query, view, etc). Show which virtual tags use each center."
             ),
             inputSchema={
                 "type": "object",

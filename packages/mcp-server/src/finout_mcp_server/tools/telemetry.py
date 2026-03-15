@@ -85,7 +85,6 @@ def _format_center(
         "field": center.get("field", ""),
         "type": center.get("type", ""),
         "is_active": center.get("isActive", False),
-        "data_fetched": center.get("initialDataFetched", False),
         "metrics": center.get("metricNames", []),
     }
 
@@ -181,7 +180,6 @@ async def list_telemetry_centers_impl(args: dict) -> dict:
         "_presentation_hint": (
             "Present telemetry centers grouped by type. "
             "Highlight the source summary for each (bucket, query, view, etc). "
-            "Note which centers have data_fetched=true vs false. "
             "For each center, show which virtual tags use it (used_by_virtual_tags). "
             "Flag unused centers as potential cleanup candidates."
         ),
