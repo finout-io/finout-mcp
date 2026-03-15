@@ -1,13 +1,15 @@
+"""Tests for PKCE utilities and opaque token generation."""
+
 import base64
 import hashlib
-from unittest.mock import patch
-
-import pytest
 
 from finout_mcp_hosted.oauth import (
-    _verify_pkce,
-    consume_auth_code,
-    generate_auth_code,
+    TOKEN_PREFIX_ACCESS,
+    TOKEN_PREFIX_CODE,
+    TOKEN_PREFIX_REFRESH,
+    generate_opaque_token,
+    pkce_challenge,
+    verify_pkce,
 )
 
 
@@ -16,91 +18,42 @@ def _make_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
-REDIRECT_URI = "http://localhost/callback"
+def test_generate_opaque_token_has_prefix():
+    token = generate_opaque_token(TOKEN_PREFIX_ACCESS)
+    assert token.startswith("fmcp_at_")
 
 
-def test_generate_and_consume_auth_code_valid_pkce():
-    verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-    challenge = _make_challenge(verifier)
-
-    code = generate_auth_code("test-jwt", challenge, REDIRECT_URI)
-    jwt_out, refresh_token = consume_auth_code(code, verifier, REDIRECT_URI)
-
-    assert jwt_out == "test-jwt"
-    assert refresh_token == ""
+def test_generate_opaque_token_length():
+    token = generate_opaque_token(TOKEN_PREFIX_ACCESS)
+    # prefix (8 chars) + 64 hex chars = 72
+    assert len(token) == 8 + 64
 
 
-def test_consume_auth_code_with_refresh_token():
-    verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-    challenge = _make_challenge(verifier)
-
-    code = generate_auth_code("jwt", challenge, REDIRECT_URI, refresh_token="rt-123")
-    jwt_out, refresh_token = consume_auth_code(code, verifier, REDIRECT_URI)
-
-    assert jwt_out == "jwt"
-    assert refresh_token == "rt-123"
+def test_generate_opaque_token_unique():
+    t1 = generate_opaque_token(TOKEN_PREFIX_CODE)
+    t2 = generate_opaque_token(TOKEN_PREFIX_CODE)
+    assert t1 != t2
 
 
-def test_consume_auth_code_wrong_verifier_raises():
-    verifier = "correct-verifier-abcdefghij1234567890abcdef"
-    challenge = _make_challenge(verifier)
-
-    code = generate_auth_code("jwt", challenge, "http://localhost/cb")
-
-    with pytest.raises(ValueError, match="PKCE"):
-        consume_auth_code(code, "wrong-verifier", "http://localhost/cb")
-
-
-def test_consume_auth_code_expired_raises():
-    verifier = "some-verifier-abcdefghij1234567890abcdef01"
-    challenge = _make_challenge(verifier)
-
-    code = generate_auth_code("jwt", challenge, "http://localhost/cb")
-
-    with patch("finout_mcp_hosted.oauth.time") as mock_time:
-        mock_time.time.return_value = 9_999_999_999  # far future
-        with pytest.raises(ValueError, match="expired"):
-            consume_auth_code(code, verifier, "http://localhost/cb")
-
-
-def test_consume_auth_code_tampered_signature_raises():
-    verifier = "tamper-verifier-abcdefghij1234567890abcdef"
-    challenge = _make_challenge(verifier)
-
-    code = generate_auth_code("jwt", challenge, "http://localhost/cb")
-    tampered = code[:-4] + "xxxx"
-
-    with pytest.raises(ValueError, match="Invalid"):
-        consume_auth_code(tampered, verifier, "http://localhost/cb")
-
-
-def test_consume_auth_code_redirect_uri_mismatch_raises():
-    verifier = "redirect-verifier-abcdefghij1234567890abc"
-    challenge = _make_challenge(verifier)
-
-    code = generate_auth_code("jwt", challenge, "http://localhost/cb")
-
-    with pytest.raises(ValueError, match="redirect_uri mismatch"):
-        consume_auth_code(code, verifier, "http://evil.com/steal")
-
-
-def test_consume_auth_code_redirect_uri_missing_raises():
-    verifier = "redirect-verifier-abcdefghij1234567890abc"
-    challenge = _make_challenge(verifier)
-
-    code = generate_auth_code("jwt", challenge, "http://localhost/cb")
-
-    with pytest.raises(ValueError, match="redirect_uri required"):
-        consume_auth_code(code, verifier)
+def test_token_prefixes():
+    assert generate_opaque_token(TOKEN_PREFIX_ACCESS).startswith("fmcp_at_")
+    assert generate_opaque_token(TOKEN_PREFIX_REFRESH).startswith("fmcp_rt_")
+    assert generate_opaque_token(TOKEN_PREFIX_CODE).startswith("fmcp_ac_")
 
 
 def test_verify_pkce_correct_sha256():
     verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
     expected_challenge = _make_challenge(verifier)
-    assert _verify_pkce(verifier, expected_challenge) is True
+    assert verify_pkce(verifier, expected_challenge) is True
 
 
 def test_verify_pkce_wrong_verifier():
     verifier = "correct-verifier-00000000000000000000000000"
     challenge = _make_challenge(verifier)
-    assert _verify_pkce("wrong-verifier", challenge) is False
+    assert verify_pkce("wrong-verifier", challenge) is False
+
+
+def test_pkce_challenge_matches_manual():
+    verifier = "test-verifier-1234567890"
+    expected = _make_challenge(verifier)
+    assert pkce_challenge(verifier) == expected

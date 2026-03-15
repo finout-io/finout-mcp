@@ -19,6 +19,28 @@ class ChangelogEntry(TypedDict):
 # Newest first. Add one entry for every released version.
 CHANGELOG_ENTRIES: List[ChangelogEntry] = [
     {
+        "version": "0.35.0",
+        "date": "2026-03-15",
+        "title": "Filter search intelligence, cross-cost-center recovery, telemetry centers",
+        "sections": {
+            "external_mcp": [
+                "Filter search now understands multi-word queries (e.g., 'capacity type', 'purchase option', 'kubernetes cluster')",
+                "Cost queries automatically detect sparse dimensions and suggest better alternatives",
+                "Cross-cost-center guidance helps find historical data when K8s labels lack coverage"
+            ],
+            "internal_mcp": [
+                "Telemetry centers tool for inspecting KPI data sources behind virtual tag allocations",
+                "Virtual tag type inference refined (custom vs relational classification)"
+            ],
+            "billy": [
+                "Tokenized search reduces failed filter lookups from ~6 retries to 0",
+                "Sparse data quality hints with K8s-specific AWS CUR fallback guidance",
+                "14 new eval cases for filter discovery, cross-cost-center, and search quality (102 total)",
+                "Eval case fixes: financial_plans arg expectations, list_available_filters routing"
+            ]
+        }
+    },
+    {
         "version": "0.34.0",
         "date": "2026-03-15",
         "title": "Share link in embedded sidebar",

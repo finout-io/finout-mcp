@@ -709,8 +709,8 @@ class TestToolDescriptions:
         assert "savings" in tool_map["get_waste_recommendations"].lower()
         assert "waste" in tool_map["get_waste_recommendations"].lower()
 
-        # list_available_filters should warn against casual use
-        assert "ONLY" in tool_map["list_available_filters"]
+        # list_available_filters should position as fallback for search
+        assert "FALLBACK" in tool_map["list_available_filters"]
 
         # get_usage_unit_types should mention chaining
         assert "CHAIN" in tool_map["get_usage_unit_types"]
@@ -763,7 +763,7 @@ class TestToolDescriptions:
         assert "get_top_movers" in internal_tool_names
         assert "get_unit_economics" in internal_tool_names
         assert "list_data_explorers" in internal_tool_names
-        assert len(internal_tools) == 26
+        assert len(internal_tools) == 27
 
     @pytest.mark.asyncio
     async def test_create_dashboard_impl_formats_presentation_hint(self):
@@ -1039,11 +1039,28 @@ class TestAnalyzeVirtualTagsHelpers:
         assert _infer_tag_type(tag, {}) == "reallocation"
 
     def test_infer_tag_type_relational(self):
+        """Relational: only when API type is multiKeyReallocation."""
+        from src.finout_mcp_server.server import _infer_tag_type
+
+        tag = {"type": "multiKeyReallocation", "rules": [{"to": "x"}]}
+        assert _infer_tag_type(tag, {}) == "relational"
+
+    def test_infer_tag_type_custom_with_vtag_references(self):
+        """Custom: even when rules reference virtual tags (filter or output)."""
         from src.finout_mcp_server.server import _infer_tag_type
 
         tag_map = {"tag-id-1": "Other Tag"}
-        tag = {"rules": [{"filters": {"costCenter": "virtualTag", "key": "tag-id-1"}}]}
-        assert _infer_tag_type(tag, tag_map) == "relational"
+        # Filtering on virtualTag → still custom
+        tag = {
+            "rules": [
+                {"to": "my-value", "filters": {"costCenter": "virtualTag", "key": "tag-id-1"}}
+            ]
+        }
+        assert _infer_tag_type(tag, tag_map) == "custom"
+
+        # Output delegating to virtualTag → still custom (not multiKeyReallocation)
+        tag2 = {"rules": [{"to": {"key": "tag-id-1"}, "filters": {"costCenter": "amazon-cur"}}]}
+        assert _infer_tag_type(tag2, tag_map) == "custom"
 
     def test_infer_tag_type_custom(self):
         from src.finout_mcp_server.server import _infer_tag_type
@@ -1106,7 +1123,7 @@ class TestAnalyzeVirtualTagsHelpers:
         result = _notable_tags(tags, edges, tag_map, tag_id_to_type)
         assert result == []
 
-    def test_get_reallocation_info_metric(self):
+    def test_get_reallocation_info_telemetry(self):
         from src.finout_mcp_server.server import _get_reallocation_info
 
         tag = {
@@ -1125,33 +1142,70 @@ class TestAnalyzeVirtualTagsHelpers:
         }
         info = _get_reallocation_info(tag)
 
-        assert info["strategy"] == "metric"
+        assert info["reallocation_type"] == "telemetry"
         assert len(info["metric_sources"]) == 1
         assert info["metric_sources"][0]["metric"] == "ratio"
         assert info["metric_sources"][0]["dimension"] == "namespace"
         assert info["metric_sources"][0]["join_on"] == "name_skeleton"
         assert info["allocation_count"] == 1
 
-    def test_get_reallocation_info_percentage(self):
+    def test_get_reallocation_info_static(self):
         from src.finout_mcp_server.server import _get_reallocation_info
 
-        tag = {"allocations": [{"type": "percentage", "targets": ["team-a", "team-b"]}]}
+        tag = {
+            "allocations": [
+                {
+                    "name": "cost-split",
+                    "type": "fixed",
+                    "data": {
+                        "tags": [
+                            {"key": "COGS", "value": 80},
+                            {"key": "S&M", "value": 20},
+                        ]
+                    },
+                }
+            ]
+        }
         info = _get_reallocation_info(tag)
 
-        assert info["strategy"] == "percentage"
+        assert info["reallocation_type"] == "static"
+        assert len(info["static_splits"]) == 1
+        assert info["static_splits"][0]["splits"] == {"COGS": 80, "S&M": 20}
+        assert "metric_sources" not in info
         assert info["allocation_count"] == 1
+
+    def test_get_reallocation_info_mixed(self):
+        from src.finout_mcp_server.server import _get_reallocation_info
+
+        tag = {
+            "allocations": [
+                {
+                    "name": "telemetry-split",
+                    "type": "metric",
+                    "data": {"metricName": "ratio", "kpiCenterId": "kpi-1"},
+                },
+                {
+                    "name": "static-split",
+                    "type": "fixed",
+                    "data": {"tags": [{"key": "A", "value": 50}, {"key": "B", "value": 50}]},
+                },
+            ]
+        }
+        info = _get_reallocation_info(tag)
+
+        assert info["reallocation_type"] == "mixed"
+        assert len(info["metric_sources"]) == 1
+        assert len(info["static_splits"]) == 1
 
     def test_get_reallocation_info_empty(self):
         from src.finout_mcp_server.server import _get_reallocation_info
 
         assert _get_reallocation_info({}) == {
-            "strategy": "unknown",
-            "metric_sources": [],
+            "reallocation_type": "unknown",
             "allocation_count": 0,
         }
         assert _get_reallocation_info({"allocations": []}) == {
-            "strategy": "unknown",
-            "metric_sources": [],
+            "reallocation_type": "unknown",
             "allocation_count": 0,
         }
 
@@ -1397,6 +1451,112 @@ class TestValueBasedSearch:
         assert "Matched values:" in formatted
         assert "AWS Marketplace" in formatted
         assert "GCP Marketplace" in formatted
+
+
+class TestTokenizedSearch:
+    """Tests for multi-word tokenized search in search_filters_by_keyword."""
+
+    def _k8s_metadata(self):
+        return {
+            "kubernetes": {
+                "kubernetesResources": [
+                    {
+                        "key": "k8s_cluster",
+                        "path": "Kubernetes/Resources/k8s_cluster",
+                        "values": {"prod04-airflow": {}, "staging03": {}},
+                    },
+                    {
+                        "key": "k8s_namespace",
+                        "path": "Kubernetes/Resources/k8s_namespace",
+                        "values": {"default": {}, "kube-system": {}},
+                    },
+                ],
+                "node_label": [
+                    {
+                        "key": "label_karpenter_sh_capacity_type",
+                        "path": "Kubernetes/Labels/Node Labels/label_karpenter_sh_capacity_type",
+                        "values": {"spot": {}, "on-demand": {}},
+                    },
+                    {
+                        "key": "label_node_kubernetes_io_instance_type",
+                        "path": "Kubernetes/Labels/Node Labels/label_node_kubernetes_io_instance_type",
+                        "values": {"m5.xlarge": {}, "r6g.16xlarge": {}},
+                    },
+                ],
+            },
+            "amazon-cur": {
+                "finrichment": [
+                    {
+                        "key": "finrichment_purchase_option",
+                        "path": "AWS/Purchase Option",
+                        "values": {"OnDemand": {}, "Spot": {}, "Reserved": {}},
+                    },
+                    {
+                        "key": "finrichment_product_name",
+                        "path": "AWS/Product Name",
+                        "values": {"Amazon Elastic Compute Cloud": {}},
+                    },
+                ],
+            },
+        }
+
+    def test_multi_word_kubernetes_cluster(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        results = search_filters_by_keyword(self._k8s_metadata(), "kubernetes cluster")
+        assert len(results) > 0
+        assert results[0]["key"] == "k8s_cluster"
+
+    def test_multi_word_capacity_type(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        results = search_filters_by_keyword(self._k8s_metadata(), "capacity type")
+        keys = [r["key"] for r in results]
+        assert "label_karpenter_sh_capacity_type" in keys
+
+    def test_multi_word_purchase_option(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        results = search_filters_by_keyword(self._k8s_metadata(), "purchase option")
+        assert len(results) > 0
+        assert results[0]["key"] == "finrichment_purchase_option"
+
+    def test_multi_word_instance_type(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        results = search_filters_by_keyword(self._k8s_metadata(), "instance type")
+        keys = [r["key"] for r in results]
+        assert "label_node_kubernetes_io_instance_type" in keys
+
+    def test_multi_word_product_name(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        results = search_filters_by_keyword(self._k8s_metadata(), "product name")
+        assert len(results) > 0
+        assert results[0]["key"] == "finrichment_product_name"
+
+    def test_single_word_still_works(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        results = search_filters_by_keyword(self._k8s_metadata(), "cluster")
+        assert len(results) > 0
+        assert results[0]["key"] == "k8s_cluster"
+
+    def test_full_phrase_preferred_over_tokens(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        # "k8s_cluster" as exact query should score higher than tokenized
+        results = search_filters_by_keyword(self._k8s_metadata(), "k8s_cluster")
+        assert len(results) > 0
+        assert results[0]["key"] == "k8s_cluster"
+        assert results[0]["relevance"] == 100  # exact match
+
+    def test_no_false_positives_from_single_short_token(self):
+        from src.finout_mcp_server.filter_utils import search_filters_by_keyword
+
+        # "xyz foo" — neither token should match anything
+        results = search_filters_by_keyword(self._k8s_metadata(), "xyz foo")
+        assert len(results) == 0
 
 
 class TestFormatSearchResultsWithSamples:
@@ -2882,6 +3042,394 @@ class TestListDataExplorersImpl:
 
         assert result["total"] == 1
         assert result["explorers"][0]["name"] == "K8s Costs"
+
+
+class TestListTelemetryCentersImpl:
+    @pytest.mark.asyncio
+    async def test_list_telemetry_centers_basic(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            account_id = "test-123"
+
+            async def get_telemetry_centers(self):
+                return [
+                    {
+                        "id": "tc-1",
+                        "name": "Anthropic ratio",
+                        "type": "megabill-ratio",
+                        "field": "anthropic_ratio",
+                        "isActive": True,
+                        "initialDataFetched": True,
+                        "metricNames": ["anthropic_ratio"],
+                        "data": {"viewId": "view-abc", "timeFrameType": "slidingWindow"},
+                        "enrichers": [],
+                        "createdBy": "admin@test.io",
+                    },
+                    {
+                        "id": "tc-2",
+                        "name": "BucketSizeBytes",
+                        "type": "cloudwatch",
+                        "field": "BucketSizeBytes",
+                        "isActive": True,
+                        "initialDataFetched": False,
+                        "metricNames": ["BucketSizeBytes"],
+                        "data": {
+                            "namespace": "AWS/S3",
+                            "metricName": "BucketSizeBytes",
+                            "dimensions": ["StorageType", "BucketName"],
+                            "region_value": "us-east-1",
+                        },
+                        "enrichers": [],
+                        "unit": "bytes",
+                    },
+                ]
+
+            async def get_virtual_tags(self):
+                return []
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.list_telemetry_centers_impl({})
+        finally:
+            server_module.finout_client = original
+
+        assert result["total"] == 2
+        assert result["showing"] == 2
+        assert result["by_type"]["megabill-ratio"] == 1
+        assert result["by_type"]["cloudwatch"] == 1
+        assert result["centers"][0]["name"] == "Anthropic ratio"
+        assert result["centers"][0]["source"]["view_id"] == "view-abc"
+        assert result["centers"][1]["unit"] == "bytes"
+        assert result["centers"][1]["source"]["namespace"] == "AWS/S3"
+
+    @pytest.mark.asyncio
+    async def test_list_telemetry_centers_filter_by_type(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            account_id = "test-123"
+
+            async def get_telemetry_centers(self):
+                return [
+                    {
+                        "id": "tc-1",
+                        "name": "ratio1",
+                        "type": "megabill-ratio",
+                        "field": "f1",
+                        "isActive": True,
+                        "metricNames": ["ratio1"],
+                        "data": {},
+                    },
+                    {
+                        "id": "tc-2",
+                        "name": "csv1",
+                        "type": "s3-csv",
+                        "field": "f2",
+                        "isActive": True,
+                        "metricNames": ["csv1"],
+                        "data": {"bucketName": "my-bucket"},
+                    },
+                ]
+
+            async def get_virtual_tags(self):
+                return []
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.list_telemetry_centers_impl({"type": "s3-csv"})
+        finally:
+            server_module.finout_client = original
+
+        assert result["total"] == 2
+        assert result["showing"] == 1
+        assert result["centers"][0]["name"] == "csv1"
+
+    @pytest.mark.asyncio
+    async def test_list_telemetry_centers_filter_by_name(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            account_id = "test-123"
+
+            async def get_telemetry_centers(self):
+                return [
+                    {
+                        "id": "tc-1",
+                        "name": "Anthropic ratio",
+                        "type": "megabill-ratio",
+                        "field": "f1",
+                        "isActive": True,
+                        "metricNames": ["ratio1"],
+                        "data": {},
+                    },
+                    {
+                        "id": "tc-2",
+                        "name": "Memory usage",
+                        "type": "datadog",
+                        "field": "f2",
+                        "isActive": True,
+                        "metricNames": ["mem"],
+                        "data": {"query": "sum:container.memory.usage{}"},
+                    },
+                ]
+
+            async def get_virtual_tags(self):
+                return []
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.list_telemetry_centers_impl({"name": "anthropic"})
+        finally:
+            server_module.finout_client = original
+
+        assert result["showing"] == 1
+        assert result["centers"][0]["name"] == "Anthropic ratio"
+
+    @pytest.mark.asyncio
+    async def test_list_telemetry_centers_empty(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            account_id = "test-123"
+
+            async def get_telemetry_centers(self):
+                return []
+
+            async def get_virtual_tags(self):
+                return []
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.list_telemetry_centers_impl({})
+        finally:
+            server_module.finout_client = original
+
+        assert "message" in result
+
+    @pytest.mark.asyncio
+    async def test_list_telemetry_centers_strips_secrets(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            account_id = "test-123"
+
+            async def get_telemetry_centers(self):
+                return [
+                    {
+                        "id": "tc-1",
+                        "name": "dd_metric",
+                        "type": "datadog",
+                        "field": "mem",
+                        "isActive": True,
+                        "metricNames": ["mem"],
+                        "data": {
+                            "apiKeyAuth": "{secret}abc-123",
+                            "appKeyAuth": "{secret}def-456",
+                            "query": "sum:container.memory.usage{cluster:prod}",
+                        },
+                    },
+                ]
+
+            async def get_virtual_tags(self):
+                return []
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.list_telemetry_centers_impl({})
+        finally:
+            server_module.finout_client = original
+
+        import json
+
+        output = json.dumps(result)
+        assert "{secret}" not in output
+        assert "abc-123" not in output
+        assert result["centers"][0]["source"]["query"] == "sum:container.memory.usage{cluster:prod}"
+
+    @pytest.mark.asyncio
+    async def test_list_telemetry_centers_shows_vtag_usage(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            account_id = "test-123"
+
+            async def get_telemetry_centers(self):
+                return [
+                    {
+                        "id": "tc-1",
+                        "name": "test ratio",
+                        "type": "megabill-ratio",
+                        "field": "test",
+                        "isActive": True,
+                        "metricNames": ["test"],
+                        "data": {"viewId": "v1"},
+                    },
+                    {
+                        "id": "tc-2",
+                        "name": "unused center",
+                        "type": "s3-csv",
+                        "field": "unused",
+                        "isActive": True,
+                        "metricNames": ["unused"],
+                        "data": {},
+                    },
+                ]
+
+            async def get_virtual_tags(self):
+                return [
+                    {
+                        "id": "vt-1",
+                        "name": "Team Allocation",
+                        "allocations": [
+                            {
+                                "name": "split",
+                                "type": "metric",
+                                "data": {
+                                    "metricName": "test",
+                                    "kpiCenterId": "tc-1",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "id": "vt-2",
+                        "name": "Cost Realloc",
+                        "allocations": [
+                            {
+                                "name": "breakdown",
+                                "type": "metric",
+                                "data": {
+                                    "metricName": "test",
+                                    "kpiCenterId": "tc-1",
+                                },
+                            }
+                        ],
+                    },
+                ]
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.list_telemetry_centers_impl({})
+        finally:
+            server_module.finout_client = original
+
+        assert result["used_by_virtual_tags"] == 1
+        assert result["unused"] == 1
+
+        # tc-1 should show both virtual tags
+        tc1 = result["centers"][0]
+        assert len(tc1["used_by_virtual_tags"]) == 2
+        vtag_names = {vt["name"] for vt in tc1["used_by_virtual_tags"]}
+        assert vtag_names == {"Team Allocation", "Cost Realloc"}
+
+        # tc-2 should show no virtual tags
+        tc2 = result["centers"][1]
+        assert tc2["used_by_virtual_tags"] == []
+
+    @pytest.mark.asyncio
+    async def test_list_telemetry_centers_vtag_fetch_failure_graceful(self):
+        import importlib
+
+        server_module = importlib.import_module("src.finout_mcp_server.server")
+
+        class StubClient:
+            internal_api_url = "http://localhost:3000"
+            account_id = "test-123"
+
+            async def get_telemetry_centers(self):
+                return [
+                    {
+                        "id": "tc-1",
+                        "name": "ratio",
+                        "type": "megabill-ratio",
+                        "field": "f",
+                        "isActive": True,
+                        "metricNames": ["r"],
+                        "data": {},
+                    },
+                ]
+
+            async def get_virtual_tags(self):
+                raise Exception("API error")
+
+        original = server_module.finout_client
+        server_module.finout_client = StubClient()
+        try:
+            result = await server_module.list_telemetry_centers_impl({})
+        finally:
+            server_module.finout_client = original
+
+        # Should still work, just without vtag cross-reference
+        assert result["total"] == 1
+        assert result["centers"][0]["used_by_virtual_tags"] == []
+
+
+class TestGetReallocationInfoWithTelemetry:
+    def test_resolves_kpi_center_id(self):
+        from src.finout_mcp_server.server import _get_reallocation_info
+
+        tag = {
+            "allocations": [
+                {
+                    "name": "my-split",
+                    "type": "metric",
+                    "data": {
+                        "metricName": "ratio",
+                        "kpiCenterId": "kpi-123",
+                    },
+                }
+            ]
+        }
+        telemetry_index = {
+            "kpi-123": {"name": "Anthropic ratio", "type": "megabill-ratio"},
+        }
+        info = _get_reallocation_info(tag, telemetry_index)
+
+        assert info["metric_sources"][0]["telemetry_center"] == {
+            "name": "Anthropic ratio",
+            "type": "megabill-ratio",
+        }
+
+    def test_no_telemetry_index_still_works(self):
+        from src.finout_mcp_server.server import _get_reallocation_info
+
+        tag = {
+            "allocations": [
+                {
+                    "name": "split",
+                    "type": "metric",
+                    "data": {"metricName": "r", "kpiCenterId": "kpi-999"},
+                }
+            ]
+        }
+        info = _get_reallocation_info(tag)
+        assert info["metric_sources"][0]["kpi_center_id"] == "kpi-999"
+        assert "telemetry_center" not in info["metric_sources"][0]
 
 
 class TestInferPreviousPeriod:

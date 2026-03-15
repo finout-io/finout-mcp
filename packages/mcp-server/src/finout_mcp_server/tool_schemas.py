@@ -76,9 +76,22 @@ async def list_tools() -> list[Tool]:
                 "filters: [{'costCenter': 'kubernetes', 'key': 'deployment', "
                 "'path': 'Kubernetes/Resources/deployment', 'type': 'namespace_object', "
                 "'operator': 'oneOf', 'value': ['refresh-web', 'refresh-notifications']}]\n\n"
+                "Kubernetes node label:\n"
+                "filters: [{'costCenter': 'kubernetes', 'key': 'label_karpenter_sh_capacity_type', "
+                "'path': 'Kubernetes/Labels/Node Labels/label_karpenter_sh_capacity_type', "
+                "'type': 'node_label', 'operator': 'is', 'value': 'spot'}]\n\n"
                 "Custom tag:\n"
                 "filters: [{'costCenter': 'amazon-cur', 'key': 'environment', "
                 "'path': 'AWS/Tags/environment', 'type': 'tag', 'operator': 'is', 'value': 'production'}]\n\n"
+                "SPARSE DATA RECOVERY:\n"
+                "If the response contains '_data_quality_hints' (dimension has many empty values), "
+                "the dimension lacks historical coverage. Recovery steps:\n"
+                "1. Try an alternative dimension in the SAME cost center (e.g., a different node label)\n"
+                "2. If no alternative works, try a RELATED cost center. Cost centers overlap — "
+                "the same infrastructure appears in multiple cost centers with different dimensions. "
+                "For example: Kubernetes workloads run on cloud instances, so 'kubernetes' labels may "
+                "lack history but 'amazon-cur' has billing dimensions like 'finrichment_purchase_option' "
+                "(OnDemand/Spot/Reserved) with full history. Link via tags like 'eks_cluster_name'.\n\n"
                 "CRITICAL RULES:\n"
                 "- NEVER construct filters from memory. ALWAYS copy from search_filters 'filters' list.\n"
                 "- The 'type' field is NOT always 'col' — it can be 'finrichment', 'tag', 'namespace_object', etc.\n"
@@ -790,10 +803,12 @@ async def list_tools() -> list[Tool]:
             name="list_available_filters",
             description=(
                 "List all available cost filters organized by cost center.\n\n"
-                "WHEN TO USE: ONLY when the user explicitly asks 'what filters exist?', "
-                "'what can I filter by?', or 'show me all available filters'.\n\n"
-                "DO NOT use for normal cost queries - use search_filters instead. "
-                "This returns a large response and should be a last resort."
+                "WHEN TO USE:\n"
+                "- When the user asks 'what filters exist?', 'what can I filter by?', "
+                "or 'show me available dimensions'\n"
+                "- As a FALLBACK when search_filters returns 0 results after 1-2 attempts — "
+                "pass cost_center to scope the response (e.g., list_available_filters(cost_center='kubernetes'))\n\n"
+                "Prefer search_filters for targeted lookups. Use this to browse when search fails."
             ),
             inputSchema={
                 "type": "object",
@@ -832,6 +847,11 @@ async def list_tools() -> list[Tool]:
                 "- search_filters('service') → AWS/GCP services\n"
                 "- search_filters('environment') → Environment tags\n"
                 "- search_filters('pod') → Kubernetes pods\n\n"
+                "SEARCH TIPS:\n"
+                "- Multi-word queries work: 'capacity type', 'kubernetes cluster', 'purchase option'\n"
+                "- If 0 results: try a shorter single-word term (e.g., 'cluster' instead of 'kubernetes cluster')\n"
+                "- If still 0 results after 1-2 attempts: use list_available_filters(cost_center='X') to browse\n"
+                "- Check the 'suggestion' field in zero-result responses for guidance\n\n"
                 "DO NOT show raw search results to the user. Use them to build the next query.\n\n"
                 "When results span multiple providers, check the cross_provider_note field for coverage gaps.\n\n"
                 "Returns up to 50 matches sorted by relevance."
@@ -1739,6 +1759,42 @@ async def list_tools() -> list[Tool]:
                     "query": {
                         "type": "string",
                         "description": "Optional: Filter explorers by name or description keyword.",
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="list_telemetry_centers",
+            description=(
+                "List telemetry centers that feed custom metrics into virtual tags and cost allocation.\n\n"
+                "WHEN TO USE: When the user asks about telemetry centers, KPI centers, custom metrics, "
+                "data sources for virtual tags, what feeds a reallocation, 'where does this metric come from', "
+                "or wants to understand the data pipeline behind cost allocation.\n\n"
+                "Each telemetry center ingests data from an external source (S3 CSV, Datadog, CloudWatch, "
+                "AWS Cost Explorer, or a Finout view ratio) and produces metrics that virtual tags use "
+                "for metric-based cost reallocation.\n\n"
+                "PRESENTING RESULTS: Group centers by type. Highlight source details "
+                "(bucket, query, view, etc). Note which have data_fetched=true vs false."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "description": "Filter by source type.",
+                        "enum": [
+                            "s3-csv",
+                            "megabill-ratio",
+                            "costexplorer",
+                            "cloudwatch",
+                            "datadog",
+                            "internal-demo",
+                        ],
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Filter by name (case-insensitive substring match).",
                     },
                 },
                 "required": [],

@@ -6,9 +6,9 @@ metadata:
 data:
   mcp-host: "0.0.0.0"
   mcp-port: "8080"
-  finout-api-url: "https://app.finout.io"
   mcp-base-url: "https://mcp.finout.io"
+  finout-api-url: "https://app.finout.io"
   frontegg-base-url: "https://auth.finout.io"
   frontegg-mcp-client-id: "fc310979-8f06-41bc-acfe-b1f91e4c3c13"
-  finout-jwt-issuer: "frontegg"        # iss claim from Frontegg JWT
-  finout-jwt-audience: "d5069f33-9608-4141-9e1d-ebf8e9cf6582"    # aud claim from Frontegg JWT
+  finout-jwt-issuer: "frontegg"
+  finout-jwt-audience: "d5069f33-9608-4141-9e1d-ebf8e9cf6582"

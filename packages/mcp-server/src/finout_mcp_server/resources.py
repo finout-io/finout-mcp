@@ -91,8 +91,21 @@ User Question → Filters:
 - "pods in production" → search_filters("pod") + search_filters("namespace")
 
 ## Key Principle
-NEVER use list_available_filters unless specifically asked "what filters are available?"
-ALWAYS use search_filters to find specific filters based on the user's question.
+Use search_filters to find specific filters based on the user's question.
+If search returns 0 results after 1-2 attempts, fall back to list_available_filters(cost_center='X')
+to browse available dimensions for the relevant cost center.
+
+## Cost Center Relationships
+Cost centers often overlap — the same infrastructure appears in multiple cost centers
+with different available dimensions:
+- **Kubernetes** costs come from underlying cloud infrastructure (AWS/GCP/Azure).
+  K8s-specific dimensions (labels, namespaces, pods) are in the 'kubernetes' cost center.
+  Billing-level dimensions (purchase option, pricing model, instance lifecycle) are in the
+  cloud provider cost center (e.g., 'amazon-cur'). Link them via tags like 'eks_cluster_name'.
+- **Datadog/Snowflake** costs may also have corresponding cloud provider costs.
+
+When a dimension isn't available in one cost center, check if a related cost center
+has richer metadata for the same resources.
 """
 
         elif uri == "finout://date-range-examples":

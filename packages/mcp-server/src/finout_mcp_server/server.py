@@ -114,6 +114,7 @@ BILLY_INTERNAL_EXTRA_TOOLS: set[str] = {
     "submit_feedback",
     "create_dashboard",
     "render_chart",
+    "list_telemetry_centers",
 }
 
 BILLY_INTERNAL_TOOLS: set[str] = PUBLIC_TOOLS | BILLY_INTERNAL_EXTRA_TOOLS
@@ -140,6 +141,7 @@ INTERNAL_API_TOOLS: set[str] = {
     "get_tag_coverage",
     "get_cost_statistics",
     "list_data_explorers",
+    "list_telemetry_centers",
 }
 
 KEY_SECRET_TOOLS: set[str] = {
@@ -361,6 +363,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 result = await get_cost_statistics_impl(arguments)
             elif name == "list_data_explorers":
                 result = await list_data_explorers_impl(arguments or {})
+            elif name == "list_telemetry_centers":
+                result = await list_telemetry_centers_impl(arguments or {})
             else:
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -506,6 +510,9 @@ from .tools import (
 )
 from .tools import (
     list_data_explorers_impl as list_data_explorers_impl,
+)
+from .tools import (
+    list_telemetry_centers_impl as list_telemetry_centers_impl,
 )
 from .tools import (
     query_costs_impl as query_costs_impl,

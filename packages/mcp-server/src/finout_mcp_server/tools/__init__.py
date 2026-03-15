@@ -22,6 +22,7 @@ from .filters import (
     list_available_filters_impl,
     search_filters_impl,
 )
+from .telemetry import list_telemetry_centers_impl
 from .views import create_dashboard_impl, create_view_impl
 from .virtual_tags import (
     _compute_summary,
@@ -54,6 +55,7 @@ __all__ = [
     "get_unit_economics_impl",
     "get_usage_unit_types_impl",
     "list_data_explorers_impl",
+    "list_telemetry_centers_impl",
     "get_waste_recommendations_impl",
     "list_available_filters_impl",
     "query_costs_impl",

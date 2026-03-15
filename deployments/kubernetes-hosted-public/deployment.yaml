@@ -15,6 +15,7 @@ spec:
       labels:
         app: finout-mcp
     spec:
+      serviceAccountName: finout-mcp-hosted
       containers:
       - name: finout-mcp
         image: 277411487094.dkr.ecr.us-east-1.amazonaws.com/finout-mcp:latest
@@ -24,6 +25,7 @@ spec:
           name: http
           protocol: TCP
         env:
+        # Non-sensitive config from ConfigMap
         - name: MCP_HOST
           valueFrom:
             configMapKeyRef:
@@ -34,16 +36,16 @@ spec:
             configMapKeyRef:
               name: finout-mcp-hosted-public-config
               key: mcp-port
-        - name: FINOUT_API_URL
-          valueFrom:
-            configMapKeyRef:
-              name: finout-mcp-hosted-public-config
-              key: finout-api-url
         - name: MCP_BASE_URL
           valueFrom:
             configMapKeyRef:
               name: finout-mcp-hosted-public-config
               key: mcp-base-url
+        - name: FINOUT_API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: finout-mcp-hosted-public-config
+              key: finout-api-url
         - name: FRONTEGG_BASE_URL
           valueFrom:
             configMapKeyRef:
@@ -64,17 +66,8 @@ spec:
             configMapKeyRef:
               name: finout-mcp-hosted-public-config
               key: finout-jwt-audience
-        - name: FINOUT_LOGIN_JWT_PUBLIC_KEY
-          valueFrom:
-            secretKeyRef:
-              name: finout-mcp-hosted-public-secret
-              key: finout-login-jwt-public-key
-              optional: true
-        - name: MCP_CODE_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: finout-mcp-hosted-public-secret
-              key: mcp-code-secret
+        # Secrets (REDIS_URL, JWT public keys) loaded from Vault at startup.
+        # See vault.py — IRSA → Secrets Manager → Vault chain.
         resources:
           requests:
             cpu: "250m"
@@ -92,7 +85,7 @@ spec:
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /health
+            path: /health/ready
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 5

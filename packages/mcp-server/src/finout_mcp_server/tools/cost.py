@@ -182,6 +182,63 @@ async def query_costs_impl(args: dict) -> dict:
     }
     if validation_warnings:
         result["_validation_warnings"] = validation_warnings
+
+    # Detect sparse group_by dimensions — flag when most data has empty values
+    if group_by and summarized:
+        for gb_item in group_by if isinstance(group_by, list) else []:
+            gb_key = gb_item.get("key", "")
+            if not gb_key:
+                continue
+
+            # The API may return the display name from the path instead of the raw key.
+            # E.g., key="finrichment_purchase_option" but column="Purchase Option".
+            # Check both the raw key and the path's leaf segment.
+            gb_path = gb_item.get("path", "")
+            path_leaf = gb_path.rsplit("/", 1)[-1].strip() if gb_path else ""
+            candidate_columns = {gb_key}
+            if path_leaf:
+                candidate_columns.add(path_leaf)
+
+            # Find which column name actually appears in the data
+            if summarized:
+                first_row_keys = set(summarized[0].keys())
+                matched_col = None
+                for col in candidate_columns:
+                    if col in first_row_keys:
+                        matched_col = col
+                        break
+                if matched_col is None:
+                    # Neither raw key nor display name found — skip check
+                    continue
+            else:
+                matched_col = gb_key
+
+            total_rows = len(summarized)
+            empty_rows = sum(
+                1
+                for row in summarized
+                if row.get(matched_col, "") == "" or row.get(matched_col) is None
+            )
+            if total_rows >= 3 and empty_rows / total_rows > 0.5:
+                gb_cc = gb_item.get("costCenter", "")
+
+                hint = (
+                    f"The dimension '{gb_key}' has empty values in {empty_rows}/{total_rows} "
+                    f"rows ({empty_rows * 100 // total_rows}%). This usually means the "
+                    f"dimension was not populated for much of the queried time period. "
+                    f"Follow the SPARSE DATA RECOVERY steps in the query_costs tool description."
+                )
+                if gb_cc == "kubernetes":
+                    hint += (
+                        " Specifically: this is a Kubernetes dimension — try querying "
+                        "'amazon-cur' cost center instead, using 'eks_cluster_name' tag "
+                        "to filter by cluster and 'finrichment_purchase_option' "
+                        "(OnDemand/Spot/Reserved) or 'finrichment_coverage_type' to "
+                        "group by purchase type. These AWS billing dimensions have full "
+                        "historical coverage."
+                    )
+                result.setdefault("_data_quality_hints", []).append(hint)
+
     return result
 
 

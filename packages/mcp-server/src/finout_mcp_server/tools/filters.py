@@ -145,6 +145,50 @@ async def search_filters_impl(args: dict) -> dict:
         "filters": copy_paste_filters,
     }
 
+    # Zero-result guidance: help the LLM recover instead of retrying blindly
+    if not results:
+        try:
+            metadata = await finout_client.get_filters_metadata()
+            from ..filter_utils import organize_filters_by_cost_center
+
+            organized = organize_filters_by_cost_center(metadata)
+            cc_summary = {cc: len(f) for cc, f in organized.items()}
+            response["available_cost_centers"] = cc_summary
+
+            if cost_center:
+                matching_cc = next(
+                    (cc for cc in cc_summary if cc.lower() == cost_center.lower()), None
+                )
+                if matching_cc:
+                    response["suggestion"] = (
+                        f"No results for '{query}' in {cost_center}. "
+                        f"This cost center has {cc_summary[matching_cc]} filters. "
+                        f"Try: list_available_filters(cost_center='{cost_center}') "
+                        f"to browse all available dimensions, or try a shorter single-word "
+                        f"search term."
+                    )
+                else:
+                    response["suggestion"] = (
+                        f"Cost center '{cost_center}' not found. "
+                        f"Available: {', '.join(sorted(cc_summary.keys()))}."
+                    )
+            else:
+                total = sum(cc_summary.values())
+                response["suggestion"] = (
+                    f"No results for '{query}' across {total} filters in "
+                    f"{len(cc_summary)} cost centers. Try:\n"
+                    f"1. A shorter single-word search (e.g., one keyword from your query)\n"
+                    f"2. list_available_filters(cost_center='X') to browse a specific "
+                    f"cost center's dimensions\n"
+                    f"Available cost centers: {', '.join(sorted(cc_summary.keys()))}"
+                )
+        except Exception:
+            response["suggestion"] = (
+                "No results found. Try a shorter single-word search term, "
+                "or use list_available_filters(cost_center='X') to browse "
+                "available dimensions for a specific cost center."
+            )
+
     # Cross-provider gap detection (only for broad searches without cost_center)
     if not cost_center and results:
         primary_providers = {"amazon-cur", "gcp", "azure"}

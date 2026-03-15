@@ -1434,7 +1434,11 @@
     ],
     "expected": {
       "tools": [
-        "search_filters"
+        "list_available_filters"
+      ],
+      "allowed_prefix_tools": [
+        "search_filters",
+        "list_available_filters"
       ],
       "no_fabrication": true
     }
@@ -1497,13 +1501,6 @@
       "tools": [
         "get_financial_plans"
       ],
-      "args": {
-        "get_financial_plans": {
-          "name": {
-            "$regex": "(?i)infra"
-          }
-        }
-      },
       "no_fabrication": true
     }
   },
@@ -1543,9 +1540,8 @@
       "args": {
         "get_financial_plans": {
           "name": {
-            "$regex": "(?i)aws"
-          },
-          "period": "2026-2"
+            "$present": true
+          }
         }
       },
       "no_fabrication": true
@@ -2148,6 +2144,358 @@
           "cost_type": "fairShareCost"
         }
       },
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "k8s_cluster_cost_breakdown",
+    "description": "multi-word filter search - kubernetes cluster costs",
+    "prompt": "Break down my Kubernetes costs by cluster",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "kubernetes",
+      "search_quality"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "k8s_namespace_costs",
+    "description": "multi-word filter search - kubernetes namespace",
+    "prompt": "What are my costs by Kubernetes namespace?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "kubernetes",
+      "search_quality"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "purchase_option_breakdown",
+    "description": "multi-word filter search - purchase option",
+    "prompt": "Show me costs broken down by purchase option",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "search_quality"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "instance_type_costs",
+    "description": "multi-word filter search - instance type",
+    "prompt": "What's my cost by instance type?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "search_quality"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "spot_vs_ondemand_k8s",
+    "description": "cross-concept search - spot vs on-demand on kubernetes",
+    "prompt": "What's my spot vs on-demand cost split on Kubernetes?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "kubernetes",
+      "search_quality",
+      "cross_concept"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "browse_k8s_dimensions",
+    "description": "browse kubernetes filters - escalation to list_available_filters",
+    "prompt": "What Kubernetes dimensions can I filter or group by?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "kubernetes",
+      "escalation"
+    ],
+    "expected": {
+      "tools": [
+        "list_available_filters"
+      ],
+      "args": {
+        "list_available_filters": {
+          "cost_center": {
+            "$regex": "(?i)k(ubernetes|8s)"
+          }
+        }
+      },
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "coverage_type_costs",
+    "description": "multi-word filter search - coverage type",
+    "prompt": "Break down my AWS costs by coverage type",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "search_quality"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "product_name_filter",
+    "description": "multi-word filter search - product name",
+    "prompt": "What are my costs by AWS product name?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "search_quality"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "k8s_deployment_costs",
+    "description": "multi-word filter search - kubernetes deployment costs",
+    "prompt": "Show costs grouped by Kubernetes deployment",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "kubernetes",
+      "search_quality"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "k8s_spot_od_via_aws_cur",
+    "description": "cross-cost-center - K8s spot vs on-demand using AWS billing data",
+    "prompt": "What's my on-demand vs spot cost for the prod04-airflow EKS cluster using AWS billing data?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "kubernetes",
+      "cross_cost_center",
+      "search_quality"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "args": {
+        "query_costs": {
+          "filters": {
+            "$present": true
+          }
+        }
+      },
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "k8s_monthly_purchase_option_trend",
+    "description": "cross-cost-center - K8s monthly purchase option trend over time",
+    "prompt": "Show me the monthly on-demand vs spot cost trend for our Kubernetes airflow cluster over the last 6 months",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "kubernetes",
+      "cross_cost_center",
+      "search_quality"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "aws_purchase_option_breakdown",
+    "description": "direct AWS purchase option breakdown",
+    "prompt": "Break down my AWS costs by purchase option for last month",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "search_quality"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "k8s_node_label_search",
+    "description": "multi-word filter search - kubernetes node label",
+    "prompt": "What node labels are available for Kubernetes cost analysis?",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "kubernetes"
+    ],
+    "expected": {
+      "tools": [
+        "search_filters"
+      ],
+      "allowed_prefix_tools": [
+        "search_filters",
+        "list_available_filters"
+      ],
+      "no_fabrication": true
+    }
+  },
+  {
+    "id": "eks_cluster_filter_search",
+    "description": "multi-word tokenized search - eks cluster name",
+    "prompt": "Show me costs filtered by EKS cluster name",
+    "suites": [
+      "langfuse"
+    ],
+    "tags": [
+      "filter_discovery",
+      "search_quality"
+    ],
+    "expected": {
+      "tools": [
+        "query_costs"
+      ],
+      "terminal_tool": "query_costs",
+      "allowed_prefix_tools": [
+        "search_filters",
+        "get_filter_values",
+        "list_available_filters"
+      ],
       "no_fabrication": true
     }
   }

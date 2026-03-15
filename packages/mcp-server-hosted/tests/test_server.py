@@ -34,9 +34,11 @@ def test_app_routes_exposed():
     paths = {getattr(route, "path", "") for route in module.app.routes}
 
     assert "/health" in paths
+    assert "/health/ready" in paths
     assert "/mcp" in paths
     assert "/authorize" in paths
     assert "/token" in paths
+    assert "/revoke" in paths
 
 
 def test_main_uses_env_host_port(monkeypatch):
@@ -44,14 +46,16 @@ def test_main_uses_env_host_port(monkeypatch):
 
     captured: dict[str, object] = {}
 
-    def fake_run(app: str, host: str, port: int, lifespan: str):
+    def fake_run(app: str, host: str, port: int, lifespan: str, workers: int = 1):
         captured["app"] = app
         captured["host"] = host
         captured["port"] = port
         captured["lifespan"] = lifespan
+        captured["workers"] = workers
 
     monkeypatch.setenv("MCP_HOST", "127.0.0.1")
     monkeypatch.setenv("MCP_PORT", "19090")
+    monkeypatch.setenv("MCP_WORKERS", "2")
     monkeypatch.setattr("uvicorn.run", fake_run)
 
     module.main()
@@ -60,6 +64,7 @@ def test_main_uses_env_host_port(monkeypatch):
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 19090
     assert captured["lifespan"] == "on"
+    assert captured["workers"] == 2
 
 
 def test_extract_public_auth_from_scope_defaults_api_url(monkeypatch):
@@ -144,6 +149,25 @@ def test_mcp_get_with_invalid_bearer_is_unauthorized():
         assert response.status_code == 401
 
 
+# ── /health ──────────────────────────────────────────────────────────────────
+
+
+def test_health_returns_200():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with TestClient(module.app) as client:
+        resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "healthy"
+
+
+def test_health_ready_checks_redis():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with TestClient(module.app) as client:
+        resp = client.get("/health/ready")
+    assert resp.status_code == 200
+    assert resp.json()["redis"] == "connected"
+
+
 # ── /authorize ────────────────────────────────────────────────────────────────
 
 
@@ -212,11 +236,30 @@ def test_authorize_get_wrong_response_type_returns_400():
     assert response.status_code == 400
 
 
-def test_authorize_post_valid_jwt_redirects_with_code():
+def test_authorize_get_disallowed_redirect_uri_returns_400(monkeypatch):
     module = importlib.import_module("finout_mcp_hosted.server")
+    monkeypatch.setenv("FRONTEGG_BASE_URL", "https://app-abc.frontegg.com")
+    monkeypatch.setenv("FRONTEGG_MCP_CLIENT_ID", "test-client-id")
+    with TestClient(module.app) as client:
+        response = client.get(
+            "/authorize",
+            params={
+                "response_type": "code",
+                "redirect_uri": "https://evil.example.com/steal",
+                "code_challenge": _make_challenge("v"),
+            },
+        )
+    assert response.status_code == 400
+    assert "redirect_uri" in response.json()["error_description"]
+
+
+def test_authorize_post_valid_jwt_redirects_with_opaque_code(monkeypatch):
+    module = importlib.import_module("finout_mcp_hosted.server")
+    monkeypatch.setenv("FRONTEGG_BASE_URL", "https://app-abc.frontegg.com")
+    monkeypatch.setenv("FRONTEGG_MCP_CLIENT_ID", "test-client-id")
     with patch(
         "finout_mcp_hosted.server.verify_login_jwt",
-        return_value={"tenantId": "tenant-123"},
+        return_value={"tenantId": "tenant-123", "email": "test@example.com", "sub": "user-1"},
     ):
         with TestClient(module.app, follow_redirects=False) as client:
             response = client.post(
@@ -230,7 +273,7 @@ def test_authorize_post_valid_jwt_redirects_with_code():
             )
     assert response.status_code == 302
     location = response.headers["location"]
-    assert "code=" in location
+    assert "code=fmcp_ac_" in location
     assert "state=mystate" in location
 
 
@@ -263,28 +306,25 @@ def test_authorize_post_missing_params_returns_400():
 # ── /token ────────────────────────────────────────────────────────────────────
 
 
-def test_token_exchange_valid():
-    module = importlib.import_module("finout_mcp_hosted.server")
-    verifier = "token-exchange-verifier-abcdefghij1234567"
+def _do_oauth_flow(module, verifier: str, jwt: str, tenant_id: str) -> dict:
+    """Run the full OAuth PKCE flow and return the token response."""
     challenge = _make_challenge(verifier)
-
     with patch(
         "finout_mcp_hosted.server.verify_login_jwt",
-        return_value={"tenantId": "tenant-123"},
+        return_value={"tenantId": tenant_id, "email": "test@example.com", "sub": "user-1"},
     ):
         with TestClient(module.app, follow_redirects=False) as client:
-            post_resp = client.post(
+            auth_resp = client.post(
                 "/authorize",
                 data={
-                    "access_token": "jwt-from-frontegg",
+                    "access_token": jwt,
                     "redirect_uri": "http://localhost/cb",
                     "code_challenge": challenge,
-                    "state": "",
+                    "state": "s",
                 },
             )
-        assert post_resp.status_code == 302
-        location = post_resp.headers["location"]
-        code = location.split("code=")[1].split("&")[0]
+        assert auth_resp.status_code == 302, f"Authorize failed: {auth_resp.status_code}"
+        code = auth_resp.headers["location"].split("code=")[1].split("&")[0]
 
         with TestClient(module.app) as client:
             token_resp = client.post(
@@ -292,10 +332,17 @@ def test_token_exchange_valid():
                 content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb",
                 headers={"content-type": "application/x-www-form-urlencoded"},
             )
-    assert token_resp.status_code == 200
-    data = token_resp.json()
-    assert data["access_token"] == "jwt-from-frontegg"
+        assert token_resp.status_code == 200, f"Token exchange failed: {token_resp.text}"
+        return token_resp.json()
+
+
+def test_token_exchange_returns_opaque_tokens():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    data = _do_oauth_flow(module, "token-exchange-verifier-abcdefghij1234567", "jwt-from-frontegg", "tenant-123")
+    assert data["access_token"].startswith("fmcp_at_")
+    assert data["refresh_token"].startswith("fmcp_rt_")
     assert data["token_type"] == "bearer"
+    assert data["expires_in"] == 3600
 
 
 def test_token_exchange_invalid_code():
@@ -310,6 +357,47 @@ def test_token_exchange_invalid_code():
     assert response.json()["error"] == "invalid_grant"
 
 
+def test_token_exchange_code_single_use():
+    """Second exchange with same code fails."""
+    module = importlib.import_module("finout_mcp_hosted.server")
+    verifier = "single-use-verifier-abcdefghij1234567890"
+    challenge = _make_challenge(verifier)
+
+    with patch(
+        "finout_mcp_hosted.server.verify_login_jwt",
+        return_value={"tenantId": "t1", "email": "a@b.com", "sub": "u1"},
+    ):
+        with TestClient(module.app, follow_redirects=False) as client:
+            auth_resp = client.post(
+                "/authorize",
+                data={
+                    "access_token": "jwt",
+                    "redirect_uri": "http://localhost/cb",
+                    "code_challenge": challenge,
+                    "state": "",
+                },
+            )
+        code = auth_resp.headers["location"].split("code=")[1].split("&")[0]
+
+        with TestClient(module.app) as client:
+            # First exchange succeeds
+            resp1 = client.post(
+                "/token",
+                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb",
+                headers={"content-type": "application/x-www-form-urlencoded"},
+            )
+            assert resp1.status_code == 200
+
+            # Second exchange fails
+            resp2 = client.post(
+                "/token",
+                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb",
+                headers={"content-type": "application/x-www-form-urlencoded"},
+            )
+            assert resp2.status_code == 400
+            assert resp2.json()["error"] == "invalid_grant"
+
+
 def test_token_unsupported_grant_type():
     module = importlib.import_module("finout_mcp_hosted.server")
     with TestClient(module.app) as client:
@@ -322,10 +410,61 @@ def test_token_unsupported_grant_type():
     assert response.json()["error"] == "unsupported_grant_type"
 
 
+# ── /revoke ──────────────────────────────────────────────────────────────────
+
+
+def test_revoke_invalidates_session():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    data = _do_oauth_flow(module, "revoke-verifier-abcdefghij1234567890", "jwt-1", "t1")
+    access_token = data["access_token"]
+
+    with TestClient(module.app) as client:
+        # Verify session is valid first
+        mcp_resp = client.post(
+            "/mcp",
+            headers={
+                "authorization": f"Bearer {access_token}",
+                "accept": "application/json, text/event-stream",
+            },
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        )
+        assert mcp_resp.status_code == 200
+
+        # Revoke
+        revoke_resp = client.post(
+            "/revoke",
+            content=f"token={access_token}",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+        assert revoke_resp.status_code == 200
+
+        # Session should now be invalid
+        mcp_resp2 = client.post(
+            "/mcp",
+            headers={
+                "authorization": f"Bearer {access_token}",
+                "accept": "application/json, text/event-stream",
+            },
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        )
+        assert mcp_resp2.status_code == 401
+
+
+def test_revoke_empty_token_returns_200():
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with TestClient(module.app) as client:
+        resp = client.post(
+            "/revoke",
+            content="token=",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    assert resp.status_code == 200
+
+
 # ── /.well-known/oauth-authorization-server ───────────────────────────────────
 
 
-def test_oauth_metadata_returns_own_endpoints(monkeypatch):
+def test_oauth_metadata_includes_revocation_endpoint(monkeypatch):
     module = importlib.import_module("finout_mcp_hosted.server")
     monkeypatch.setenv("MCP_BASE_URL", "https://mcp.example.com")
     with TestClient(module.app) as client:
@@ -336,7 +475,9 @@ def test_oauth_metadata_returns_own_endpoints(monkeypatch):
     assert data["authorization_endpoint"] == "https://mcp.example.com/authorize"
     assert data["token_endpoint"] == "https://mcp.example.com/token"
     assert data["registration_endpoint"] == "https://mcp.example.com/register"
+    assert data["revocation_endpoint"] == "https://mcp.example.com/revoke"
     assert "S256" in data["code_challenge_methods_supported"]
+    assert "refresh_token" in data["grant_types_supported"]
 
 
 def test_openid_configuration_same_as_auth_server(monkeypatch):
@@ -512,57 +653,32 @@ def test_proxy_tenant_switch_returns_new_token(monkeypatch):
 # ── End-to-end: OAuth → token → MCP tools/list ───────────────────────────────
 
 
+def _mcp_headers(bearer: str) -> dict:
+    return {
+        "authorization": f"Bearer {bearer}",
+        "accept": "application/json, text/event-stream",
+    }
+
+
 def test_oauth_then_mcp_tools_list():
-    """Full flow: authorize → token exchange → use Bearer to list MCP tools."""
+    """Full flow: authorize → token exchange → use opaque Bearer to list MCP tools."""
     module = importlib.import_module("finout_mcp_hosted.server")
-    verifier = "e2e-verifier-abcdefghij1234567890"
-    challenge = _make_challenge(verifier)
+    data = _do_oauth_flow(module, "e2e-verifier-abcdefghij1234567890", "fake-frontegg-jwt", "tenant-e2e")
+    access_token = data["access_token"]
+    assert access_token.startswith("fmcp_at_")
 
-    with patch(
-        "finout_mcp_hosted.server.verify_login_jwt",
-        return_value={"tenantId": "tenant-e2e", "email": "test@example.com"},
-    ):
-        # Step 1: POST /authorize → get auth code
-        with TestClient(module.app, follow_redirects=False) as client:
-            auth_resp = client.post(
-                "/authorize",
-                data={
-                    "access_token": "fake-frontegg-jwt",
-                    "redirect_uri": "http://localhost/cb",
-                    "code_challenge": challenge,
-                    "state": "s",
-                },
-            )
-        assert auth_resp.status_code == 302
-        code = auth_resp.headers["location"].split("code=")[1].split("&")[0]
-
-        # Step 2: POST /token → exchange code for access_token
-        with TestClient(module.app) as client:
-            token_resp = client.post(
-                "/token",
-                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb",
-                headers={"content-type": "application/x-www-form-urlencoded"},
-            )
-        assert token_resp.status_code == 200
-        access_token = token_resp.json()["access_token"]
-        assert access_token == "fake-frontegg-jwt"
-
-        # Step 3: POST /mcp with Bearer token → tools/list
-        with TestClient(module.app) as client:
-            mcp_resp = client.post(
-                "/mcp",
-                headers={
-                    "authorization": f"Bearer {access_token}",
-                    "accept": "application/json, text/event-stream",
-                },
-                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
-            )
-        assert mcp_resp.status_code == 200, f"MCP failed: {mcp_resp.status_code} {mcp_resp.text}"
-        body = mcp_resp.json()
-        assert "error" not in body, f"MCP error: {body}"
-        assert "result" in body
-        assert "tools" in body["result"]
-        assert len(body["result"]["tools"]) > 0
+    with TestClient(module.app) as client:
+        mcp_resp = client.post(
+            "/mcp",
+            headers=_mcp_headers(access_token),
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        )
+    assert mcp_resp.status_code == 200, f"MCP failed: {mcp_resp.status_code} {mcp_resp.text}"
+    body = mcp_resp.json()
+    assert "error" not in body, f"MCP error: {body}"
+    assert "result" in body
+    assert "tools" in body["result"]
+    assert len(body["result"]["tools"]) > 0
 
 
 def test_mcp_tools_list_with_key_secret():
@@ -585,166 +701,78 @@ def test_mcp_tools_list_with_key_secret():
     assert "tools" in body["result"]
 
 
-def _mcp_headers(bearer: str) -> dict:
-    return {
-        "authorization": f"Bearer {bearer}",
-        "accept": "application/json, text/event-stream",
-    }
-
-
-def _do_oauth_flow(module, verifier: str, jwt: str, tenant_id: str) -> str:
-    """Run the full OAuth PKCE flow and return the access_token."""
-    challenge = _make_challenge(verifier)
-    with patch(
-        "finout_mcp_hosted.server.verify_login_jwt",
-        return_value={"tenantId": tenant_id, "email": "test@example.com"},
-    ):
-        with TestClient(module.app, follow_redirects=False) as client:
-            auth_resp = client.post(
-                "/authorize",
-                data={
-                    "access_token": jwt,
-                    "redirect_uri": "http://localhost/cb",
-                    "code_challenge": challenge,
-                    "state": "s",
-                },
-            )
-        assert auth_resp.status_code == 302, f"Authorize failed: {auth_resp.status_code}"
-        code = auth_resp.headers["location"].split("code=")[1].split("&")[0]
-
-        with TestClient(module.app) as client:
-            token_resp = client.post(
-                "/token",
-                content=f"grant_type=authorization_code&code={code}&code_verifier={verifier}&redirect_uri=http%3A%2F%2Flocalhost%2Fcb",
-                headers={"content-type": "application/x-www-form-urlencoded"},
-            )
-        assert token_resp.status_code == 200, f"Token exchange failed: {token_resp.text}"
-        return token_resp.json()["access_token"]
+def test_mcp_raw_jwt_returns_401():
+    """Raw Frontegg JWT (not opaque session token) should be rejected."""
+    module = importlib.import_module("finout_mcp_hosted.server")
+    with TestClient(module.app) as client:
+        resp = client.post(
+            "/mcp",
+            headers={
+                "authorization": "Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyMSJ9.fake",
+                "accept": "application/json, text/event-stream",
+            },
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        )
+    assert resp.status_code == 401
 
 
 def test_e2e_oauth_tools_list_then_call_tool():
     """Full flow: OAuth → tools/list → call a tool."""
     module = importlib.import_module("finout_mcp_hosted.server")
-    token = _do_oauth_flow(module, "e2e-full-verifier-1234567890ab", "jwt-t1", "tenant-1")
+    data = _do_oauth_flow(module, "e2e-full-verifier-1234567890ab", "jwt-t1", "tenant-1")
+    access_token = data["access_token"]
 
-    with patch(
-        "finout_mcp_hosted.server.verify_login_jwt",
-        return_value={"tenantId": "tenant-1", "email": "test@example.com"},
-    ):
-        with TestClient(module.app) as client:
-            # tools/list
-            resp = client.post("/mcp", headers=_mcp_headers(token),
-                               json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
-            assert resp.status_code == 200
-            body = resp.json()
-            assert "result" in body, f"tools/list error: {body}"
-            tool_names = [t["name"] for t in body["result"]["tools"]]
-            assert "query_costs" in tool_names
+    with TestClient(module.app) as client:
+        # tools/list
+        resp = client.post("/mcp", headers=_mcp_headers(access_token),
+                           json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "result" in body, f"tools/list error: {body}"
+        tool_names = [t["name"] for t in body["result"]["tools"]]
+        assert "query_costs" in tool_names
 
-            # call_tool (will fail at API level but should NOT fail at protocol level)
-            resp2 = client.post("/mcp", headers=_mcp_headers(token),
-                                json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                                      "params": {"name": "query_costs", "arguments": {
-                                          "time_period": "last_7_days"}}})
-            assert resp2.status_code == 200
-            body2 = resp2.json()
-            # Should get a result (even if it's an error message from the tool, not a protocol error)
-            assert "result" in body2 or ("error" not in body2 or body2["error"]["code"] != -32602), \
-                f"Protocol error on call_tool: {body2}"
-
-
-def test_e2e_tenant_switch_produces_valid_token(monkeypatch):
-    """Tenant switch proxy → new JWT → OAuth → tools/list."""
-    module = importlib.import_module("finout_mcp_hosted.server")
-    monkeypatch.setenv("FRONTEGG_BASE_URL", "https://app-test.frontegg.com/oauth")
-
-    switched_jwt = "jwt-after-switch-to-tenant-2"
-
-    # Mock Frontegg: switch returns user profile, refresh returns new tokens.
-    with patch("finout_mcp_hosted.server.httpx.AsyncClient") as mock_cls:
-        switch_resp = type("R", (), {
-            "status_code": 200,
-            "json": lambda self: {"tenantId": "tenant-2", "name": "User"},
-        })()
-        refresh_resp = type("R", (), {
-            "status_code": 200,
-            "json": lambda self: {"accessToken": switched_jwt, "refreshToken": "new-rt"},
-        })()
-
-        class FakeClient:
-            async def __aenter__(self):
-                return self
-            async def __aexit__(self, *a):
-                pass
-            async def put(self, url, **kwargs):
-                return switch_resp
-            async def post(self, url, **kwargs):
-                return refresh_resp
-
-        mock_cls.return_value = FakeClient()
-
-        with TestClient(module.app) as client:
-            switch_result = client.put(
-                "/api/tenant-switch",
-                json={"tenantId": "tenant-2", "refreshToken": "old-rt"},
-                headers={"authorization": "Bearer original-jwt"},
-            )
-        assert switch_result.status_code == 200
-        new_token = switch_result.json()["accessToken"]
-        assert new_token == switched_jwt
-
-    # Now use the switched JWT through the full OAuth flow.
-    access_token = _do_oauth_flow(
-        module, "switch-verifier-1234567890abcde", switched_jwt, "tenant-2"
-    )
-    assert access_token == switched_jwt
-
-    # And verify MCP works with it.
-    with patch(
-        "finout_mcp_hosted.server.verify_login_jwt",
-        return_value={"tenantId": "tenant-2", "email": "test@example.com"},
-    ):
-        with TestClient(module.app) as client:
-            resp = client.post("/mcp", headers=_mcp_headers(access_token),
-                               json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
-            assert resp.status_code == 200
-            body = resp.json()
-            assert "result" in body, f"tools/list failed after switch: {body}"
-            assert len(body["result"]["tools"]) > 0
+        # call_tool (will fail at API level but should NOT fail at protocol level)
+        resp2 = client.post("/mcp", headers=_mcp_headers(access_token),
+                            json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                  "params": {"name": "query_costs", "arguments": {
+                                      "time_period": "last_7_days"}}})
+        assert resp2.status_code == 200
+        body2 = resp2.json()
+        assert "result" in body2 or ("error" not in body2 or body2["error"]["code"] != -32602), \
+            f"Protocol error on call_tool: {body2}"
 
 
 def test_e2e_two_tenants_isolated():
     """Two users with different tenants get isolated tool responses."""
     module = importlib.import_module("finout_mcp_hosted.server")
-    token_a = _do_oauth_flow(module, "tenant-a-verifier-1234567890ab", "jwt-a", "tenant-a")
-    token_b = _do_oauth_flow(module, "tenant-b-verifier-1234567890ab", "jwt-b", "tenant-b")
+    data_a = _do_oauth_flow(module, "tenant-a-verifier-1234567890ab", "jwt-a", "tenant-a")
+    data_b = _do_oauth_flow(module, "tenant-b-verifier-1234567890ab", "jwt-b", "tenant-b")
 
-    with patch(
-        "finout_mcp_hosted.server.verify_login_jwt",
-        side_effect=lambda t: {"tenantId": "tenant-a" if t == "jwt-a" else "tenant-b",
-                                "email": "a@test.com" if t == "jwt-a" else "b@test.com"},
-    ):
-        with TestClient(module.app) as client:
-            resp_a = client.post("/mcp", headers=_mcp_headers(token_a),
-                                 json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
-            resp_b = client.post("/mcp", headers=_mcp_headers(token_b),
-                                 json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+    with TestClient(module.app) as client:
+        resp_a = client.post("/mcp", headers=_mcp_headers(data_a["access_token"]),
+                             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+        resp_b = client.post("/mcp", headers=_mcp_headers(data_b["access_token"]),
+                             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
 
-        assert resp_a.status_code == 200
-        assert resp_b.status_code == 200
-        assert "result" in resp_a.json(), f"Tenant A error: {resp_a.json()}"
-        assert "result" in resp_b.json(), f"Tenant B error: {resp_b.json()}"
+    assert resp_a.status_code == 200
+    assert resp_b.status_code == 200
+    assert "result" in resp_a.json(), f"Tenant A error: {resp_a.json()}"
+    assert "result" in resp_b.json(), f"Tenant B error: {resp_b.json()}"
 
 
 # ── Client pool ──────────────────────────────────────────────────────────────
 
 
-def test_lifespan_creates_client_pool():
+def test_lifespan_creates_client_pool_and_redis():
     module = importlib.import_module("finout_mcp_hosted.server")
     with TestClient(module.app) as client:
         pool = module.app.state.client_pool
         assert pool is not None
         assert len(pool) == 0
+
+        store = module.app.state.redis_store
+        assert store is not None
 
         # A request with key/secret auth should create a pooled client.
         client.post(

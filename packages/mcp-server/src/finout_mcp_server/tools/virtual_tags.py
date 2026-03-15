@@ -64,47 +64,39 @@ def _extract_virtual_tag_references(tag: dict, tag_map: dict[str, str]) -> list[
 
 def _infer_tag_type(tag: dict, tag_map: dict[str, str]) -> str:
     """
-    Derive tag type. The API type field is almost always 'default' and not useful,
-    with the exception of 'multiKeyReallocation' which means relational.
+    Derive tag type from the API type field and structural signals.
 
-    For 'default' tags, type is inferred structurally:
+    - relational:   API type is 'multiKeyReallocation' (the only non-'default' type)
     - reallocation: has allocations (metric/telemetry-based cost splits)
-    - relational:   rules reference other virtual tags via costCenter == 'virtualTag'
-    - custom:       has rules but no cross-tag references
+    - custom:       has rules (may reference virtual tags in filters or output, still custom)
     - base:         no rules, no allocations
     """
     if (tag.get("type") or "") == "multiKeyReallocation":
         return "relational"
     if tag.get("allocations"):
         return "reallocation"
-    for rule in tag.get("rules") or []:
-        if not isinstance(rule, dict):
-            continue
-        filters = rule.get("filters") or {}
-        if not isinstance(filters, dict):
-            continue
-        if filters.get("costCenter") == "virtualTag":
-            return "relational"
-        for cond in (filters.get("OR") or []) + (filters.get("AND") or []):
-            if isinstance(cond, dict) and cond.get("costCenter") == "virtualTag":
-                return "relational"
     if tag.get("rules"):
         return "custom"
     return "base"
 
 
-def _get_reallocation_info(tag: dict) -> dict:
+def _get_reallocation_info(
+    tag: dict,
+    telemetry_index: dict[str, dict[str, str]] | None = None,
+) -> dict:
     """
     Extract reallocation strategy from a tag's allocations.
     Allocation entries have shape: {name, type, active, data: {metricName, kpiCenterId,
     tagName, joinField, filters, keys}}.
+
+    If telemetry_index is provided, resolves kpiCenterId to human-readable info.
     """
     allocations = tag.get("allocations") or []
     if not allocations:
-        return {"strategy": "unknown", "metric_sources": [], "allocation_count": 0}
+        return {"reallocation_type": "unknown", "allocation_count": 0}
 
     metric_sources: list[dict] = []
-    strategy = "unknown"
+    static_splits: list[dict] = []
 
     for alloc in allocations:
         if not isinstance(alloc, dict):
@@ -112,7 +104,6 @@ def _get_reallocation_info(tag: dict) -> dict:
         alloc_type = (alloc.get("type") or "").lower()
         data = alloc.get("data") or {}
         if alloc_type == "metric" or data.get("metricName") or data.get("kpiCenterId"):
-            strategy = "metric"
             source: dict[str, Any] = {"name": alloc.get("name") or ""}
             if data.get("metricName"):
                 source["metric"] = data["metricName"]
@@ -121,21 +112,39 @@ def _get_reallocation_info(tag: dict) -> dict:
             if data.get("joinField"):
                 source["join_on"] = data["joinField"]
             if data.get("kpiCenterId"):
-                source["kpi_center_id"] = data["kpiCenterId"]
+                kpi_id = data["kpiCenterId"]
+                source["kpi_center_id"] = kpi_id
+                if telemetry_index and kpi_id in telemetry_index:
+                    source["telemetry_center"] = telemetry_index[kpi_id]
             metric_sources.append(source)
-        elif (
-            alloc_type in ("percentage", "fixed")
-            or alloc.get("targets")
-            or alloc.get("participants")
-        ):
-            if strategy == "unknown":
-                strategy = "percentage"
+        elif alloc_type == "fixed":
+            split: dict[str, Any] = {"name": alloc.get("name") or ""}
+            tags = data.get("tags") or []
+            if tags:
+                split["splits"] = {
+                    t["key"]: t["value"] for t in tags if "key" in t and "value" in t
+                }
+            static_splits.append(split)
 
-    return {
-        "strategy": strategy,
-        "metric_sources": metric_sources,
+    # Determine reallocation type
+    if metric_sources and static_splits:
+        reallocation_type = "mixed"
+    elif metric_sources:
+        reallocation_type = "telemetry"
+    elif static_splits:
+        reallocation_type = "static"
+    else:
+        reallocation_type = "unknown"
+
+    result: dict[str, Any] = {
+        "reallocation_type": reallocation_type,
         "allocation_count": len(allocations),
     }
+    if metric_sources:
+        result["metric_sources"] = metric_sources
+    if static_splits:
+        result["static_splits"] = static_splits
+    return result
 
 
 def _compute_summary(
@@ -297,6 +306,7 @@ def _focused_tag_detail(
     tag_map: dict[str, str],
     tag_index: dict[str, dict],
     tag_id_to_type: dict[str, str],
+    telemetry_index: dict[str, dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-seed-tag breakdown: type, position, direct deps/consumers, cost dimensions."""
     direct_deps: dict[str, list[str]] = {}
@@ -332,6 +342,9 @@ def _focused_tag_detail(
         }
         if values:
             entry["values"] = values
+        tag_type = tag_id_to_type.get(tid, "unknown")
+        if tag_type == "reallocation":
+            entry["reallocation"] = _get_reallocation_info(tag, telemetry_index)
         result.append(entry)
     return result
 
@@ -341,6 +354,7 @@ def _tag_details_list(
     edge_counts: dict[tuple[str, str], int],
     tag_map: dict[str, str],
     tag_id_to_type: dict[str, str],
+    telemetry_index: dict[str, dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Compact per-tag summary for every tag in a subgraph."""
     used_by: dict[str, int] = {}
@@ -365,6 +379,8 @@ def _tag_details_list(
         }
         if values:
             row["values"] = values
+        if tag_id_to_type.get(tid) == "reallocation":
+            row["reallocation"] = _get_reallocation_info(tag, telemetry_index)
         rows.append(row)
     rows.sort(key=lambda r: (-(r["used_by"] + r["depends_on"]), r["name"]))  # type: ignore[operator]
     return rows
@@ -648,8 +664,22 @@ async def analyze_virtual_tags_impl(args: dict) -> dict:
     }
 
     if focused:
+        # Fetch telemetry centers if any tag in the subgraph is reallocation type
+        telemetry_index: dict[str, dict[str, str]] | None = None
+        has_reallocation = any(tag_id_to_type.get(tid) == "reallocation" for tid in subgraph)
+        if has_reallocation:
+            try:
+                centers = await finout_client.get_telemetry_centers()
+                telemetry_index = {
+                    c["id"]: {"name": c.get("name", ""), "type": c.get("type", "")}
+                    for c in centers
+                    if "id" in c
+                }
+            except Exception:
+                pass  # Non-critical — proceed without resolution
+
         focused_detail = _focused_tag_detail(
-            seed_ids, edge_counts, tag_map, tag_index, tag_id_to_type
+            seed_ids, edge_counts, tag_map, tag_index, tag_id_to_type, telemetry_index
         )
 
         # Fetch live values from the filters API for seed tags
@@ -664,7 +694,7 @@ async def analyze_virtual_tags_impl(args: dict) -> dict:
             subgraph_tags, edge_counts, tag_map, tag_id_to_type
         )
         result["tag_details"] = _tag_details_list(
-            subgraph_tags, edge_counts, tag_map, tag_id_to_type
+            subgraph_tags, edge_counts, tag_map, tag_id_to_type, telemetry_index
         )
     else:
         result["ecosystem"] = _discover_chains(tags, all_edges, tag_map, tag_index, tag_id_to_type)

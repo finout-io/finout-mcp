@@ -521,6 +521,29 @@ TOOLS_REFERENCE: List[ToolEntry] = [
         "workflow": None,
     },
     {
+        "name": "list_telemetry_centers",
+        "category": "context",
+        "availability": "internal",
+        "description": "List telemetry centers that feed custom metrics into virtual tags and cost allocation.",
+        "when_to_use": [
+            "telemetry centers, KPI centers, custom metrics",
+            "what data feeds my virtual tags?",
+            "where does this reallocation metric come from?",
+            "data pipeline for cost allocation",
+        ],
+        "example_prompts": [
+            "What telemetry centers do I have?",
+            "Show me my Datadog metrics",
+            "Which telemetry center feeds the anthropic_ratio virtual tag?",
+            "List all S3-based telemetry sources",
+        ],
+        "key_params": [
+            "type — filter by source type (s3-csv, megabill-ratio, costexplorer, cloudwatch, datadog)",
+            "name — filter by name (substring match)",
+        ],
+        "workflow": None,
+    },
+    {
         "name": "debug_filters",
         "category": "filters",
         "availability": "internal",

@@ -50,15 +50,71 @@ def organize_filters_by_cost_center(filters: dict[str, Any]) -> dict[str, list[d
     return organized
 
 
+def _score_term_against_field(term: str, key: str, path: str) -> int:
+    """Score a single search term against a filter's key and path.
+
+    Returns a relevance score (0-100) based on match quality.
+    """
+    t = term.lower()
+    k = key.lower()
+    p = path.lower()
+
+    if t == k:
+        return 100
+    if k.startswith(t):
+        return 80
+    if t in k:
+        return 60
+    if re.search(rf"\b{re.escape(t)}", k):
+        return 50
+    if t in p:
+        return 40
+    if re.search(rf"\b{re.escape(t)}", p):
+        return 30
+    return 0
+
+
+def _score_values(terms: list[str], raw_values: dict | list | Any) -> tuple[int, list[str]]:
+    """Score search terms against filter values.
+
+    Returns (relevance_score, matched_value_names).
+    """
+    if isinstance(raw_values, dict):
+        value_names = list(raw_values.keys())
+    elif isinstance(raw_values, list):
+        value_names = [str(v) for v in raw_values]
+    else:
+        return 0, []
+
+    matched: list[str] = []
+    for vn in value_names:
+        vn_lower = vn.lower()
+        # Full-phrase match
+        if any(t in vn_lower for t in terms):
+            matched.append(vn)
+
+    if not matched:
+        return 0, []
+
+    # Exact value match scores higher than substring
+    if any(t == mv.lower() for t in terms for mv in matched):
+        return 25, matched[:5]
+    return 20, matched[:5]
+
+
 def search_filters_by_keyword(
     filters: dict[str, Any], query: str, cost_center: str | None = None, limit: int = 50
 ) -> list[dict[str, Any]]:
     """
     Search filters by keyword with relevance ranking.
 
+    Supports multi-word queries by tokenizing and matching individual terms.
+    For example, "kubernetes cluster" matches filters where "kubernetes" appears
+    in the path and "cluster" appears in the key.
+
     Args:
         filters: Raw filters data from API
-        query: Search query (case-insensitive)
+        query: Search query (case-insensitive, supports multi-word)
         cost_center: Optional cost center to filter by
         limit: Maximum number of results
 
@@ -66,6 +122,7 @@ def search_filters_by_keyword(
         List of matching filters, sorted by relevance
     """
     query_lower = query.lower()
+    tokens = [t for t in query_lower.split() if len(t) >= 2]
     results = []
 
     for cc, filter_types in filters.items():
@@ -84,51 +141,27 @@ def search_filters_by_keyword(
                 key = filter_item.get("key", "")
                 path = filter_item.get("path", "")
 
-                # Calculate relevance score
-                relevance = 0
+                # 1) Try full query as a single phrase (preserves existing behavior)
+                relevance = _score_term_against_field(query_lower, key, path)
+
+                # 2) If no full-phrase match and query has multiple tokens,
+                #    try tokenized matching — score each token independently
+                if relevance == 0 and len(tokens) > 1:
+                    token_scores = [_score_term_against_field(token, key, path) for token in tokens]
+                    hits = [s for s in token_scores if s > 0]
+                    if hits:
+                        match_ratio = len(hits) / len(tokens)
+                        # Require at least half the tokens to match
+                        if match_ratio >= 0.5:
+                            avg_score = sum(hits) / len(hits)
+                            relevance = int(avg_score * match_ratio)
+
+                # 3) Value search (also tokenized for multi-word queries)
                 matched_values: list[str] = []
-
-                # Exact match in key (highest priority)
-                if query_lower == key.lower():
-                    relevance = 100
-                # Key starts with query
-                elif key.lower().startswith(query_lower):
-                    relevance = 80
-                # Query in key
-                elif query_lower in key.lower():
-                    relevance = 60
-                # Fuzzy match (word boundary) in key
-                elif re.search(rf"\b{re.escape(query_lower)}", key.lower()):
-                    relevance = 50
-                # Query in path
-                elif query_lower in path.lower():
-                    relevance = 40
-                # Fuzzy match (word boundary) in path
-                elif re.search(rf"\b{re.escape(query_lower)}", path.lower()):
-                    relevance = 30
-
-                # Search in values (lower priority, but catches concept mismatches)
                 if relevance == 0:
                     raw_values = filter_item.get("values", {})
-                    if isinstance(raw_values, dict):
-                        value_names = list(raw_values.keys())
-                    elif isinstance(raw_values, list):
-                        value_names = [str(v) for v in raw_values]
-                    else:
-                        value_names = []
-
-                    for vn in value_names:
-                        if query_lower in vn.lower():
-                            matched_values.append(vn)
-
-                    if matched_values:
-                        # Exact value match scores higher than substring
-                        if any(query_lower == mv.lower() for mv in matched_values):
-                            relevance = 25
-                        else:
-                            relevance = 20
-                        # Cap to 5 matched values to avoid noise
-                        matched_values = matched_values[:5]
+                    value_relevance, matched_values = _score_values(tokens, raw_values)
+                    relevance = value_relevance
 
                 if relevance > 0:
                     result_item: dict[str, Any] = {

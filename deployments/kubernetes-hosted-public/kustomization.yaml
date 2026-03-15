@@ -5,8 +5,8 @@ namespace: mcp-public
 
 resources:
   - namespace.yaml
+  - serviceaccount.yaml
   - configmap.yaml
-  - secret.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml

@@ -1,15 +1,14 @@
 """
 Hosted public MCP service (Streamable HTTP transport).
 
-This service runs the same MCP tool core in fixed PUBLIC mode and is intentionally
-separate from BILLY.
-
 Supports concurrent multi-user requests via per-request ContextVar isolation and
-a pooled FinoutClient cache.
+a pooled FinoutClient cache. Auth codes, sessions, and rate limits are Redis-backed.
 """
 
 from __future__ import annotations
 
+import asyncio
+import fnmatch
 import html
 import os
 import pathlib
@@ -23,6 +22,7 @@ import httpx
 from dotenv import load_dotenv
 from mcp.server.streamable_http import StreamableHTTPServerTransport
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -31,8 +31,11 @@ from starlette.routing import Route
 import finout_mcp_server.server as server_module
 
 from .auth import _get_login_cookie_public_key, _get_public_key, check_sso, check_sso_debug, frontegg_base_url, verify_cookie_jwt, verify_login_jwt
+from .circuit_breaker import CircuitBreaker
 from .client_pool import ClientPool
-from .oauth import consume_auth_code, generate_auth_code
+from .oauth import TOKEN_PREFIX_ACCESS, TOKEN_PREFIX_CODE, TOKEN_PREFIX_REFRESH, generate_opaque_token, verify_pkce
+from .rate_limit import RateLimitConfig, check_auth_rate_limit, check_mcp_rate_limit
+from .redis_store import RedisStore, RedisUnavailableError
 from finout_mcp_server.finout_client import InternalAuthMode
 from finout_mcp_server.server import MCPMode, _client_var, _runtime_mode_var, server, set_request_client, set_request_runtime_mode
 from finout_mcp_server.observability import reset_trace_context, set_trace_context
@@ -42,20 +45,56 @@ load_dotenv(override=True)
 import logging as _logging
 _logging.basicConfig(level=_logging.INFO, format="%(name)s %(levelname)s %(message)s")
 
+# Load secrets from Vault (IRSA → Secrets Manager → Vault) with env var fallback.
+from .vault import inject_secrets_into_env
+inject_secrets_into_env()
+
+
+# ── Redirect URI allowlist ────────────────────────────────────────────────────
+
+
+def _get_allowed_redirect_patterns() -> list[str]:
+    raw = os.getenv(
+        "MCP_ALLOWED_REDIRECT_PATTERNS",
+        "http://localhost/*,http://localhost:*/*,http://127.0.0.1/*,http://127.0.0.1:*/*",
+    )
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def _validate_redirect_uri(uri: str) -> bool:
+    """Check redirect_uri against allowed patterns (fnmatch-style)."""
+    patterns = _get_allowed_redirect_patterns()
+    return any(fnmatch.fnmatch(uri, pattern) for pattern in patterns)
+
+
+
+# ── Lifespan ──────────────────────────────────────────────────────────────────
+
 
 @asynccontextmanager
 async def lifespan(app: Starlette):
-    """Initialize MCP core in fixed public mode."""
+    """Initialize MCP core, Redis, circuit breaker, and semaphore."""
     server_module.runtime_mode = MCPMode.PUBLIC.value
     server_module.finout_client = None
 
     pool = ClientPool(max_size=50, ttl=3600)
     app.state.client_pool = pool
 
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    store = RedisStore(redis_url)
+    app.state.redis_store = store
+
+    app.state.circuit_breaker = CircuitBreaker()
+    app.state.mcp_semaphore = asyncio.Semaphore(
+        int(os.getenv("MCP_MAX_CONCURRENT", "100"))
+    )
+    app.state.rate_limit_config = RateLimitConfig()
+
     try:
         yield
     finally:
         await pool.close_all()
+        await store.close()
 
 
 def _debug_enabled() -> bool:
@@ -167,8 +206,11 @@ async def debug_verify_token(request: Request) -> JSONResponse:
     return JSONResponse(result)
 
 
+# ── Health ────────────────────────────────────────────────────────────────────
+
+
 async def health(_: Request) -> JSONResponse:
-    """Health check endpoint for hosted deployment."""
+    """Liveness check — always returns 200."""
     return JSONResponse(
         {
             "status": "healthy",
@@ -178,6 +220,20 @@ async def health(_: Request) -> JSONResponse:
     )
 
 
+async def health_ready(request: Request) -> JSONResponse:
+    """Readiness check — verifies Redis connectivity."""
+    store: RedisStore = request.app.state.redis_store
+    if await store.ping():
+        return JSONResponse({"status": "ready", "redis": "connected"})
+    return JSONResponse(
+        {"status": "not ready", "redis": "disconnected"},
+        status_code=503,
+    )
+
+
+# ── Auth helpers ──────────────────────────────────────────────────────────────
+
+
 def _extract_public_auth_from_scope(scope: Any) -> tuple[str, str, str]:
     """Extract required auth headers from ASGI scope."""
     headers = {
@@ -185,8 +241,6 @@ def _extract_public_auth_from_scope(scope: Any) -> tuple[str, str, str]:
     }
     client_id = headers.get("x-finout-client-id", "").strip()
     secret_key = headers.get("x-finout-secret-key", "").strip()
-    # Intentionally ignore client-provided API URL in hosted mode.
-    # This avoids request-driven upstream URL override.
     api_url = os.getenv("FINOUT_API_URL", "https://app.finout.io")
 
     if not client_id or not secret_key:
@@ -201,6 +255,9 @@ def _frontegg_host() -> str:
         return ""
     parsed = urlparse(base)
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+# ── Proxy endpoints ──────────────────────────────────────────────────────────
 
 
 async def proxy_tenants(request: Request) -> JSONResponse:
@@ -253,7 +310,6 @@ async def proxy_tenant_switch(request: Request) -> JSONResponse:
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as http:
-            # Step 1: Switch the active tenant.
             switch_url = f"{fe_host}/identity/resources/users/v1/tenant"
             logger.info("PUT %s for tenant %s", switch_url, tenant_id)
             switch_resp = await http.put(
@@ -269,7 +325,6 @@ async def proxy_tenant_switch(request: Request) -> JSONResponse:
                     err = {"error": f"Tenant switch failed: HTTP {switch_resp.status_code}"}
                 return JSONResponse(err, status_code=switch_resp.status_code)
 
-            # Step 2: Refresh the token to get a new JWT with the new tenantId.
             refresh_url = f"{fe_host}/identity/resources/auth/v1/user/token/refresh"
             logger.info("POST %s", refresh_url)
             refresh_resp = await http.post(
@@ -297,17 +352,11 @@ async def proxy_tenant_switch(request: Request) -> JSONResponse:
 
 
 async def frontegg_proxy(request: Request) -> Response:
-    """Catch-all proxy for /frontegg/* → Frontegg host.
-
-    The Frontegg JS SDK calls {appUrl}/frontegg/... for identity operations
-    like switchTenant. We strip the /frontegg prefix and forward to the
-    real Frontegg host.
-    """
+    """Catch-all proxy for /frontegg/* -> Frontegg host."""
     fe_host = _frontegg_host()
     if not fe_host:
         return JSONResponse({"error": "Frontegg not configured"}, status_code=500)
 
-    # Strip /frontegg prefix to get the real path.
     path = request.url.path
     if path.startswith("/frontegg"):
         path = path[len("/frontegg"):]
@@ -316,7 +365,6 @@ async def frontegg_proxy(request: Request) -> Response:
     if request.url.query:
         target_url += f"?{request.url.query}"
 
-    # Forward all headers except host.
     fwd_headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
     body = await request.body()
 
@@ -335,6 +383,9 @@ async def frontegg_proxy(request: Request) -> Response:
     )
 
 
+# ── OAuth login page ─────────────────────────────────────────────────────────
+
+
 _LOGIN_HTML_TEMPLATE = (pathlib.Path(__file__).parent / "login.html").read_text()
 
 
@@ -343,11 +394,6 @@ def _embedded_login_page(
     code_challenge: str = "",
     state: str = "",
 ) -> HTMLResponse:
-    """Render the Frontegg embedded login page.
-
-    Called both for the initial /authorize GET (params embedded in HTML) and for
-    post-login callback routes (empty params, restored from sessionStorage by JS).
-    """
     fe_base_url = os.getenv("FRONTEGG_BASE_URL", "")
     fe_client_id = os.getenv("FRONTEGG_MCP_CLIENT_ID", "")
     if not fe_base_url or not fe_client_id:
@@ -366,13 +412,11 @@ def _embedded_login_page(
 
 
 async def oauth_login_callback(request: Request) -> Response:
-    """Handle Frontegg SDK navigation under /account/*.
-
-    The Frontegg embedded SDK navigates to various {appUrl}/account/* paths during
-    login (login, login-callback, MFA challenge, social login, etc.).
-    We serve the same login page so the JS SDK keeps control of the flow.
-    """
+    """Handle Frontegg SDK navigation under /account/*."""
     return _embedded_login_page()
+
+
+# ── OAuth authorize ──────────────────────────────────────────────────────────
 
 
 async def oauth_authorize_get(request: Request) -> Response:
@@ -388,6 +432,12 @@ async def oauth_authorize_get(request: Request) -> Response:
             status_code=400,
         )
 
+    if not _validate_redirect_uri(redirect_uri):
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": "redirect_uri not allowed"},
+            status_code=400,
+        )
+
     return _embedded_login_page(
         redirect_uri=redirect_uri,
         code_challenge=code_challenge,
@@ -396,7 +446,7 @@ async def oauth_authorize_get(request: Request) -> Response:
 
 
 async def oauth_authorize_post(request: Request) -> Response:
-    """Complete OAuth after Frontegg embedded login."""
+    """Complete OAuth after Frontegg embedded login — store opaque auth code in Redis."""
     import logging
     _log = logging.getLogger("finout_mcp_hosted.oauth")
 
@@ -407,22 +457,23 @@ async def oauth_authorize_post(request: Request) -> Response:
     code_challenge = str(form.get("code_challenge", "")).strip()
     state = str(form.get("state", "")).strip()
 
-    _log.info("POST /authorize — token_len=%d redirect_uri=%s challenge=%s state=%s",
-              len(access_token), redirect_uri, code_challenge[:10] + "...", state[:10])
-    _log.info("POST /authorize — token first 30: %s", access_token[:30])
-    _log.info("POST /authorize — token dots: %d (JWT has 2)", access_token.count("."))
+    _log.info("POST /authorize — token_len=%d redirect_uri=%s", len(access_token), redirect_uri)
 
     if not access_token or not redirect_uri or not code_challenge:
-        _log.warning("POST /authorize — missing params")
         return JSONResponse(
             {"error": "invalid_request", "error_description": "Missing required parameters"},
             status_code=400,
         )
 
+    if not _validate_redirect_uri(redirect_uri):
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": "redirect_uri not allowed"},
+            status_code=400,
+        )
+
     try:
         payload = verify_login_jwt(access_token)
-        _log.info("POST /authorize — JWT valid, tenantId=%s email=%s",
-                  payload.get("tenantId"), payload.get("email"))
+        _log.info("POST /authorize — JWT valid, tenantId=%s", payload.get("tenantId"))
     except Exception as exc:
         _log.warning("POST /authorize — JWT validation failed: %s", exc)
         return JSONResponse(
@@ -430,15 +481,34 @@ async def oauth_authorize_post(request: Request) -> Response:
             status_code=401,
         )
 
-    code = generate_auth_code(access_token, code_challenge, redirect_uri, refresh_token)
-    _log.info("POST /authorize — generated code len=%d first 30: %s", len(code), code[:30])
-    _log.info("POST /authorize — code dots: %d (should be 1)", code.count("."))
+    store: RedisStore = request.app.state.redis_store
+    code = generate_opaque_token(TOKEN_PREFIX_CODE)
+    code_data = {
+        "jwt": access_token,
+        "refresh_token": refresh_token,
+        "redirect_uri": redirect_uri,
+        "code_challenge": code_challenge,
+        "account_id": payload.get("tenantId", ""),
+        "user_id": payload.get("sub") or payload.get("email") or "",
+        "email": payload.get("email", ""),
+    }
+
+    try:
+        await store.store_auth_code(code, code_data, ttl=120)
+    except RedisUnavailableError:
+        return JSONResponse(
+            {"error": "server_error", "error_description": "Service temporarily unavailable"},
+            status_code=503,
+        )
+
     query: dict[str, str] = {"code": code}
     if state:
         query["state"] = state
     redirect_url = f"{redirect_uri}?{urlencode(query)}"
-    _log.info("POST /authorize — redirecting to %s", redirect_url[:100] + "...")
     return RedirectResponse(redirect_url, status_code=302)
+
+
+# ── OAuth token ──────────────────────────────────────────────────────────────
 
 
 async def oauth_register(request: Request) -> JSONResponse:
@@ -475,6 +545,7 @@ async def oauth_authorization_server(request: Request) -> JSONResponse:
             "authorization_endpoint": f"{base_url}/authorize",
             "token_endpoint": f"{base_url}/token",
             "registration_endpoint": f"{base_url}/register",
+            "revocation_endpoint": f"{base_url}/revoke",
             "response_types_supported": ["code"],
             "code_challenge_methods_supported": ["S256"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
@@ -496,17 +567,17 @@ def _jwt_expires_in(token: str) -> int:
         return 3600
 
 
-async def _refresh_via_frontegg(refresh_token: str) -> JSONResponse:
-    """Exchange a Frontegg refresh token for new access + refresh tokens."""
+async def _refresh_via_frontegg(refresh_token: str) -> tuple[str, str] | None:
+    """Exchange a Frontegg refresh token for new access + refresh tokens.
+
+    Returns (new_access, new_refresh) or None on failure.
+    """
     import logging
     _log = logging.getLogger("finout_mcp_hosted.oauth")
 
     fe_host = _frontegg_host()
     if not fe_host:
-        return JSONResponse(
-            {"error": "server_error", "error_description": "Frontegg not configured"},
-            status_code=500,
-        )
+        return None
 
     url = f"{fe_host}/identity/resources/auth/v1/user/token/refresh"
     _log.info("POST /token [refresh] — calling %s", url)
@@ -515,31 +586,19 @@ async def _refresh_via_frontegg(refresh_token: str) -> JSONResponse:
 
     if resp.status_code != 200:
         _log.warning("POST /token [refresh] — Frontegg returned %d", resp.status_code)
-        return JSONResponse(
-            {"error": "invalid_grant", "error_description": "Refresh token rejected"},
-            status_code=400,
-        )
+        return None
 
     try:
         tokens = resp.json()
     except Exception:
-        return JSONResponse({"error": "server_error"}, status_code=502)
+        return None
 
     new_access = tokens.get("accessToken", tokens.get("access_token", ""))
     new_refresh = tokens.get("refreshToken", tokens.get("refresh_token", ""))
     if not new_access:
-        return JSONResponse(
-            {"error": "server_error", "error_description": "No access token in refresh response"},
-            status_code=502,
-        )
+        return None
 
-    _log.info("POST /token [refresh] — OK, tenantId=%s", decodeJwtTenantId(new_access))
-    return JSONResponse({
-        "access_token": new_access,
-        "token_type": "bearer",
-        "expires_in": _jwt_expires_in(new_access),
-        "refresh_token": new_refresh,
-    })
+    return new_access, new_refresh
 
 
 async def oauth_token(request: Request) -> JSONResponse:
@@ -558,6 +617,8 @@ async def oauth_token(request: Request) -> JSONResponse:
     grant_type = _get("grant_type")
     _log.info("POST /token — grant_type=%s", grant_type)
 
+    store: RedisStore = request.app.state.redis_store
+
     if grant_type == "refresh_token":
         rt = _get("refresh_token")
         if not rt:
@@ -565,7 +626,74 @@ async def oauth_token(request: Request) -> JSONResponse:
                 {"error": "invalid_request", "error_description": "refresh_token required"},
                 status_code=400,
             )
-        return await _refresh_via_frontegg(rt)
+
+        # Look up stored refresh entry in Redis
+        try:
+            rt_data = await store.get_refresh_token(rt)
+        except RedisUnavailableError:
+            return JSONResponse(
+                {"error": "server_error", "error_description": "Service temporarily unavailable"},
+                status_code=503,
+            )
+
+        if rt_data is None:
+            return JSONResponse(
+                {"error": "invalid_grant", "error_description": "Invalid or expired refresh token"},
+                status_code=400,
+            )
+
+        # Refresh via Frontegg
+        frontegg_rt = rt_data.get("frontegg_refresh_token", "")
+        result = await _refresh_via_frontegg(frontegg_rt)
+        if result is None:
+            return JSONResponse(
+                {"error": "invalid_grant", "error_description": "Refresh token rejected"},
+                status_code=400,
+            )
+
+        new_frontegg_access, new_frontegg_refresh = result
+
+        # Decode new JWT for session data
+        try:
+            new_payload = verify_login_jwt(new_frontegg_access)
+        except Exception:
+            # If verification fails, use data from the old refresh token entry
+            new_payload = {
+                "tenantId": rt_data.get("account_id", ""),
+                "sub": rt_data.get("user_id", ""),
+                "email": rt_data.get("email", ""),
+            }
+
+        # Create new session + refresh token, delete old
+        new_session_token = generate_opaque_token(TOKEN_PREFIX_ACCESS)
+        new_refresh_token = generate_opaque_token(TOKEN_PREFIX_REFRESH)
+
+        session_data = {
+            "frontegg_jwt": new_frontegg_access,
+            "frontegg_refresh_token": new_frontegg_refresh,
+            "account_id": new_payload.get("tenantId", rt_data.get("account_id", "")),
+            "user_id": new_payload.get("sub") or new_payload.get("email") or rt_data.get("user_id", ""),
+            "email": new_payload.get("email", rt_data.get("email", "")),
+        }
+
+        try:
+            await store.store_session(new_session_token, session_data, ttl=3600)
+            await store.store_refresh_token(new_refresh_token, {
+                **session_data,
+            }, ttl=86400)
+            await store.delete_refresh_token(rt)
+        except RedisUnavailableError:
+            return JSONResponse(
+                {"error": "server_error", "error_description": "Service temporarily unavailable"},
+                status_code=503,
+            )
+
+        return JSONResponse({
+            "access_token": new_session_token,
+            "token_type": "bearer",
+            "expires_in": 3600,
+            "refresh_token": new_refresh_token,
+        })
 
     if grant_type != "authorization_code":
         return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
@@ -573,40 +701,100 @@ async def oauth_token(request: Request) -> JSONResponse:
     code = _get("code")
     code_verifier = _get("code_verifier")
     redirect_uri = _get("redirect_uri")
-    _log.info("POST /token — code len=%d code dots=%d first 30: %s",
-              len(code), code.count("."), code[:30])
-    _log.info("POST /token — verifier len=%d", len(code_verifier))
 
+    # Atomic single-use consumption from Redis
     try:
-        access_token, refresh_token = consume_auth_code(code, code_verifier, redirect_uri)
-        _log.info("POST /token — code consumed OK, jwt len=%d dots=%d tenantId=%s",
-                  len(access_token), access_token.count("."),
-                  decodeJwtTenantId(access_token))
-    except ValueError as exc:
-        _log.warning("POST /token — consume failed: %s", exc)
-        _log.info("POST /token — code first 50: %s", code[:50])
-        return JSONResponse({"error": "invalid_grant", "error_description": str(exc)}, status_code=400)
+        code_data = await store.consume_auth_code(code)
+    except RedisUnavailableError:
+        return JSONResponse(
+            {"error": "server_error", "error_description": "Service temporarily unavailable"},
+            status_code=503,
+        )
 
-    result: dict[str, object] = {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "expires_in": _jwt_expires_in(access_token),
+    if code_data is None:
+        return JSONResponse(
+            {"error": "invalid_grant", "error_description": "Invalid or already used authorization code"},
+            status_code=400,
+        )
+
+    # Verify PKCE
+    stored_challenge = code_data.get("code_challenge", "")
+    if not code_verifier or not verify_pkce(code_verifier, stored_challenge):
+        return JSONResponse(
+            {"error": "invalid_grant", "error_description": "PKCE verification failed"},
+            status_code=400,
+        )
+
+    # Verify redirect_uri
+    stored_redirect = code_data.get("redirect_uri", "")
+    if stored_redirect and redirect_uri != stored_redirect:
+        return JSONResponse(
+            {"error": "invalid_grant", "error_description": "redirect_uri mismatch"},
+            status_code=400,
+        )
+
+    # Create opaque session + refresh tokens
+    session_token = generate_opaque_token(TOKEN_PREFIX_ACCESS)
+    refresh_token = generate_opaque_token(TOKEN_PREFIX_REFRESH)
+
+    session_data = {
+        "frontegg_jwt": code_data["jwt"],
+        "frontegg_refresh_token": code_data.get("refresh_token", ""),
+        "account_id": code_data.get("account_id", ""),
+        "user_id": code_data.get("user_id", ""),
+        "email": code_data.get("email", ""),
     }
-    if refresh_token:
-        result["refresh_token"] = refresh_token
-    return JSONResponse(result)
 
-
-def decodeJwtTenantId(token: str) -> str:
-    """Decode tenantId from JWT for logging."""
-    import base64, json as _json
     try:
-        parts = token.split(".")
-        pad = "=" * (-len(parts[1]) % 4)
-        payload = _json.loads(base64.urlsafe_b64decode(parts[1] + pad))
-        return payload.get("tenantId", "")
-    except Exception:
-        return "(decode-failed)"
+        await store.store_session(session_token, session_data, ttl=3600)
+        await store.store_refresh_token(refresh_token, {
+            **session_data,
+        }, ttl=86400)
+    except RedisUnavailableError:
+        return JSONResponse(
+            {"error": "server_error", "error_description": "Service temporarily unavailable"},
+            status_code=503,
+        )
+
+    return JSONResponse({
+        "access_token": session_token,
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "refresh_token": refresh_token,
+    })
+
+
+# ── Revocation (RFC 7009) ────────────────────────────────────────────────────
+
+
+async def oauth_revoke(request: Request) -> JSONResponse:
+    """Revoke a session or refresh token. Always returns 200 per RFC 7009."""
+    body = await request.body()
+    from urllib.parse import parse_qs
+    params = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+    token = (params.get("token", [""]))[0]
+
+    if not token:
+        return JSONResponse({})
+
+    store: RedisStore = request.app.state.redis_store
+
+    try:
+        if token.startswith(TOKEN_PREFIX_ACCESS):
+            await store.delete_session(token)
+        elif token.startswith(TOKEN_PREFIX_REFRESH):
+            await store.delete_refresh_token(token)
+        else:
+            # Try both
+            await store.delete_session(token)
+            await store.delete_refresh_token(token)
+    except RedisUnavailableError:
+        pass  # RFC 7009: always return 200
+
+    return JSONResponse({})
+
+
+# ── OAuth challenge headers ──────────────────────────────────────────────────
 
 
 def _oauth_challenge_headers(base_url: str, error: str | None = None) -> dict[str, str]:
@@ -615,6 +803,9 @@ def _oauth_challenge_headers(base_url: str, error: str | None = None) -> dict[st
     if error:
         value = f'{value}, error="{error}"'
     return {"WWW-Authenticate": value}
+
+
+# ── MCP transport ────────────────────────────────────────────────────────────
 
 
 async def _handle_with_transport(scope: Any, receive: Any, send: Any) -> None:
@@ -640,8 +831,9 @@ async def _handle_with_transport(scope: Any, receive: Any, send: Any) -> None:
 async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
     """ASGI mount for Streamable HTTP MCP transport.
 
-    Each request gets its own transport + ContextVar-isolated client from the pool.
-    No serialization lock — concurrent requests run in parallel.
+    Auth paths:
+    1. Bearer token (opaque session token from Redis)
+    2. Key/secret headers (backward compatible, no Redis dependency)
     """
     if scope.get("method") == "POST":
         headers = {
@@ -650,6 +842,10 @@ async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
         auth_header = headers.get("authorization", "")
         base_url = os.getenv("MCP_BASE_URL", "").rstrip("/")
         pool: ClientPool = scope["app"].state.client_pool
+        store: RedisStore = scope["app"].state.redis_store
+        cb: CircuitBreaker = scope["app"].state.circuit_breaker
+        semaphore: asyncio.Semaphore = scope["app"].state.mcp_semaphore
+        rl_config: RateLimitConfig = scope["app"].state.rate_limit_config
         request_id = headers.get("x-request-id", "").strip() or str(uuid4())
         session_id = (
             headers.get("mcp-session-id", "").strip()
@@ -662,28 +858,19 @@ async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
 
             import logging
             _mcp_log = logging.getLogger("finout_mcp_hosted.mcp_asgi")
-            _mcp_log.info("POST /mcp — Bearer token len=%d dots=%d first 20: %s",
-                          len(token), token.count("."), token[:20])
 
-            # Try Frontegg JWT first, then fall back to Finout login cookie JWT.
-            payload: dict | None = None
-            use_cookie_auth = False
+            # Session lookup in Redis
             try:
-                payload = verify_login_jwt(token)
-                _mcp_log.info("POST /mcp — Frontegg JWT OK, tenantId=%s",
-                              payload.get("tenantId"))
-            except Exception as exc:
-                _mcp_log.info("POST /mcp — Frontegg JWT failed: %s, trying cookie", exc)
-                try:
-                    payload = verify_cookie_jwt(token)
-                    use_cookie_auth = True
-                    _mcp_log.info("POST /mcp — Cookie JWT OK, tenantId=%s",
-                                  payload.get("tenantId"))
-                except Exception as exc2:
-                    _mcp_log.warning("POST /mcp — Both JWT checks failed: %s", exc2)
-                    pass
+                session = await store.get_session(token)
+            except RedisUnavailableError:
+                response = JSONResponse(
+                    {"error": "Service temporarily unavailable"},
+                    status_code=503,
+                )
+                await response(scope, receive, send)
+                return
 
-            if payload is None:
+            if session is None:
                 response = JSONResponse(
                     {"error": "Invalid or expired token"},
                     status_code=401,
@@ -692,74 +879,109 @@ async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
                 await response(scope, receive, send)
                 return
 
-            account_id = payload.get("tenantId", "").strip()
+            account_id = session.get("account_id", "")
+            user_id = session.get("user_id", "")
+            frontegg_jwt = session.get("frontegg_jwt", "")
+
             if not account_id:
                 response = JSONResponse(
-                    {"error": "Invalid token"},
+                    {"error": "Invalid session"},
                     status_code=401,
                     headers=_oauth_challenge_headers(base_url, "invalid_token"),
                 )
                 await response(scope, receive, send)
                 return
 
-            if use_cookie_auth:
-                # Cookie JWT path: use AUTHORIZED_HEADERS mode via internal API URL.
-                internal_api_url = os.getenv("FINOUT_INTERNAL_API_URL", "")
-                if not internal_api_url:
-                    response = JSONResponse(
-                        {"error": "FINOUT_INTERNAL_API_URL not configured"},
-                        status_code=503,
-                    )
-                    await response(scope, receive, send)
-                    return
-                fingerprint: tuple[str, ...] = ("cookie", account_id, internal_api_url)
-                client = await pool.get_or_create(
-                    fingerprint,
-                    internal_api_url=internal_api_url,
-                    account_id=account_id,
-                    internal_auth_mode=InternalAuthMode.AUTHORIZED_HEADERS,
-                    allow_missing_credentials=True,
+            # Rate limit check
+            allowed, rl_headers = await check_mcp_rate_limit(
+                store, user_id, account_id, rl_config
+            )
+            if not allowed:
+                response = JSONResponse(
+                    {"error": "Rate limit exceeded"},
+                    status_code=429,
+                    headers=rl_headers,
                 )
-            else:
-                # Frontegg JWT path: use BEARER_TOKEN mode via public API URL.
-                # Include user identity in fingerprint so different users don't
-                # share a client (and each other's bearer tokens).
+                await response(scope, receive, send)
+                return
+
+            # Circuit breaker check
+            if not cb.allow_request():
+                response = JSONResponse(
+                    {"error": "Service temporarily unavailable"},
+                    status_code=503,
+                )
+                await response(scope, receive, send)
+                return
+
+            # Semaphore for concurrency control
+            try:
+                await asyncio.wait_for(semaphore.acquire(), timeout=1.0)
+            except asyncio.TimeoutError:
+                response = JSONResponse(
+                    {"error": "Server at capacity"},
+                    status_code=503,
+                )
+                await response(scope, receive, send)
+                return
+
+            try:
                 api_url = os.getenv("FINOUT_API_URL", "https://app.finout.io")
-                user_id = payload.get("sub") or payload.get("email") or account_id
-                fingerprint = ("jwt", account_id, user_id, api_url)
+                fingerprint: tuple[str, ...] = ("session", account_id, user_id, api_url)
                 client = await pool.get_or_create(
                     fingerprint,
-                    bearer_token=token,
+                    bearer_token=frontegg_jwt,
                     internal_api_url=api_url,
                     account_id=account_id,
                     internal_auth_mode=InternalAuthMode.BEARER_TOKEN,
                     allow_missing_credentials=True,
                 )
-                # Always update to the current token so re-auth refreshes it.
-                client.bearer_token = token
+                # Always update to the current JWT
+                client.bearer_token = frontegg_jwt
 
-            # Set per-coroutine context so tool impls see this client.
-            client_token = set_request_client(client)
-            mode_token = set_request_runtime_mode(MCPMode.PUBLIC.value)
-            trace_token = set_trace_context(
-                {
-                    "origin": "direct_mcp",
-                    "request_id": request_id,
-                    "session_id": session_id,
-                    "account_id": account_id,
-                    "user_id": payload.get("email") or payload.get("sub") or account_id,
-                    "auth_mode": "cookie_jwt" if use_cookie_auth else "bearer_token",
-                }
-            )
-            try:
-                await _handle_with_transport(scope, receive, send)
+                # Refresh session TTL on use
+                try:
+                    await store.refresh_session_ttl(token, ttl=3600)
+                except RedisUnavailableError:
+                    pass
+
+                client_token = set_request_client(client)
+                mode_token = set_request_runtime_mode(MCPMode.PUBLIC.value)
+                trace_token = set_trace_context(
+                    {
+                        "origin": "direct_mcp",
+                        "request_id": request_id,
+                        "session_id": session_id,
+                        "account_id": account_id,
+                        "user_id": user_id,
+                        "auth_mode": "session",
+                    }
+                )
+                try:
+                    await asyncio.wait_for(
+                        _handle_with_transport(scope, receive, send),
+                        timeout=30.0,
+                    )
+                    cb.record_success()
+                except asyncio.TimeoutError:
+                    cb.record_failure()
+                    response = JSONResponse(
+                        {"jsonrpc": "2.0", "error": {"code": -32000, "message": "Request timeout"}, "id": None},
+                        status_code=504,
+                    )
+                    await response(scope, receive, send)
+                except Exception:
+                    cb.record_failure()
+                    raise
+                finally:
+                    reset_trace_context(trace_token)
+                    _client_var.reset(client_token)
+                    _runtime_mode_var.reset(mode_token)
             finally:
-                reset_trace_context(trace_token)
-                _client_var.reset(client_token)
-                _runtime_mode_var.reset(mode_token)
+                semaphore.release()
             return
 
-        # Key/secret header auth path (backward compatible)
+        # Key/secret header auth path (backward compatible, no Redis dependency)
         try:
             client_id, secret_key, api_url = _extract_public_auth_from_scope(scope)
         except ValueError:
@@ -801,27 +1023,28 @@ async def mcp_asgi(scope: Any, receive: Any, send: Any) -> None:
             _runtime_mode_var.reset(mode_token)
         return
 
-    # For non-POST requests (GET/DELETE), require valid auth as well.
+    # For non-POST requests (GET/DELETE), require valid auth.
     headers = {
         k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])
     }
     base_url = os.getenv("MCP_BASE_URL", "").rstrip("/")
     auth_header = headers.get("authorization", "")
+
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
+        store = scope["app"].state.redis_store
         try:
-            verify_login_jwt(token)
-        except Exception:
-            try:
-                verify_cookie_jwt(token)
-            except Exception:
-                response = JSONResponse(
-                    {"error": "Unauthorized"},
-                    status_code=401,
-                    headers=_oauth_challenge_headers(base_url, "invalid_token"),
-                )
-                await response(scope, receive, send)
-                return
+            session = await store.get_session(token)
+        except RedisUnavailableError:
+            session = None
+        if session is None:
+            response = JSONResponse(
+                {"error": "Unauthorized"},
+                status_code=401,
+                headers=_oauth_challenge_headers(base_url, "invalid_token"),
+            )
+            await response(scope, receive, send)
+            return
     elif not (
         headers.get("x-finout-client-id", "").strip()
         and headers.get("x-finout-secret-key", "").strip()
@@ -860,28 +1083,30 @@ async def mcp_route(request: Request) -> Response:
     return await _invoke_asgi_as_response(request)
 
 
+# ── App ──────────────────────────────────────────────────────────────────────
+
+
 app = Starlette(
     routes=[
         Route("/health", endpoint=health, methods=["GET"]),
+        Route("/health/ready", endpoint=health_ready, methods=["GET"]),
         Route("/debug/sso", endpoint=debug_sso, methods=["GET"]),
         Route("/debug/cookies", endpoint=debug_cookies, methods=["GET"]),
         Route("/debug/verify-token", endpoint=debug_verify_token, methods=["GET"]),
         Route("/api/tenants", endpoint=proxy_tenants, methods=["GET"]),
         Route("/api/tenant-switch", endpoint=proxy_tenant_switch, methods=["POST", "PUT"]),
-        # Catch-all proxy for Frontegg SDK calls (e.g. switchTenant).
         Route("/frontegg/{path:path}", endpoint=frontegg_proxy, methods=["GET", "POST", "PUT", "DELETE", "PATCH"]),
         Route("/authorize", endpoint=oauth_authorize_get, methods=["GET"]),
         Route("/authorize", endpoint=oauth_authorize_post, methods=["POST"]),
-        # Frontegg SDK navigates to {appUrl}/account/* for login, MFA, callbacks, etc.
         Route("/account/{path:path}", endpoint=oauth_login_callback, methods=["GET"]),
         Route("/register", endpoint=oauth_register, methods=["POST"]),
         Route("/token", endpoint=oauth_token, methods=["POST"]),
+        Route("/revoke", endpoint=oauth_revoke, methods=["POST"]),
         Route(
             "/.well-known/oauth-protected-resource",
             endpoint=oauth_protected_resource,
             methods=["GET"],
         ),
-        # RFC 9728 canonical path: /.well-known/oauth-protected-resource/{resource-path}
         Route(
             "/.well-known/oauth-protected-resource/mcp",
             endpoint=oauth_protected_resource,
@@ -892,26 +1117,26 @@ app = Starlette(
             endpoint=oauth_authorization_server,
             methods=["GET"],
         ),
-        # OIDC configuration — some clients probe this in addition to oauth-authorization-server.
         Route(
             "/.well-known/openid-configuration",
             endpoint=oauth_authorization_server,
             methods=["GET"],
         ),
-        # Register both variants explicitly to avoid framework-level slash redirects.
         Route("/mcp", endpoint=mcp_route, methods=["GET", "POST", "DELETE"]),
         Route("/mcp/", endpoint=mcp_route, methods=["GET", "POST", "DELETE"]),
     ],
     lifespan=lifespan,
+    middleware=[
+        Middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["WWW-Authenticate"],
+        ),
+    ],
 )
 app.router.redirect_slashes = False
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["WWW-Authenticate"],
-)
 
 
 class _HealthFilter(_logging.Filter):
@@ -928,12 +1153,14 @@ class _HealthFilter(_logging.Filter):
 
 def main() -> None:
     """Run hosted public MCP service."""
+    import multiprocessing
     import uvicorn
 
     _logging.getLogger("uvicorn.access").addFilter(_HealthFilter())
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_PORT", "8080"))
-    uvicorn.run("finout_mcp_hosted.server:app", host=host, port=port, lifespan="on")
+    workers = int(os.getenv("MCP_WORKERS", str(min(multiprocessing.cpu_count(), 4))))
+    uvicorn.run("finout_mcp_hosted.server:app", host=host, port=port, lifespan="on", workers=workers)
 
 
 def dev() -> None:
