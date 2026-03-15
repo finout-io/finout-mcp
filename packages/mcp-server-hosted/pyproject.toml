@@ -1,6 +1,6 @@
 [project]
 name = "finout-mcp-hosted"
-version = "0.1.0"
+version = "0.2.0"
 description = "Hosted public MCP server with Frontegg OAuth — internal deployment only"
 requires-python = ">=3.11"
 dependencies = [
